@@ -48,3 +48,22 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "C:\GSV\tools\godot-cockpit\Invoke
 3. **Receipt/log viewer** — receipts.jsonl, live-sprint.log
 4. **Terminal Depths state panel** — TD depth, cycle, CHUG status
 5. **Godot RL / Torch integration** — after telemetry is stable
+
+## Verify
+
+Headless boot budget plus a check that every tab still builds:
+
+```powershell
+C:\dev\scripts\godot\godot-run.ps1 -ProjectPath C:\dev\active\GSV_Godot_Cockpit -- --import
+C:\dev\scripts\godot\godot-run.ps1 -ProjectPath C:\dev\active\GSV_Godot_Cockpit -- --script res://tests/cockpit_boot_test.gd
+```
+
+Phase 1 asserts the cockpit paints its first frame inside 8 s. Phase 2 visits
+all 13 tabs and requires each to build — that half is slow on purpose, because
+it pays the real service-probe cost that used to be spent before first paint.
+
+Lint (report only, never repo-wide `-Fix`):
+
+```powershell
+C:\dev\scripts\godot\godot-check.ps1 -ProjectPath C:\dev\active\GSV_Godot_Cockpit
+```

@@ -15,6 +15,15 @@ extends Control
 
 const BRIDGE := "C:/GSV/tools/godot-cockpit/Invoke-GSVGodotBridge.ps1"
 
+## Every panel that talks to the colony does so with a blocking
+## OS.execute("pwsh", ...) call from its own _ready(). Building all thirteen
+## tabs up front therefore cost 24 serial process spawns — measured at 39 s —
+## before the window could draw anything. Tabs are now built on first visit,
+## and the cockpit's own first probe waits until a frame has been painted.
+## Two frames, not a wall-clock delay: the first frame's delta can already
+## exceed a short timer, which would put the probe back ahead of the paint.
+const FIRST_PROBE_DELAY_FRAMES := 2
+
 var _tabs: TabContainer
 var _status_box: RichTextLabel
 var _status_bar: Label
@@ -22,6 +31,9 @@ var _route_input: LineEdit
 var _route_output: RichTextLabel
 var _steer_output: RichTextLabel
 var _flight_output: RichTextLabel
+
+## tab index -> Callable(Control), dropped once that tab has been built.
+var _lazy_fillers: Dictionary = {}
 
 func _ready() -> void:
 	_build_ui()
@@ -31,6 +43,13 @@ func _ready() -> void:
 	_append_status("Bridge: " + BRIDGE)
 	_append_status("Kilo_Core · GSV · Intermediary · FCC · LiteLLM · OpenClaw · Serena → [b]Cockpit[/b] → you")
 	_append_status("─────────────────────────────────────")
+	# refresh_status() blocks on a bridge call measured at ~21 s. Paint first.
+	_probe_after_first_paint()
+
+## Runs the opening status probe once the cockpit is actually on screen.
+func _probe_after_first_paint() -> void:
+	for _frame in FIRST_PROBE_DELAY_FRAMES:
+		await get_tree().process_frame
 	refresh_status()
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -63,25 +82,50 @@ func _build_ui() -> void:
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(_tabs)
 
-	_build_status_tab()
-	_build_events_tab()
-	_build_gitlog_tab()
-	_build_dispatch_tab()
-	_build_models_tab()
-	_build_agent_tab()
-	_build_chug_tab()
-	_build_quest_tab()
-	_build_receipt_tab()
-	_build_td_tab()
-	_build_flight_tab()
-	_build_steer_tab()
-	_build_route_tab()
+	_add_tab("Status", _fill_status_tab)
+	_add_tab("Events", _panel_filler("res://scripts/EventStream.gd"))
+	_add_tab("Git Log", _panel_filler("res://scripts/GitLogPanel.gd"))
+	_add_tab("Dispatch", _panel_filler("res://scripts/DispatchQueuePanel.gd"))
+	_add_tab("Models", _panel_filler("res://scripts/ModelStatusPanel.gd"))
+	_add_tab("Agents", _panel_filler("res://scripts/AgentMap.gd"))
+	_add_tab("CHUG", _panel_filler("res://scripts/CHUGPanel.gd"))
+	_add_tab("Quests", _panel_filler("res://scripts/QuestBoard.gd"))
+	_add_tab("Receipts", _panel_filler("res://scripts/ReceiptViewer.gd"))
+	_add_tab("Terminal Depths", _panel_filler("res://scripts/TDStatePanel.gd"))
+	_add_tab("Flight", _fill_flight_tab)
+	_add_tab("Steer", _fill_steer_tab)
+	_add_tab("Route", _fill_route_tab)
 
-func _build_status_tab() -> void:
+	_tabs.tab_changed.connect(_materialize_tab)
+	# The tab that is already showing has no tab_changed to wait for.
+	_materialize_tab(_tabs.current_tab)
+
+## Adds a tab whose contents are built the first time it is shown.
+func _add_tab(tab_name: String, filler: Callable) -> void:
 	var panel := VBoxContainer.new()
-	panel.name = "Status"
+	panel.name = tab_name
+	panel.add_theme_constant_override("separation", 6)
 	_tabs.add_child(panel)
+	_lazy_fillers[_tabs.get_tab_count() - 1] = filler
 
+func _materialize_tab(idx: int) -> void:
+	if not _lazy_fillers.has(idx):
+		return
+	var filler: Callable = _lazy_fillers[idx]
+	_lazy_fillers.erase(idx)
+	var panel := _tabs.get_tab_control(idx)
+	if panel == null:
+		return
+	filler.call(panel)
+
+## Filler for tabs whose whole body is a single panel script.
+func _panel_filler(script_path: String) -> Callable:
+	return func(panel: Control) -> void:
+		var node: Control = load(script_path).new()
+		node.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		panel.add_child(node)
+
+func _fill_status_tab(panel: Control) -> void:
 	var btns := HBoxContainer.new()
 	btns.add_theme_constant_override("separation", 6)
 	panel.add_child(btns)
@@ -95,84 +139,7 @@ func _build_status_tab() -> void:
 	_status_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_child(_status_box)
 
-func _build_events_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Events"
-	_tabs.add_child(panel)
-	var stream = load("res://scripts/EventStream.gd").new()
-	stream.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(stream)
-
-func _build_gitlog_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Git Log"
-	_tabs.add_child(panel)
-	var gl = load("res://scripts/GitLogPanel.gd").new()
-	gl.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(gl)
-
-func _build_dispatch_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Dispatch"
-	_tabs.add_child(panel)
-	var q = load("res://scripts/DispatchQueuePanel.gd").new()
-	q.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(q)
-
-func _build_models_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Models"
-	_tabs.add_child(panel)
-	var models = _gsv_create_model_status_panel()
-	models.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(models)
-
-func _build_chug_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "CHUG"
-	_tabs.add_child(panel)
-	var chug = load("res://scripts/CHUGPanel.gd").new()
-	chug.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(chug)
-
-func _build_agent_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Agents"
-	_tabs.add_child(panel)
-	var map = load("res://scripts/AgentMap.gd").new()
-	map.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(map)
-
-func _build_quest_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Quests"
-	_tabs.add_child(panel)
-	var board = load("res://scripts/QuestBoard.gd").new()
-	board.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(board)
-
-func _build_receipt_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Receipts"
-	_tabs.add_child(panel)
-	var viewer = load("res://scripts/ReceiptViewer.gd").new()
-	viewer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(viewer)
-
-func _build_td_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Terminal Depths"
-	_tabs.add_child(panel)
-	var td = load("res://scripts/TDStatePanel.gd").new()
-	td.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(td)
-
-func _build_flight_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Flight"
-	panel.add_theme_constant_override("separation", 6)
-	_tabs.add_child(panel)
-
+func _fill_flight_tab(panel: Control) -> void:
 	var info := Label.new()
 	info.text = "Autonomous supervisor heartbeat and log tail. Watch the colony work without losing the thread."
 	info.modulate = Color(0.7, 0.9, 1.0)
@@ -190,12 +157,7 @@ func _build_flight_tab() -> void:
 	_flight_output.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_child(_flight_output)
 
-func _build_steer_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Steer"
-	panel.add_theme_constant_override("separation", 6)
-	_tabs.add_child(panel)
-
+func _fill_steer_tab(panel: Control) -> void:
 	var info := Label.new()
 	info.text = "Bounded actions: steering map, FCC smoke, cockpit memory. No long autonomous launch here."
 	info.modulate = Color(0.7, 0.9, 1.0)
@@ -215,12 +177,7 @@ func _build_steer_tab() -> void:
 	_steer_output.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_child(_steer_output)
 
-func _build_route_tab() -> void:
-	var panel := VBoxContainer.new()
-	panel.name = "Route"
-	panel.add_theme_constant_override("separation", 6)
-	_tabs.add_child(panel)
-
+func _fill_route_tab(panel: Control) -> void:
 	var info := Label.new()
 	info.text = "Type a task. It routes through intermediary + gsv who-can."
 	info.modulate = Color(0.7, 0.9, 1.0)
@@ -430,7 +387,3 @@ func _append_steer(text: String) -> void:
 func _append_flight(text: String) -> void:
 	if _flight_output:
 		_flight_output.append_text(text + "\n")
-
-
-func _gsv_create_model_status_panel() -> Control:
-	return load("res://scripts/ModelStatusPanel.gd").new()
