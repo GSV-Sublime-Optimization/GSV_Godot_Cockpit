@@ -1,0 +1,21 @@
+# GSV build contract for GSV_Godot_Cockpit.
+# Headless editor quit alone is not a parse proof; import + explicit GDScript parse gate are required.
+schema: gsv.build/v1
+project:
+  id: gsv-godot-cockpit
+  type: godot
+  repo: GSV-Sublime-Optimization/GSV_Godot_Cockpit
+toolchains:
+  godot: "4"
+  python: "3"
+commands:
+  check:
+    - name: Godot resource import
+      run: ${godot} --headless --path . --import
+      requires: [godot]
+    - name: Godot GDScript parse
+      run: ${python} ${gsv_tools}/godot_parse_gate.py --project .
+      requires: [godot]
+security:
+  network_required: false
+  secrets_required: false
