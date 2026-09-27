@@ -1,0 +1,15 @@
+schema: gsv.project/v1
+id: gsv-godot-cockpit
+name: GSV Godot Cockpit
+repo: GSV-Sublime-Optimization/GSV_Godot_Cockpit
+domain: application
+maturity: active
+build_profile: godot
+os: [windows]
+privacy: public
+agent_policy: supervised
+release: none
+authority: Godot membrane of GSV Sublime Optimization; cockpit #2
+notes: >
+  Visual membrane/projection only. It may present agents, services, quests and
+  receipts, but it must not become the authority for those underlying systems.
