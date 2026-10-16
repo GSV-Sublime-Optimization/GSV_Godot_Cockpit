@@ -32,5 +32,9 @@ Acceptance evidence on the recovered Sprite (Godot 4.3):
   missing-directory ERROR diagnostics.
 - Patched strict smoke gate: 2/2 headless suites PASS, zero engine errors.
 - Negative-control unit tests: 4/4 PASS.
-- Target application declares Godot 4.7, so release validation must also
-  execute on the declared 4.7 toolchain before production merge.
+- Also verified with the declared Godot 4.7-stable release: SHA512 checked
+  against the official release manifest, import exit 0 with no engine errors,
+  strict smoke gate 2/2 PASS with zero engine errors. Ubuntu Sprite runtime
+  dependencies were extracted into a user-local overlay; no system changes.
+- Operator workstation runtime and Windows-specific bridge paths remain
+  unverified; review/CI should validate those separately before merge.
