@@ -124,13 +124,27 @@ func refresh() -> void:
 		_suggestions.add_child(lbl)
 		shown += 1
 
+## This result proves only that the HTTP request was accepted; it never proves
+## a completed CHUG cycle or its success. Both transport failure and missing
+## explicit acknowledgement must remain unverified.
+static func classify_trigger_result(exit_code: int, acknowledged: bool) -> String:
+	return "accepted" if exit_code == 0 and acknowledged else "unverified"
+
 func _trigger_chug() -> void:
+	_stats.append_text("\n[color=cyan]Sending CHUG trigger request...[/color]")
 	var output: Array = []
-	OS.execute("pwsh", [
+	var exit_code := OS.execute("pwsh", [
 		"-NoProfile", "-Command",
-		"Invoke-WebRequest '%s' -Method Post -UseBasicParsing -TimeoutSec 10 | Out-Null; Write-Host 'triggered'" % DM_TRIGGER
+		"try { $r=Invoke-WebRequest '%s' -Method Post -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop; if ([int]$r.StatusCode -ge 200 -and [int]$r.StatusCode -lt 300) { Write-Output 'CHUG_TRIGGER_ACCEPTED'; exit 0 } else { exit 1 } } catch { exit 1 }" % DM_TRIGGER
 	], output, true, false)
-	_stats.append_text("\n[color=green]⚡ CHUG cycle triggered[/color]")
+	var acknowledged := false
+	for line in output:
+		if str(line).strip_edges() == "CHUG_TRIGGER_ACCEPTED":
+			acknowledged = true
+	if classify_trigger_result(exit_code, acknowledged) == "accepted":
+		_stats.append_text("\n[color=yellow]CHUG request accepted; cycle completion unverified. Refresh to inspect status.[/color]")
+	else:
+		_stats.append_text("\n[color=red]CHUG trigger unverified (request failed or lacked acknowledgement).[/color]")
 
 func _ps_get(url: String) -> String:
 	var output: Array = []
