@@ -17,6 +17,7 @@ from pathlib import Path
 
 ENGINE_ERROR = re.compile(r"(?m)^\s*(?:SCRIPT ERROR:|ERROR:|FATAL:)")
 CASES = (
+    ("import", "--import", "Godot Engine v"),
     ("boot", "res://tests/cockpit_boot_test.gd", "[boot-test] PASS"),
     ("portable", "res://tests/portable_offline_test.gd", "[portable-test] PASS"),
 )
@@ -34,7 +35,11 @@ def assess(returncode: int, output: str, expected: str) -> dict:
 
 
 def run_case(binary: str, project: Path, test: str, expected: str, timeout: int) -> dict:
-    command = [binary, "--headless", "--path", str(project), "--script", test]
+    command = [binary, "--headless", "--path", str(project)]
+    if test == "--import":
+        command.append("--import")
+    else:
+        command.extend(["--script", test])
     try:
         proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout,
                               errors="replace", check=False)
