@@ -17,6 +17,11 @@ var _timer:  Timer
 static func create() -> EventStream:
 	return EventStream.new()
 
+## All event text is external evidence. Keep trusted panel colours but render
+## data as literal text, never as parsed [url], [color] or other BBCode tags.
+static func escape_event_text(value: String) -> String:
+	return value.replace("[", "[lb]")
+
 func _ready() -> void:
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 4)
@@ -117,15 +122,17 @@ func _append_event(line: String) -> void:
 	if parser.parse(line) == OK:
 		parsed = parser.data
 	if typeof(parsed) != TYPE_DICTIONARY:
-		_box.append_text("[color=gray]" + line.substr(0, 120) + "[/color]\n")
+		_box.append_text("[color=gray]" + escape_event_text(line.substr(0, 120)) + "[/color]\n")
 		return
 
 	var ts:   String = str(parsed.get("ts", parsed.get("timestamp", ""))).substr(11, 8)
-	var kind: String = str(parsed.get("kind", parsed.get("type", parsed.get("event", "event"))))
+	var kind: String = str(parsed.get("kind", parsed.get("type", parsed.get("event", "event")))).substr(0, 80)
 	var msg:  String = str(parsed.get("msg", parsed.get("message", parsed.get("data", line)))).substr(0, 120)
 
 	var color := _color_for_kind(kind)
-	_box.append_text("[color=gray]%s[/color] [color=%s]%-16s[/color] %s\n" % [ts, color, kind, msg])
+	_box.append_text("[color=gray]%s[/color] [color=%s]%-16s[/color] %s\n" % [
+		escape_event_text(ts), color, escape_event_text(kind), escape_event_text(msg)
+	])
 
 func _color_for_kind(kind: String) -> String:
 	kind = kind.to_lower()
