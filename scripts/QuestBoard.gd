@@ -6,6 +6,18 @@ class_name QuestBoard
 const REPORTS_DIR := "C:/dev/active/Kilo_Core/state/cultivation/reports"
 const SPRINT_INDEX := "C:/GSV/state/autonomous-sprints"
 
+static func reports_dir() -> String:
+	var configured := OS.get_environment("GSV_KILOCORE_REPORTS_DIR").strip_edges()
+	if not configured.is_empty():
+		return configured
+	return REPORTS_DIR if OS.has_feature("windows") else ""
+
+static func sprints_dir() -> String:
+	var configured := OS.get_environment("GSV_SPRINTS_DIR").strip_edges()
+	if not configured.is_empty():
+		return configured
+	return SPRINT_INDEX if OS.has_feature("windows") else ""
+
 func _ready() -> void:
 	var root := VBoxContainer.new()
 	add_child(root)
@@ -52,13 +64,17 @@ func _populate(root: VBoxContainer) -> void:
 
 	# Clear existing entries
 	for child in list.get_children():
+		list.remove_child(child)
 		child.queue_free()
 
 	# Sprint status first
 	_add_sprint_status(list)
 
 	# Cultivation reports as quests
-	var reports := DirAccess.get_files_at(REPORTS_DIR)
+	var reports := PackedStringArray()
+	var source_dir := reports_dir()
+	if not source_dir.is_empty() and DirAccess.dir_exists_absolute(source_dir):
+		reports = DirAccess.get_files_at(source_dir)
 	if reports.size() == 0:
 		var empty := Label.new()
 		empty.text = "(no reports found)"
@@ -75,13 +91,16 @@ func _populate(root: VBoxContainer) -> void:
 	for fname in sorted:
 		if count >= 12:
 			break
-		if not fname.ends_with(".txt"):
+		if not (fname.ends_with(".txt") or fname.ends_with(".md")):
 			continue
 		_add_quest_entry(list, fname)
 		count += 1
 
 func _add_sprint_status(list: VBoxContainer) -> void:
-	var index_file := SPRINT_INDEX + "/index.json"
+	var root_dir := sprints_dir()
+	if root_dir.is_empty():
+		return
+	var index_file := root_dir.path_join("index.json")
 	if not FileAccess.file_exists(index_file):
 		return
 	var f := FileAccess.open(index_file, FileAccess.READ)
@@ -143,7 +162,7 @@ func _add_quest_entry(list: VBoxContainer, fname: String) -> void:
 
 	var lbl := Label.new()
 	# Strip timestamp prefix if present (e.g. "20260625-" style)
-	var display := fname.replace(".txt", "")
+	var display := fname.get_basename()
 	if display.length() > 9 and display.substr(0,8).is_valid_int():
 		display = display.substr(9)
 	lbl.text = display
