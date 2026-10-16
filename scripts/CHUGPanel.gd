@@ -86,9 +86,10 @@ func refresh() -> void:
 	var cycles  := EventStream.escape_event_text(str(d.get("cycles_completed", d.get("total_cycles", "?"))).substr(0, 40))
 	var issues  := EventStream.escape_event_text(str(d.get("total_issues_found", d.get("issues_found", "?"))).substr(0, 40))
 	var fixes   := EventStream.escape_event_text(str(d.get("total_fixes_applied", d.get("fixes_applied", "?"))).substr(0, 40))
-	var last_ts := EventStream.escape_event_text(str(d.get("last_cycle_at", d.get("last_run", "?"))))
+	var last_ts := str(d.get("last_cycle_at", d.get("last_run", "?")))
 	if last_ts.length() > 16:
 		last_ts = last_ts.substr(0, 16)
+	last_ts = EventStream.escape_event_text(last_ts)
 
 	_stats.append_text(
 		"[b]cycles:[/b] %s    [b]issues found:[/b] %s    [b]fixes applied:[/b] %s\n" % [cycles, issues, fixes]
