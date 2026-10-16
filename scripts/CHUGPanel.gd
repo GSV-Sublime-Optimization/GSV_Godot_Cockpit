@@ -40,6 +40,7 @@ func _ready() -> void:
 
 	# Stats area
 	_stats = RichTextLabel.new()
+	_stats.bbcode_enabled = true # panel owns the colour tags; API strings are escaped below
 	_stats.fit_content = true
 	_stats.custom_minimum_size = Vector2(0, 80)
 	root.add_child(_stats)
@@ -66,13 +67,13 @@ func refresh() -> void:
 	var raw := _ps_get(DM_CHUG)
 	if raw.begins_with("ERR"):
 		_stats.clear()
-		_stats.append_text("[color=red]" + raw + "[/color]")
+		_stats.append_text("[color=red]" + EventStream.escape_event_text(raw.substr(0, 200)) + "[/color]")
 		return
 
 	var json := JSON.new()
 	if json.parse(raw) != OK:
 		_stats.clear()
-		_stats.append_text("[color=yellow]Parse error — raw:\n" + raw.substr(0, 200) + "[/color]")
+		_stats.append_text("[color=yellow]Parse error — raw:\n" + EventStream.escape_event_text(raw.substr(0, 200)) + "[/color]")
 		return
 
 	var d = json.get_data()
@@ -82,12 +83,13 @@ func refresh() -> void:
 		_stats.append_text("[color=red]Unexpected response type[/color]")
 		return
 
-	var cycles  := str(d.get("cycles_completed", d.get("total_cycles", "?")))
-	var issues  := str(d.get("total_issues_found", d.get("issues_found", "?")))
-	var fixes   := str(d.get("total_fixes_applied", d.get("fixes_applied", "?")))
+	var cycles  := EventStream.escape_event_text(str(d.get("cycles_completed", d.get("total_cycles", "?"))).substr(0, 40))
+	var issues  := EventStream.escape_event_text(str(d.get("total_issues_found", d.get("issues_found", "?"))).substr(0, 40))
+	var fixes   := EventStream.escape_event_text(str(d.get("total_fixes_applied", d.get("fixes_applied", "?"))).substr(0, 40))
 	var last_ts := str(d.get("last_cycle_at", d.get("last_run", "?")))
 	if last_ts.length() > 16:
 		last_ts = last_ts.substr(0, 16)
+	last_ts = EventStream.escape_event_text(last_ts)
 
 	_stats.append_text(
 		"[b]cycles:[/b] %s    [b]issues found:[/b] %s    [b]fixes applied:[/b] %s\n" % [cycles, issues, fixes]
@@ -124,13 +126,27 @@ func refresh() -> void:
 		_suggestions.add_child(lbl)
 		shown += 1
 
+## This result proves only that the HTTP request was accepted; it never proves
+## a completed CHUG cycle or its success. Both transport failure and missing
+## explicit acknowledgement must remain unverified.
+static func classify_trigger_result(exit_code: int, acknowledged: bool) -> String:
+	return "accepted" if exit_code == 0 and acknowledged else "unverified"
+
 func _trigger_chug() -> void:
+	_stats.append_text("\n[color=cyan]Sending CHUG trigger request...[/color]")
 	var output: Array = []
-	OS.execute("pwsh", [
+	var exit_code := OS.execute("pwsh", [
 		"-NoProfile", "-Command",
-		"Invoke-WebRequest '%s' -Method Post -UseBasicParsing -TimeoutSec 10 | Out-Null; Write-Host 'triggered'" % DM_TRIGGER
+		"try { $r=Invoke-WebRequest '%s' -Method Post -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop; if ([int]$r.StatusCode -ge 200 -and [int]$r.StatusCode -lt 300) { Write-Output 'CHUG_TRIGGER_ACCEPTED'; exit 0 } else { exit 1 } } catch { exit 1 }" % DM_TRIGGER
 	], output, true, false)
-	_stats.append_text("\n[color=green]⚡ CHUG cycle triggered[/color]")
+	var acknowledged := false
+	for line in output:
+		if str(line).strip_edges() == "CHUG_TRIGGER_ACCEPTED":
+			acknowledged = true
+	if classify_trigger_result(exit_code, acknowledged) == "accepted":
+		_stats.append_text("\n[color=yellow]CHUG request accepted; cycle completion unverified. Refresh to inspect status.[/color]")
+	else:
+		_stats.append_text("\n[color=red]CHUG trigger unverified (request failed or lacked acknowledgement).[/color]")
 
 func _ps_get(url: String) -> String:
 	var output: Array = []
