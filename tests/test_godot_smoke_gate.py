@@ -17,6 +17,10 @@ class GodotSmokeLogGateTests(unittest.TestCase):
         result = assess(0, "[boot-test] PASS\nERROR: Parse JSON failed.\n", "[boot-test] PASS")
         self.assertFalse(result["passed"])
 
+    def test_import_exit_zero_with_fontconfig_errors_is_rejected(self):
+        result = assess(0, "Godot Engine v4.7\nERROR: Unable to load fontconfig\n", "Godot Engine v")
+        self.assertFalse(result["passed"])
+
     def test_nonzero_exit_is_rejected_even_without_errors(self):
         self.assertFalse(assess(2, "[boot-test] PASS", "[boot-test] PASS")["passed"])
 
