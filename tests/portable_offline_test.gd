@@ -54,6 +54,21 @@ func _run() -> void:
 	else:
 		print("[portable-test] PASS: absent directory renders empty state without error")
 
+	# On non-Windows CI hosts the external PowerShell bridge is absent.
+	# The UI must disclose that state rather than claiming successful flight.
+	if not OS.has_feature("windows"):
+		var cockpit: Control = load("res://scenes/Main.tscn").instantiate()
+		root.add_child(cockpit)
+		await process_frame
+		await process_frame
+		await process_frame
+		var bar: Label = cockpit.get("_status_bar")
+		if bar == null or not bar.text.contains("bridge unavailable"):
+			_fail("Cockpit falsely reports a healthy bridge in Linux offline mode")
+		else:
+			print("[portable-test] PASS: absent bridge is explicitly unavailable")
+		cockpit.queue_free()
+
 	board.queue_free()
 	viewer.queue_free()
 	empty_board.queue_free()
