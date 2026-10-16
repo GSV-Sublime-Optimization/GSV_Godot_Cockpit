@@ -16,6 +16,9 @@ commands:
     - name: Godot GDScript parse
       run: ${python} ${gsv_tools}/godot_parse_gate.py --project .
       requires: [godot]
+    - name: Cockpit offline integration smoke with strict engine diagnostics
+      run: ${python} tests/godot_smoke_gate.py --godot ${godot} --project .
+      requires: [godot]
 security:
   network_required: false
   secrets_required: false
