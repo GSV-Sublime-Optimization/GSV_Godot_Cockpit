@@ -40,6 +40,7 @@ func _ready() -> void:
 
 	# Stats area
 	_stats = RichTextLabel.new()
+	_stats.bbcode_enabled = true # panel owns the colour tags; API strings are escaped below
 	_stats.fit_content = true
 	_stats.custom_minimum_size = Vector2(0, 80)
 	root.add_child(_stats)
@@ -66,13 +67,13 @@ func refresh() -> void:
 	var raw := _ps_get(DM_CHUG)
 	if raw.begins_with("ERR"):
 		_stats.clear()
-		_stats.append_text("[color=red]" + raw + "[/color]")
+		_stats.append_text("[color=red]" + EventStream.escape_event_text(raw.substr(0, 200)) + "[/color]")
 		return
 
 	var json := JSON.new()
 	if json.parse(raw) != OK:
 		_stats.clear()
-		_stats.append_text("[color=yellow]Parse error — raw:\n" + raw.substr(0, 200) + "[/color]")
+		_stats.append_text("[color=yellow]Parse error — raw:\n" + EventStream.escape_event_text(raw.substr(0, 200)) + "[/color]")
 		return
 
 	var d = json.get_data()
@@ -82,10 +83,10 @@ func refresh() -> void:
 		_stats.append_text("[color=red]Unexpected response type[/color]")
 		return
 
-	var cycles  := str(d.get("cycles_completed", d.get("total_cycles", "?")))
-	var issues  := str(d.get("total_issues_found", d.get("issues_found", "?")))
-	var fixes   := str(d.get("total_fixes_applied", d.get("fixes_applied", "?")))
-	var last_ts := str(d.get("last_cycle_at", d.get("last_run", "?")))
+	var cycles  := EventStream.escape_event_text(str(d.get("cycles_completed", d.get("total_cycles", "?"))).substr(0, 40))
+	var issues  := EventStream.escape_event_text(str(d.get("total_issues_found", d.get("issues_found", "?"))).substr(0, 40))
+	var fixes   := EventStream.escape_event_text(str(d.get("total_fixes_applied", d.get("fixes_applied", "?"))).substr(0, 40))
+	var last_ts := EventStream.escape_event_text(str(d.get("last_cycle_at", d.get("last_run", "?"))))
 	if last_ts.length() > 16:
 		last_ts = last_ts.substr(0, 16)
 
