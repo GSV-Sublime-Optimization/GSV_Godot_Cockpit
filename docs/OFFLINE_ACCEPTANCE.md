@@ -8,7 +8,8 @@ python tests/godot_smoke_gate.py --godot godot --project . --receipt cockpit-smo
 python -m unittest discover -s tests -p 'test_godot_smoke_gate.py'
 ```
 
-The gate requires the existing 13-tab boot test and a portable fixture test to pass.
+The gate requires error-free resource import, the existing 13-tab boot test,
+and a portable fixture test to pass.
 It rejects script/engine error diagnostics even when Godot exits zero and the
 boot test prints PASS. The optional JSON receipt is local evidence; it is not
 a canonical colony witness.
@@ -30,8 +31,8 @@ Dispatch and Models use curl for read-only HTTP probes outside Windows.
 Acceptance evidence on the recovered Sprite (Godot 4.3):
 - Original unpatched boot test printed PASS while Godot logged JSON parsing and
   missing-directory ERROR diagnostics.
-- Patched strict smoke gate: 2/2 headless suites PASS, zero engine errors.
-- Negative-control unit tests: 4/4 PASS.
+- Patched strict smoke gate: 3/3 phases PASS (import, boot, fixture), zero engine errors.
+- Negative-control unit tests: 5/5 PASS, including import-error false-green.
 - Also verified with the declared Godot 4.7-stable release: SHA512 checked
   against the official release manifest, import exit 0 with no engine errors,
   strict smoke gate 2/2 PASS with zero engine errors. Ubuntu Sprite runtime
