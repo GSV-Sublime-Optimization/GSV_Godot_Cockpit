@@ -36,6 +36,15 @@ class GodotSmokeLogGateTests(unittest.TestCase):
         self.assertTrue(assess(0, "[portable-test] PASS: detail\n[portable-test] PASS\n",
                                "[portable-test] PASS")["passed"])
 
+    def test_build_contract_pins_engine_for_every_phase(self):
+        manifest = (Path(__file__).resolve().parents[1] / ".gsv" / "build.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('godot: "4.7"', manifest)
+        self.assertIn("${godot} --headless --audio-driver Dummy --path . --import", manifest)
+        self.assertIn("godot_parse_gate.py --project . --godot ${godot}", manifest)
+        self.assertIn("godot_smoke_gate.py --godot ${godot} --project .", manifest)
+
 
 if __name__ == "__main__":
     unittest.main()
