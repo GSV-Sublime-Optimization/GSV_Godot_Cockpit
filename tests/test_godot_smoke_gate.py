@@ -27,6 +27,15 @@ class GodotSmokeLogGateTests(unittest.TestCase):
     def test_verified_clean_boot_passes(self):
         self.assertTrue(assess(0, "[boot-test] PASS\n", "[boot-test] PASS")["passed"])
 
+    def test_portable_partial_pass_is_not_final_pass(self):
+        result = assess(0, "[portable-test] PASS: receipt displayed\n", "[portable-test] PASS")
+        self.assertFalse(result["passed"])
+        self.assertFalse(result["marker_seen"])
+
+    def test_whole_line_final_portable_pass_is_accepted(self):
+        self.assertTrue(assess(0, "[portable-test] PASS: detail\n[portable-test] PASS\n",
+                               "[portable-test] PASS")["passed"])
+
 
 if __name__ == "__main__":
     unittest.main()

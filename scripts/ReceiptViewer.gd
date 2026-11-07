@@ -85,14 +85,16 @@ func refresh() -> void:
 				_append("  next: " + str(d.get("next_best", "")))
 				_append("")
 
-	# Scan for receipts.jsonl files
+	# Track source availability independently of an empty receipt set.
 	var found_any := false
+	var source_available := false
 	for dir_path in receipt_dirs():
 		if not DirAccess.dir_exists_absolute(dir_path):
 			continue
 		var dir := DirAccess.open(dir_path)
 		if not dir:
 			continue
+		source_available = true
 		dir.list_dir_begin()
 		var fname := dir.get_next()
 		while fname != "":
@@ -117,7 +119,10 @@ func refresh() -> void:
 			dir.list_dir_end()
 
 	if not found_any:
-		_append("[color=gray](no receipts found yet)[/color]")
+		if source_available:
+			_append("[color=gray](no receipts found yet)[/color]")
+		else:
+			_append("[color=orange](receipt sources unavailable or unconfigured)[/color]")
 
 func _read_jsonl(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.READ)

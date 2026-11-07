@@ -49,10 +49,37 @@ func _run() -> void:
 	root.add_child(empty_board)
 	await process_frame
 	var empty_text := _visible_text(empty_board)
-	if not empty_text.contains("(no reports found)"):
-		_fail("missing reports directory failed to render empty state")
+	if not empty_text.contains("(report source unavailable or unconfigured)"):
+		_fail("missing reports directory falsely claimed an empty report source: %s" % empty_text)
 	else:
-		print("[portable-test] PASS: absent directory renders empty state without error")
+		print("[portable-test] PASS: missing report directory reports unavailable")
+
+	var prior_sprint := OS.get_environment("GSV_SPRINT_CURRENT_DIR")
+	OS.set_environment("GSV_SPRINT_CURRENT_DIR", fixture.path_join("does-not-exist"))
+	var offline_viewer: Control = load("res://scripts/ReceiptViewer.gd").new()
+	root.add_child(offline_viewer)
+	await process_frame
+	var offline_text := _visible_text(offline_viewer)
+	if not offline_text.contains("(receipt sources unavailable or unconfigured)"):
+		_fail("missing receipt sources falsely claimed no receipts: %s" % offline_text)
+	else:
+		print("[portable-test] PASS: missing receipt sources report unavailable")
+
+	# A readable, genuinely empty source is the only confirmed empty state.
+	var blank := fixture.path_join("blank")
+	DirAccess.make_dir_recursive_absolute(blank)
+	OS.set_environment("GSV_KILOCORE_REPORTS_DIR", blank)
+	OS.set_environment("GSV_SPRINT_CURRENT_DIR", blank)
+	var blank_board: Control = load("res://scripts/QuestBoard.gd").new()
+	root.add_child(blank_board)
+	var blank_viewer: Control = load("res://scripts/ReceiptViewer.gd").new()
+	root.add_child(blank_viewer)
+	await process_frame
+	if not _visible_text(blank_board).contains("(no reports found)"):
+		_fail("readable empty report directory was not distinguished from offline")
+	if not _visible_text(blank_viewer).contains("(no receipts found yet)"):
+		_fail("readable empty receipt directory was not distinguished from offline")
+	print("[portable-test] PASS: readable empty sources remain distinct from unavailable")
 
 	# On non-Windows CI hosts the external PowerShell bridge is absent.
 	# The UI must disclose that state rather than claiming successful flight.
@@ -72,9 +99,14 @@ func _run() -> void:
 	board.queue_free()
 	viewer.queue_free()
 	empty_board.queue_free()
+	offline_viewer.queue_free()
+	blank_board.queue_free()
+	blank_viewer.queue_free()
 	OS.set_environment("GSV_KILOCORE_REPORTS_DIR", prior_reports)
+	OS.set_environment("GSV_SPRINT_CURRENT_DIR", prior_sprint)
 	for p in [report, legacy, receipts]:
 		DirAccess.remove_absolute(p)
+	DirAccess.remove_absolute(blank)
 	DirAccess.remove_absolute(fixture)
 	_finish()
 

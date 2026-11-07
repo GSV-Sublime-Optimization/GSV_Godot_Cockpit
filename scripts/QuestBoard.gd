@@ -70,11 +70,18 @@ func _populate(root: VBoxContainer) -> void:
 	# Sprint status first
 	_add_sprint_status(list)
 
-	# Cultivation reports as quests
-	var reports := PackedStringArray()
+	# Unconfigured, missing or unreadable is UNKNOWN, never confirmed empty.
 	var source_dir := reports_dir()
+	var source: DirAccess = null
 	if not source_dir.is_empty() and DirAccess.dir_exists_absolute(source_dir):
-		reports = DirAccess.get_files_at(source_dir)
+		source = DirAccess.open(source_dir)
+	if source == null:
+		var unavailable := Label.new()
+		unavailable.text = "(report source unavailable or unconfigured)"
+		unavailable.modulate = Color(1.0, 0.7, 0.3)
+		list.add_child(unavailable)
+		return
+	var reports := source.get_files()
 	if reports.size() == 0:
 		var empty := Label.new()
 		empty.text = "(no reports found)"
@@ -95,6 +102,11 @@ func _populate(root: VBoxContainer) -> void:
 			continue
 		_add_quest_entry(list, fname)
 		count += 1
+	if count == 0:
+		var empty := Label.new()
+		empty.text = "(no reports found)"
+		empty.modulate = Color(0.5, 0.5, 0.5)
+		list.add_child(empty)
 
 func _add_sprint_status(list: VBoxContainer) -> void:
 	var root_dir := sprints_dir()

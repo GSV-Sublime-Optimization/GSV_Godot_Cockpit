@@ -3,7 +3,7 @@
 Run the repository-owned strict verification gate after Godot import:
 
 ```sh
-godot --headless --path . --import
+godot --headless --audio-driver Dummy --path . --import
 python tests/godot_smoke_gate.py --godot godot --project . --receipt cockpit-smoke.json
 python -m unittest discover -s tests -p 'test_godot_smoke_gate.py'
 ```
@@ -11,8 +11,12 @@ python -m unittest discover -s tests -p 'test_godot_smoke_gate.py'
 The gate requires error-free resource import, the existing 13-tab boot test,
 and a portable fixture test to pass.
 It rejects script/engine error diagnostics even when Godot exits zero and the
-boot test prints PASS. The optional JSON receipt is local evidence; it is not
-a canonical colony witness.
+boot test prints PASS. The final test PASS marker must occupy its own line:
+an intermediate per-assertion PASS cannot mask a missing final verdict.
+It launches with Dummy audio and kills only its spawned process tree on timeout.
+Missing or unreadable quest/receipt sources say *unavailable*, while a readable
+source with zero entries says *empty*. The portable fixture tests both states.
+The optional JSON receipt is local evidence; it is not a canonical colony witness.
 
 Read-only path overrides for the Quests and Receipts panels:
 
@@ -37,5 +41,12 @@ Acceptance evidence on the recovered Sprite (Godot 4.3):
   against the official release manifest, import exit 0 with no engine errors,
   strict smoke gate 2/2 PASS with zero engine errors. Ubuntu Sprite runtime
   dependencies were extracted into a user-local overlay; no system changes.
-- Operator workstation runtime and Windows-specific bridge paths remain
-  unverified; review/CI should validate those separately before merge.
+- A November 7, 2026 MSI rerun of the hardened gate proved boot and
+  portable fixture phases PASS on both Godot 4.7.1 and 4.7.2 (exit 0,
+  zero engine errors), but **not** the overall import gate: 4.7.1 import
+  exited 3221225477 (Windows access violation); 4.7.2 import exited 0
+  but emitted `ERROR: Parameter "singleton" is null.` The strict gate
+  correctly marked both runs FAIL. These are observed import failures, not
+  proven to be caused by these code changes. Do not promote this branch
+  while the MSI full gate is red.
+- Live PowerShell bridge paths remain unverified and need a scoped check.

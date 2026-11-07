@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -25,27 +27,59 @@ CASES = (
 
 def assess(returncode: int, output: str, expected: str) -> dict:
     errors = [line.strip() for line in output.splitlines() if ENGINE_ERROR.match(line)]
+    # Test PASS markers must be whole lines, not prefixes of per-assertion logs.
+    marker_seen = (any(line.strip() == expected for line in output.splitlines())
+                   if expected.startswith("[") else expected in output)
     return {
         "exit_code": returncode,
         "expected_pass_marker": expected,
-        "marker_seen": expected in output,
+        "marker_seen": marker_seen,
         "engine_errors": errors,
-        "passed": returncode == 0 and expected in output and not errors,
+        "passed": returncode == 0 and marker_seen and not errors,
     }
 
 
+def _kill_owned_tree(proc: subprocess.Popen) -> None:
+    """Bounded cleanup of the process we launched and its descendants only."""
+    if os.name == "nt":
+        try:
+            killed = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                    capture_output=True, timeout=10, check=False)
+            if killed.returncode != 0 and proc.poll() is None:
+                proc.kill()
+        except (OSError, subprocess.TimeoutExpired):
+            if proc.poll() is None:
+                proc.kill()
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+
+
 def run_case(binary: str, project: Path, test: str, expected: str, timeout: int) -> dict:
-    command = [binary, "--headless", "--path", str(project)]
+    command = [binary, "--headless", "--audio-driver", "Dummy", "--path", str(project)]
     if test == "--import":
         command.append("--import")
     else:
         command.extend(["--script", test])
+    proc = None
     try:
-        proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout,
-                              errors="replace", check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, errors="replace", start_new_session=os.name != "nt")
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if proc is not None:
+            _kill_owned_tree(proc)
+        return {"test": test, "passed": False, "execution_error": "timeout (owned process tree stopped)"}
+    except OSError as exc:
         return {"test": test, "passed": False, "execution_error": str(exc)}
-    output = proc.stdout + "\n" + proc.stderr
+    output = stdout + "\n" + stderr
     result = assess(proc.returncode, output, expected)
     result["test"] = test
     if not result["passed"]:
