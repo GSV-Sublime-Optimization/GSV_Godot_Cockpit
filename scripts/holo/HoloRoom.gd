@@ -25,8 +25,25 @@ extends Node3D
 ## (paint-first-then-probe); senses start after first paint. The volume mesh
 ## is never rotated — the raymarcher marches in object space and assumes a
 ## translation + uniform-scale-only transform (see shaders/holo_volume.gdshader).
+##
+## Budget (HoloBudget): the room runs _process only while something moves,
+## and something moves only on input or a real event (Keath's rule: motion =
+## real events only). A pull animates until it settles; a pointer move drifts
+## the camera once; an observation whose honest state CHANGED plays one slice
+## sweep and a short degraded-card pulse. Then _process stops and, with
+## OS.low_processor_usage_mode, a still room is not redrawn.
+##
+## Seats: Lane B's verdicts are one dated MSI probe (2026-11-07), so a seat
+## renders "seen 11-07 (not live)", dimmed, unless a FRESH fleet snapshot
+## lists its process (HoloLayerRegistry.seat_view).
+##
+## Pulled-up cards (a seat, a rig, an atlas entry) are offered to HoloTab via
+## card_pulled; HoloTab owns the "Assign to seat" action (WarRoomOutbox).
 
 signal ledger_changed(text: String)
+## The card the human last pulled up: {kind, id, title, assignable, reason};
+## {} when the pulled card was released.
+signal card_pulled(card: Dictionary)
 
 const ENTITY_SESSION_SCENE: PackedScene = preload("res://scenes/EntitySession.tscn")
 const HOLO_LAYER_SCRIPT: Script = preload("res://scripts/holo/HoloLayer.gd")
@@ -42,7 +59,15 @@ const SLICE_AXES: PackedStringArray = ["time", "sense", "age"]
 ## time cuts vertically (magnitude), sense cuts across sense index (x),
 ## age cuts across the age axis (z). The slice plane is the human's inquiry
 ## into the dataset embedded in the volume — a data axis, not just world_y.
-const SLICE_CYCLE_SECONDS := 14.0
+## (Slice 4 swept continuously on a 14 s cycle; the sweep now runs once per
+## input or real event — see SWEEP_SECONDS.)
+## One sweep on input or on a real state change, then the slice rests at the
+## start of its range (the whole volume shown).
+const SWEEP_SECONDS := 3.0
+## How long a real event keeps degraded cards pulsing.
+const EVENT_PULSE_SECONDS := 2.0
+const SEAT_HIT_HALF := Vector2(0.6, 0.45)
+const ASSIGNABLE_KINDS: PackedStringArray = ["seat", "rig", "atlas"]
 
 var _camera: Camera3D
 var _camera_base: Vector3 = Vector3(0.0, 9.5, 8.5)
@@ -61,7 +86,6 @@ var _volume_label: Label3D
 var _web_instance: MeshInstance3D
 var _skyclaw_desk_mat: StandardMaterial3D
 var _slice_axis_index: int = 0
-var _slice_time: float = 0.0
 var _simulated_density: bool = false
 var _mouse_pos: Vector2 = Vector2.ZERO
 var _mouse_in_view: bool = false
@@ -69,6 +93,17 @@ var _model: Dictionary = {}
 var _mentor_observation: Dictionary = {}
 var _density: Dictionary = {}
 var _seat_count: int = 0
+var _seats: Array = []
+var _seat_live_tokens: PackedStringArray = []
+var _awake_until_msec: int = 0
+var _sweep_start_msec: int = -1
+var _state_signature: String = ""
+var _atlas_signature: String = ""
+var _pulled_card: Dictionary = {}
+var _pulled_seat_id: String = ""
+var _desk_rest_energy: float = 0.5
+var _desk_live_mat: StandardMaterial3D
+var _desk_dimmed_mat: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -93,22 +128,54 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	_slice_time += delta
-	_update_camera_parallax()
+	var now := Time.get_ticks_msec()
+	var motion := now < _awake_until_msec
+	var settled := true
 	for layer in _layers:
-		(layer as HoloLayer).update_frame(delta, _camera)
+		var holo := layer as HoloLayer
+		holo.motion_enabled = motion
+		holo.update_frame(delta, _camera)
+		settled = settled and holo.is_settled()
 	if _atlas_layer != null:
+		_atlas_layer.motion_enabled = motion
 		_atlas_layer.update_frame(delta, _camera)
-	_update_slice_uniform()
+		settled = settled and _atlas_layer.is_settled()
+	_billboard_seat_targets()
+	var sweeping := _update_slice_uniform(now)
 	if _skyclaw_desk_mat != null:
-		# The degraded desk flickers: honest about Skyclaw's state.
-		_skyclaw_desk_mat.emission_energy_multiplier = 0.6 + 0.5 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 180.0))
+		# The degraded desk pulses only while a real event is shown; at rest
+		# it holds a steady glow (the verdict is dated, not a live flicker).
+		if motion:
+			_skyclaw_desk_mat.emission_energy_multiplier = 0.4 + 0.5 * (0.5 + 0.5 * sin(now / 180.0))
+		else:
+			_skyclaw_desk_mat.emission_energy_multiplier = _desk_rest_energy
+	if settled and not motion and not sweeping:
+		# This frame wrote the rest values; nothing moves until the next
+		# input or real event wakes the room.
+		set_process(false)
+
+
+## Keep processing for at least `seconds` (0 = until everything settles).
+func wake(seconds: float = 0.0) -> void:
+	if seconds > 0.0:
+		_awake_until_msec = maxi(_awake_until_msec, Time.get_ticks_msec() + int(seconds * 1000.0))
+	set_process(true)
+
+
+func is_idle() -> bool:
+	return not is_processing()
+
+
+func start_sweep() -> void:
+	_sweep_start_msec = Time.get_ticks_msec()
+	wake()
 
 
 # ── Public API (called by HoloTab's buttons and pointer forwarding) ──────────
 
 func cycle_slice_axis() -> String:
 	_slice_axis_index = (_slice_axis_index + 1) % SLICE_AXES.size()
+	start_sweep()
 	_emit_ledger()
 	return SLICE_AXES[_slice_axis_index]
 
@@ -120,6 +187,7 @@ func current_slice_axis() -> String:
 func set_simulated_density(enabled: bool) -> void:
 	_simulated_density = enabled
 	_rebuild_density()
+	wake()
 	_emit_ledger()
 
 
@@ -132,12 +200,14 @@ func pull_all(pulled: bool) -> void:
 		(layer as HoloLayer).pull_target = 1.0 if pulled else 0.0
 	if _atlas_layer != null:
 		_atlas_layer.set_pulled(pulled)
+	wake()
 
 
 func cycle_atlas_slice() -> String:
 	if _atlas_layer == null:
 		return "all"
 	var view := _atlas_layer.cycle_slice_view()
+	wake()
 	_emit_ledger()
 	return view
 
@@ -151,6 +221,7 @@ func current_atlas_slice() -> String:
 func pull_atlas(pulled: bool) -> void:
 	if _atlas_layer != null:
 		_atlas_layer.set_pulled(pulled)
+	wake()
 
 
 func atlas_entry_count() -> int:
@@ -172,13 +243,26 @@ func atlas_state() -> Dictionary:
 
 
 func pointer_moved(screen_pos: Vector2) -> void:
+	# Input is an event: drift the camera once and let the cards re-billboard
+	# until they settle. No per-frame polling of the mouse.
+	if _mouse_in_view and screen_pos.distance_to(_mouse_pos) < 1.0:
+		return
 	_mouse_pos = screen_pos
 	_mouse_in_view = true
+	_update_camera_parallax()
+	wake()
 
 
 func pointer_clicked(screen_pos: Vector2) -> void:
 	_mouse_pos = screen_pos
 	_mouse_in_view = true
+	wake()
+	# An expanded atlas shelf is the content you pulled up: its cards first.
+	if _atlas_layer != null:
+		var atlas_hit: Dictionary = _atlas_layer.entry_at(_camera, screen_pos)
+		if not atlas_hit.is_empty():
+			_set_pulled_card(_card("atlas", String(atlas_hit["id"]), String(atlas_hit["title"])))
+			return
 	var entries: Array = []
 	for i in _layers.size():
 		var layer := _layers[i] as HoloLayer
@@ -195,8 +279,74 @@ func pointer_clicked(screen_pos: Vector2) -> void:
 			if _atlas_layer != null and node == _atlas_layer.header_node():
 				_atlas_layer.toggle_pull()
 			else:
-				(node as HoloLayer).toggle_pull()
+				var layer := node as HoloLayer
+				layer.toggle_pull()
+				if layer.pull_target > 0.5:
+					_set_pulled_card(_card(layer.layer_kind, layer.layer_id, layer.card_title()))
+				elif String(_pulled_card.get("id", "")) == layer.layer_id:
+					_set_pulled_card({})
 			return
+	for seat in _seats:
+		var target := (seat as Dictionary)["target"] as Node3D
+		var seat_hit: Dictionary = HoloCoordinateStack.hit_layer(_camera, screen_pos, target, SEAT_HIT_HALF)
+		if bool(seat_hit.get("hit", false)):
+			var seat_id := String((seat as Dictionary)["id"])
+			if _pulled_seat_id == seat_id:
+				_set_pulled_card({})
+			else:
+				_set_pulled_card(_card("seat", seat_id, "Seat: " + String((seat as Dictionary)["name"])))
+			return
+
+
+## Pull up a card by id without a pointer (tests, agents, keyboard):
+## kind "seat" / "atlas" / anything else = a registry layer id.
+func pull_card(kind: String, card_id: String) -> Dictionary:
+	match kind:
+		"seat":
+			var seat := HoloLayerRegistry.seat_def(card_id)
+			if seat.is_empty():
+				return {}
+			_set_pulled_card(_card("seat", card_id, "Seat: " + String(seat.get("name", card_id))))
+		"atlas":
+			var found := false
+			for raw in (_atlas.get("entries", []) as Array):
+				var entry := raw as Dictionary
+				if String(entry.get("id", "")) == card_id:
+					_set_pulled_card(_card("atlas", card_id, "Atlas: " + String(entry.get("name", card_id))))
+					found = true
+					break
+			if not found:
+				return {}
+		_:
+			var layer := _layer_by_id.get(card_id, null) as HoloLayer
+			if layer == null:
+				return {}
+			layer.pull_target = 1.0
+			_set_pulled_card(_card(layer.layer_kind, card_id, layer.card_title()))
+	wake()
+	return _pulled_card
+
+
+func pulled_card() -> Dictionary:
+	return _pulled_card
+
+
+func _card(kind: String, card_id: String, title: String) -> Dictionary:
+	var assignable := ASSIGNABLE_KINDS.has(kind)
+	return {
+		"kind": kind,
+		"id": card_id,
+		"title": title,
+		"assignable": assignable,
+		"reason": "" if assignable else "only seat, rig and atlas cards are work items",
+	}
+
+
+func _set_pulled_card(card: Dictionary) -> void:
+	_pulled_card = card
+	_pulled_seat_id = String(card.get("id", "")) if String(card.get("kind", "")) == "seat" else ""
+	_refresh_seats()
+	card_pulled.emit(card)
 
 
 func layer_count() -> int:
@@ -328,18 +478,15 @@ func _build_seats() -> void:
 	live_mat.emission = Color(0.1, 0.7, 1.0)
 	live_mat.emission_energy_multiplier = 0.8
 	var dimmed_mat := StandardMaterial3D.new()
-	dimmed_mat.albedo_color = Color(0.45, 0.6, 0.8)
-	var degraded_mat := StandardMaterial3D.new()
-	degraded_mat.albedo_color = Color(1.0, 0.9, 0.2)
-	degraded_mat.emission_enabled = true
-	degraded_mat.emission = Color(0.8, 0.7, 0.1)
-	degraded_mat.emission_energy_multiplier = 0.8
+	dimmed_mat.albedo_color = Color(0.32, 0.38, 0.48)
+	_desk_live_mat = live_mat
+	_desk_dimmed_mat = dimmed_mat
 
 	_skyclaw_desk_mat = StandardMaterial3D.new()
 	_skyclaw_desk_mat.albedo_color = Color(0.10, 0.12, 0.18)
 	_skyclaw_desk_mat.emission_enabled = true
 	_skyclaw_desk_mat.emission = Color(0.8, 0.7, 0.1)
-	_skyclaw_desk_mat.emission_energy_multiplier = 0.8
+	_skyclaw_desk_mat.emission_energy_multiplier = _desk_rest_energy
 
 	var seats: Array = HoloLayerRegistry.seat_defs()
 	_seat_count = seats.size()
@@ -357,29 +504,27 @@ func _build_seats() -> void:
 		desk.position = pos + Vector3(0.0, 0.75, 0.0)
 		add_child(desk)
 
+		var creature_parts: Array = []
 		if bool(seat.get("creature", false)):
-			var creature_mat: StandardMaterial3D = live_mat
-			match String(seat.get("state", "")):
-				"dimmed":
-					creature_mat = dimmed_mat
-				"degraded":
-					creature_mat = degraded_mat
+			# Every creature starts dimmed: its verdict is a dated probe.
+			# _refresh_seats lights it only on a fresh snapshot probe.
 			var body := MeshInstance3D.new()
 			var capsule := CapsuleMesh.new()
 			capsule.radius = 0.22
 			capsule.height = 0.7
-			capsule.material = creature_mat
 			body.mesh = capsule
+			body.material_override = dimmed_mat
 			body.position = pos + Vector3(0.0, 1.15, side * 0.45)
 			add_child(body)
 			var head := MeshInstance3D.new()
 			var sphere := SphereMesh.new()
 			sphere.radius = 0.17
 			sphere.height = 0.34
-			sphere.material = creature_mat
 			head.mesh = sphere
+			head.material_override = dimmed_mat
 			head.position = pos + Vector3(0.0, 1.65, side * 0.45)
 			add_child(head)
+			creature_parts = [body, head]
 		else:
 			var chair := MeshInstance3D.new()
 			var chair_mesh := BoxMesh.new()
@@ -396,12 +541,63 @@ func _build_seats() -> void:
 		label.outline_size = 4
 		label.modulate = Color(0.85, 0.9, 1.0)
 		label.position = pos + Vector3(0.0, 2.0, 0.0)
-		label.text = "%s\n%s\n%s" % [
-			String(seat.get("name", "?")),
-			String(seat.get("state", "unknown")),
-			String(seat.get("note", "")),
-		]
 		add_child(label)
+		# The seat's pull-up target: a card-sized plane at the label, aimed at
+		# the camera, hit-tested like every layer (HoloCoordinateStack).
+		var target := Node3D.new()
+		target.name = "SeatTarget_" + String(seat.get("id", ""))
+		target.position = label.position
+		add_child(target)
+		_seats.append({
+			"id": String(seat.get("id", "")),
+			"name": String(seat.get("name", "?")),
+			"def": seat,
+			"label": label,
+			"parts": creature_parts,
+			"target": target,
+		})
+	_refresh_seats()
+
+
+## Seat labels + creature lighting from the dated verdicts and the fresh
+## snapshot's seat tokens (HoloLayerRegistry.seat_view).
+func _refresh_seats() -> void:
+	for seat in _seats:
+		var info := seat as Dictionary
+		var def: Dictionary = info["def"]
+		var view := HoloLayerRegistry.seat_view(def, _seat_live_tokens)
+		var label := info["label"] as Label3D
+		var pulled := _pulled_seat_id == String(info["id"])
+		label.text = "%s%s\n%s\n%s" % [
+			"> " if pulled else "",
+			String(info["name"]),
+			String(view["label"]),
+			String(def.get("note", "")),
+		]
+		label.modulate = Color(0.55, 0.6, 0.7) if bool(view["dimmed"]) else Color(0.85, 0.9, 1.0)
+		if pulled:
+			label.modulate = Color(1.0, 1.0, 0.7)
+		label.pixel_size = 0.011 if pulled else 0.008
+		for part in (info["parts"] as Array):
+			(part as MeshInstance3D).material_override = _desk_live_mat if String(view["state"]) == "live" else _desk_dimmed_mat
+
+
+func _billboard_seat_targets() -> void:
+	for seat in _seats:
+		var target := (seat as Dictionary)["target"] as Node3D
+		var b := HoloCoordinateStack.billboard_basis(target.global_position, _camera.global_position)
+		target.global_transform = Transform3D(b, target.global_position)
+
+
+func seat_label_text(seat_id: String) -> String:
+	for seat in _seats:
+		if String((seat as Dictionary)["id"]) == seat_id:
+			return ((seat as Dictionary)["label"] as Label3D).text
+	return ""
+
+
+func seat_render_state(seat_id: String) -> String:
+	return String(HoloLayerRegistry.seat_view(HoloLayerRegistry.seat_def(seat_id), _seat_live_tokens)["state"])
 
 
 func _build_layers() -> void:
@@ -498,10 +694,25 @@ func _update_camera_parallax() -> void:
 	_camera.look_at(_camera_target, Vector3.UP)
 
 
-func _update_slice_uniform() -> void:
+## Returns true while a sweep is running. At rest the slice sits at the start
+## of its range (whole volume shown).
+func _update_slice_uniform(now_msec: int) -> bool:
 	if _volume_mat == null:
-		return
-	var t := fmod(_slice_time, SLICE_CYCLE_SECONDS) / SLICE_CYCLE_SECONDS
+		return false
+	var t := 0.0
+	var sweeping := false
+	if _sweep_start_msec >= 0:
+		t = float(now_msec - _sweep_start_msec) / (SWEEP_SECONDS * 1000.0)
+		if t >= 1.0:
+			t = 0.0
+			_sweep_start_msec = -1
+		else:
+			sweeping = true
+	_set_slice_plane(t)
+	return sweeping
+
+
+func _set_slice_plane(t: float) -> void:
 	var plane := Vector4(0.0, 1.0, 0.0, -100.0)
 	match SLICE_AXES[_slice_axis_index]:
 		"time":
@@ -511,6 +722,31 @@ func _update_slice_uniform() -> void:
 		"age":
 			plane = Vector4(0.0, 0.0, 1.0, lerpf(-1.3, 1.3, t))
 	_volume_mat.set_shader_parameter("slice_plane", plane)
+
+
+## A real event = an observation whose honest state changed. Re-reads that
+## only refresh ages do not move anything.
+func _note_observation() -> void:
+	var sig := _current_state_signature()
+	if sig == _state_signature:
+		return
+	_state_signature = sig
+	start_sweep()
+	wake(EVENT_PULSE_SECONDS)
+
+
+func _current_state_signature() -> String:
+	var parts: PackedStringArray = []
+	for key in ["sensor", "gateway", "constellation"]:
+		parts.append(String((_model.get(key, {}) as Dictionary).get("state", "unknown")))
+	parts.append(String(_mentor_observation.get("state", "unknown")))
+	parts.append(String(_fleet.get("state", "unknown")))
+	var rigs: Dictionary = _fleet.get("rigs", {})
+	for rig_id in ["msi", "i3", "l9", "xanadu"]:
+		parts.append(String((rigs.get(rig_id, {}) as Dictionary).get("state", "unknown")))
+	parts.append(",".join(_seat_live_tokens))
+	parts.append(str(_atlas_layer.live_count() if _atlas_layer != null else 0))
+	return "|".join(parts)
 
 
 # ── Observations -> layers / density / web / ledger ──────────────────────────
@@ -547,15 +783,25 @@ func _mount_atlas_reader() -> void:
 
 func _on_atlas_changed(_atlas_dict: Dictionary) -> void:
 	_atlas = _atlas_reader.current_atlas()
-	if _atlas_layer != null:
-		_atlas_layer.build_from(_atlas.get("entries", []))
+	var telemetry_state := String(_atlas.get("telemetry_state", "unknown"))
+	# Rebuild the shelf only when its content changed (the 60 s poll usually
+	# re-reads the same file): no node churn, no redraw, for a no-op read.
+	var sig := JSON.stringify(_atlas.get("entries", [])) + "|" + telemetry_state
+	if _atlas_layer != null and sig != _atlas_signature:
+		_atlas_signature = sig
+		_atlas_layer.build_from(_atlas.get("entries", []), telemetry_state)
+		wake()
+	_note_observation()
 	_emit_ledger()
 
 
 func _on_fleet_telemetry(_telemetry: Dictionary) -> void:
 	_fleet = _fleet_reader.current_telemetry()
+	_seat_live_tokens = HoloLayerRegistry.fresh_seat_tokens(_fleet)
+	_refresh_seats()
 	_rebuild_web()
 	_refresh_layer_texts()
+	_note_observation()
 	_emit_ledger()
 
 
@@ -564,12 +810,14 @@ func _on_self_model(_model_dict: Dictionary) -> void:
 	_rebuild_density()
 	_rebuild_web()
 	_refresh_layer_texts()
+	_note_observation()
 	_emit_ledger()
 
 
 func _on_mentor_observation(_observation: Dictionary) -> void:
 	_mentor_observation = _dev_mentor.current_observation()
 	_refresh_layer_texts()
+	_note_observation()
 	_emit_ledger()
 
 
@@ -593,8 +841,9 @@ func _rebuild_web() -> void:
 		if typeof(entry) == TYPE_DICTIONARY and String(entry.get("state", "")) == "reported_fresh":
 			reported += 1
 	# Node states: senses are LIVE observations; seat nodes are registry
-	# verdicts (Lane B, 2026-11-07) — dated evidence, not live probes;
-	# rig nodes are snapshot states (fleet_feed.ps1, <= 5 min old).
+	# verdicts (Lane B, 2026-11-07) — dated evidence, drawn "dimmed" (seen,
+	# not live) unless a fresh snapshot probe lists the seat; rig nodes are
+	# snapshot states (fleet_feed.ps1, <= 5 min old).
 	var rigs: Dictionary = _fleet.get("rigs", {})
 	var node_states: Array = [
 		["STUDIO", String(sensor.get("state", "unknown"))],
@@ -602,9 +851,9 @@ func _rebuild_web() -> void:
 		["CONSTELLATION", String(constellation.get("state", "unknown"))],
 		["FLEET", "live" if reported > 0 else "unknown"],
 		["DEV-MENTOR", String(_mentor_observation.get("state", "unknown"))],
-		["CHATDEV", "live"],
-		["OLLAMA", "live"],
-		["SKYCLAW", "degraded"],
+		["CHATDEV", seat_render_state("chatdev")],
+		["OLLAMA", seat_render_state("ollama")],
+		["SKYCLAW", seat_render_state("skyclaw")],
 		["MSI", String((rigs.get("msi", {}) as Dictionary).get("state", "unknown"))],
 		["I3", String((rigs.get("i3", {}) as Dictionary).get("state", "unknown"))],
 		["L9", String((rigs.get("l9", {}) as Dictionary).get("state", "unknown"))],
@@ -810,6 +1059,7 @@ func _emit_ledger() -> void:
 	lines.append("DENSITY " + String(_density.get("label", "—")))
 	lines.append(_fleet_line())
 	lines.append(_atlas_line())
+	lines.append(_seats_line())
 	lines.append("TERMINALS broker needed (4) · MIND VIEW incoming (PR #12)")
 	ledger_changed.emit("\n".join(lines))
 
@@ -833,7 +1083,25 @@ func _atlas_line() -> String:
 	var state := String(_atlas.get("state", "unknown"))
 	var entries: Array = _atlas.get("entries", [])
 	var slice := current_atlas_slice()
-	return "ATLAS %s %d entries · slice: %s · live-probe: %d · unverified: %d" % [
-		state, entries.size(), slice,
-		int(_atlas.get("live_probe_entries", 0)), int(_atlas.get("unverified_entries", 0)),
+	var live := _atlas_layer.live_count() if _atlas_layer != null else 0
+	return "ATLAS %s · %d graded · %d live (fresh probe; telemetry %s) · slice: %s · unverified: %d" % [
+		state, entries.size(), live, String(_atlas.get("telemetry_state", "unknown")), slice,
+		int(_atlas.get("unverified_entries", 0)),
+	]
+
+
+func _seats_line() -> String:
+	var live := 0
+	var seen := 0
+	var absent := 0
+	for seat in HoloLayerRegistry.seat_defs():
+		var view := HoloLayerRegistry.seat_view(seat, _seat_live_tokens)
+		if String(view["state"]) == "live":
+			live += 1
+		elif String(view["state"]) == "dimmed":
+			seen += 1
+		else:
+			absent += 1
+	return "SEATS %d live (probe) · %d seen %s (not live) · %d away / not detected" % [
+		live, seen, HoloLayerRegistry.SEAT_VERDICT_DATE, absent,
 	]

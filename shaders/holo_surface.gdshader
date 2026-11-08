@@ -10,7 +10,9 @@ render_mode blend_add, unshaded, cull_back, depth_draw_never;
 uniform vec4 holo_color : source_color = vec4(0.2, 0.9, 1.0, 1.0);
 uniform float fresnel_power = 3.0;
 uniform float line_density = 40.0;
-uniform float line_speed = 1.0;
+// Scanlines are static: a TIME term would keep the renderer redrawing an
+// idle room (budget: <= 5% of one core idle; motion = real events only).
+uniform float line_phase = 0.0;
 uniform float base_alpha = 0.55;
 uniform vec4 slice_plane = vec4(0.0, 1.0, 0.0, -100.0);
 
@@ -28,7 +30,7 @@ void fragment() {
 	vec3 n_world = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 view_dir = normalize(CAMERA_POSITION_WORLD - world_pos);
 	float fresnel = pow(1.0 - abs(dot(n_world, view_dir)), fresnel_power);
-	float lines = 0.5 + 0.5 * sin(world_pos.y * line_density + TIME * line_speed);
+	float lines = 0.5 + 0.5 * sin(world_pos.y * line_density + line_phase);
 	float glow = base_alpha + fresnel * 0.8;
 	ALBEDO = holo_color.rgb * glow * (0.6 + 0.4 * lines);
 	ALPHA = base_alpha;
