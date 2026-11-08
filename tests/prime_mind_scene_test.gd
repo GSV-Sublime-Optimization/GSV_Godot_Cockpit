@@ -12,6 +12,11 @@ func _run() -> void:
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.add_child(view)
 	await process_frame
+	if view.get_script() == null:
+		_check(false, "scene script failed to load")
+		view.queue_free()
+		_finish()
+		return
 	_check(view._feed.get("ok", false), "actual pinned fixture loaded")
 	_check(view._feed.get("events", []).size() == 13, "timeline loads real snapshot")
 	_check(view._selected >= 0, "latest real model thought selected")
@@ -33,6 +38,9 @@ func _run() -> void:
 	_check(Time.get_ticks_msec() - started < 1500, "no remote call on Godot startup")
 	view.queue_free()
 	await process_frame
+	_finish()
+
+func _finish() -> void:
 	if failures.is_empty():
 		print("PRIME_SCENE_PASS")
 		quit(0)
