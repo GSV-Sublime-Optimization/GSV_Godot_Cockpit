@@ -142,7 +142,7 @@ func _build_room() -> void:
 	sky_mat.shader = preload("res://shaders/space.gdshader")
 	sky.sky_material = sky_mat
 	sky.radiance_size = Sky.RADIANCE_SIZE_32
-	sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	sky.process_mode = Sky.PROCESS_MODE_QUALITY   # the background still twinkles; radiance (unused: ambient is a flat colour) is not recomputed per frame
 	e.background_mode = Environment.BG_SKY
 	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
