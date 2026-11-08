@@ -188,7 +188,7 @@ func _build_ui() -> void:
 	inspector.add_child(_compose_button)
 	var instructions := Label.new()
 	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	instructions.text = "Finder / Prev / Next chooses ANY node; Focus re-centres. Drag to orbit, wheel to zoom, click to inspect.\nHeight = domain; shape = role; colour = reported status; links = verified repos.\nOnly source-reported RUNNING work moves. Unknown does not pulse."
+	instructions.text = "Finder / Prev / Next chooses ANY node; Focus re-centres. Drag to orbit, wheel to zoom, click to inspect.\nHeight = domain; shape = role; colour = status. Blue link = verified repo, amber link = exact local path match.\nOnly source-reported RUNNING work moves. Unknown does not pulse."
 	instructions.add_theme_font_size_override("font_size", 11)
 	instructions.add_theme_color_override("font_color", Color("#93a9bb"))
 	inspector.add_child(instructions)
@@ -335,7 +335,7 @@ func _render() -> void:
 		var a: String = link["from"]
 		var b: String = link["to"]
 		if lookup.has(a) and lookup.has(b):
-			var wire := _make_edge(lookup[a]["position"], lookup[b]["position"])
+			var wire := _make_edge(lookup[a]["position"], lookup[b]["position"], String(link.get("kind", "")))
 			if wire != null:
 				_edge_meshes.append({"node": wire, "from": a, "to": b})
 				if lookup[b]["kind"] == "mission" and lookup[b]["status"] == "running":
@@ -344,7 +344,7 @@ func _render() -> void:
 	_refresh_inspector()
 	_request_redraw()
 
-func _make_edge(a: Vector3, b: Vector3) -> MeshInstance3D:
+func _make_edge(a: Vector3, b: Vector3, relation_kind: String) -> MeshInstance3D:
 	var difference := b - a
 	if difference.length() < 0.01:
 		return null
@@ -355,9 +355,9 @@ func _make_edge(a: Vector3, b: Vector3) -> MeshInstance3D:
 	tube.radial_segments = 5
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color("#4c708e")
+	mat.albedo_color = Color("#d39a64") if relation_kind == "local_path_match" else Color("#4c708e")
 	var line := MeshInstance3D.new()
-	line.name = "VerifiedRepoEdge"
+	line.name = "SourceVerifiedEdge"
 	line.mesh = tube
 	line.material_override = mat
 	line.position = (a + b) * 0.5
@@ -605,7 +605,8 @@ func _refresh_inspector() -> void:
 			other = String(edge["from"])
 		if not other.is_empty() and _meshes.has(other):
 			var target: Dictionary = _meshes[other]["entry"]
-			linked.append("%s: %s" % [String(target["kind"]).to_upper(), String(target["title"])])
+			var relation := "LOCAL PATH MATCH" if edge.get("kind", "") == "local_path_match" else "VERIFIED REPO"
+			linked.append("%s -> %s: %s" % [relation, String(target["kind"]).to_upper(), String(target["title"])])
 	_info.text += "\n\nPROVEN RELATIONSHIPS\n"
 	_info.text += "\n".join(linked) if not linked.is_empty() else "None observed. No link inferred."
 	var status := String(entry["status"])
@@ -620,6 +621,8 @@ func _refresh_inspector() -> void:
 	elif entry["kind"] == "project":
 		_info.text += "\n\nNUDGE: Verified repository. Compose a scoped Studio mission; revalidation required."
 	elif entry["kind"] == "tool":
+		if not String(entry.get("local_path", "")).is_empty():
+			_info.text += "\n\nOBSERVED LOCAL PATH\n" + String(entry["local_path"])
 		_info.text += "\n\nNUDGE: Filesystem presence is not proof of a running service, an authenticated connector, or executable capability. Qualify through its owning provider."
 	var kind := String(entry["kind"])
 	_open_button.disabled = not ["rig", "project", "mission"].has(kind)
