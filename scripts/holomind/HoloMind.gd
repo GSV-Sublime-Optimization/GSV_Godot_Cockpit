@@ -43,7 +43,8 @@ var _layer_roots: Array[Node3D] = []
 var _flights: Array[Dictionary] = []   # real events in flight: {node, from, to, t}
 var _hb_age: Dictionary = {}             # last seen heartbeat age per rig, to spot a NEW heartbeat
 var _order_state: Dictionary = {}        # order id -> last seen status, to spot new orders and receipts
-var _flights_primed: bool = false        # the first feed only records state: nothing flies for old news
+var _flights_primed: bool = false
+var _settle: float = 3.0               # seconds of scene updates left; 0 = nothing changed, so nothing is touched or redrawn        # the first feed only records state: nothing flies for old news
 var _stars: Node3D
 var _memory: Node3D
 var _mind: Node3D
@@ -98,6 +99,9 @@ func _ready() -> void:
 		elif arg == "--background":
 			background = true
 	Engine.max_fps = 30
+	# Redraw only when something changed (borrowed from GPT-6's Cognitive Loom, #18 and #23): a still scene costs ~nothing.
+	OS.low_processor_usage_mode = true
+	OS.low_processor_usage_mode_sleep_usec = 33000
 	get_window().always_on_top = false
 	# Renders and measurements must never take focus from whatever the person at the machine is doing.
 	if background or shot_path != "":
@@ -817,16 +821,30 @@ func _process(delta: float) -> void:
 		_poll = 3.0
 		_read_feed()
 	# The camera moves only when you drag it (no idle drift: motion on screen must mean something).
-	_cam.position = Vector3(cos(_yaw) * cos(_pitch), sin(_pitch), sin(_yaw) * cos(_pitch)) * _dist + Vector3(0, 1.6, 0)
-	_cam.look_at(Vector3(0, 1.8, 0), Vector3.UP)
+	var cam_want := Vector3(cos(_yaw) * cos(_pitch), sin(_pitch), sin(_yaw) * cos(_pitch)) * _dist + Vector3(0, 1.6, 0)
+	if not _cam.position.is_equal_approx(cam_want):
+		_cam.position = cam_want
+		_settle = maxf(_settle, 0.5)
+		_cam.look_at(Vector3(0, 1.8, 0), Vector3.UP)
 	# Real events in flight (a new heartbeat, an order, a receipt). Nothing else travels.
 	_update_flights(delta)
 	# The Mind moves only when its attention changes; its rings turn only while it is actually thinking.
-	_mind.position = _mind.position.lerp(_mind_target, clampf(delta * 1.6, 0.0, 1.0))
+	if _mind.position.distance_to(_mind_target) > 0.002:
+		_mind.position = _mind.position.lerp(_mind_target, clampf(delta * 1.6, 0.0, 1.0))
 	if int(feed.get("mind_thinking", 0)) > 0:
 		for c in _mind.get_children():
 			if String(c.name).begins_with("ring"):
 				(c as Node3D).rotate_object_local(Vector3(1, 0, 0) if String(c.name) == "ring100" else Vector3(0, 0, 1), delta * 0.9)
+	_settle -= delta
+	if _settle <= 0.0 and _flights.is_empty():
+		# Nothing changed: touch nothing, so the engine (low_processor_usage_mode) has nothing to redraw.
+		_hud_clock -= delta
+		if _hud_clock <= 0.0:
+			_hud_clock = 1.0
+			_update_hud()
+		if shot_path != "" and _t > 4.0:
+			_shoot()
+		return
 	_card.position = _mind.position + Vector3(0, 1.6, 0)
 	if _cam.position.distance_to(_card.position) > 0.01:
 		_card.look_at(_cam.position, Vector3.UP)
@@ -1269,6 +1287,7 @@ func _run_palette(i: int) -> void:
 ## - receipt: an order's status changed (taken/working/done/declined), so it flies from the seat back to you
 ## The first feed only records state, so old news never animates.
 func _detect_flights() -> void:
+	_settle = 3.0
 	var ship: Node3D = _layer_roots[0]
 	var bodies: Dictionary = feed.get("bodies", {})
 	for id: String in bodies:
@@ -1341,6 +1360,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	_settle = maxf(_settle, 1.0)
 	if event is InputEventKey and event.pressed:
 		var k := (event as InputEventKey).keycode
 		if k == KEY_ESCAPE:
