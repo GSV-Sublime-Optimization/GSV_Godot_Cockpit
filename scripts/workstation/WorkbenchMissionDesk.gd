@@ -20,6 +20,7 @@ var _title: LineEdit
 var _objective: TextEdit
 var _acceptance: TextEdit
 var _risk: OptionButton
+var _validator: LineEdit
 var _submit: Button
 var _view_mission: Button
 var _guard_action: Button
@@ -124,6 +125,15 @@ func _build() -> void:
 	_acceptance.placeholder_text = "Godot import exits 0 with no engine errors\nFeature test passes on exact commit\nNo unrelated workspace files touched"
 	_acceptance.text_changed.connect(_update_submit)
 	column.add_child(_acceptance)
+	var validator_label := Label.new()
+	validator_label.text = "R2 VALIDATOR   /   predeclared command, independently executed by Studio after approval"
+	validator_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(validator_label)
+	_validator = LineEdit.new()
+	_validator.placeholder_text = "python -m pytest tests/test_feature.py -q  (required for R2 only)"
+	_validator.max_length = 400
+	_validator.text_changed.connect(func(_value): _update_submit())
+	column.add_child(_validator)
 
 	var controls := HBoxContainer.new()
 	controls.add_theme_constant_override("separation", 14)
@@ -268,6 +278,9 @@ func _selected_project() -> Dictionary:
 func _risk_code() -> String:
 	return ["R0", "R1", "R2"][_risk.selected] if _risk != null and _risk.selected >= 0 and _risk.selected <= 2 else "R3"
 
+func _validator_for_risk() -> String:
+	return _validator.text if _validator != null and _risk_code() == "R2" else ""
+
 func _update_submit() -> void:
 	if _submit == null:
 		return
@@ -277,10 +290,12 @@ func _update_submit() -> void:
 			if _submission_guard == "uncertain" else
 			"START A NEW MISSION DRAFT")
 	var valid_source := _fresh()
+	if _validator != null:
+		_validator.editable = _risk_code() == "R2"
 	if _projects_state == "observed" and not valid_source and _project_state != null:
 		_project_state.text = "PROJECT SOURCE STALE / rescan before submitting. NO POST."
 	var spec: Dictionary = CONTRACT.make_spec(_selected_project(),
-		_title.text, _objective.text, _acceptance.text, _risk_code())
+		_title.text, _objective.text, _acceptance.text, _risk_code(), _validator_for_risk())
 	_submit.disabled = (_projects_busy or _post_busy or _submission_guard != "draft"
 		or not valid_source or not spec.get("ok", false))
 	_submit.tooltip_text = ("Ready for explicit Studio submission" if not _submit.disabled
@@ -297,6 +312,7 @@ func _release_submission_guard() -> void:
 		_title.clear()
 		_objective.clear()
 		_acceptance.clear()
+		_validator.clear()
 		_project_select.select(0)
 		_response.text = "NEW DRAFT / select a fresh observed repository and write a new objective."
 	else:
@@ -310,7 +326,7 @@ func _submit_mission() -> void:
 		return
 	var project := _selected_project()
 	var spec: Dictionary = CONTRACT.make_spec(project, _title.text,
-		_objective.text, _acceptance.text, _risk_code())
+		_objective.text, _acceptance.text, _risk_code(), _validator_for_risk())
 	if not spec.get("ok", false):
 		_response.text = "NOT SUBMITTED / " + String(spec.get("reason", "invalid_envelope"))
 		return
@@ -340,9 +356,14 @@ func _on_post_finished(result: int, status: int, _headers: PackedStringArray,
 	var ack: Dictionary = CONTRACT.parse_post_result(
 		status, bytes.get_string_from_utf8(), _expected_repo, _expected_risk)
 	if not ack.get("ok", false):
-		_submission_guard = "uncertain"
-		_response.text = ("NOT ACKNOWLEDGED / " + String(ack.get("reason", "invalid_result"))
-			+ ". Submission is locked until you verify Studio and explicitly unlock retry.")
+		if status == 400 and String(ack.get("reason", "")).begins_with("studio_rejected"):
+			# Studio rejected the input BEFORE store.create; this is not an ambiguous write.
+			_submission_guard = "draft"
+			_response.text = "REJECTED BY STUDIO / " + String(ack["reason"]) + ". Correct the draft and resubmit."
+		else:
+			_submission_guard = "uncertain"
+			_response.text = ("NOT ACKNOWLEDGED / " + String(ack.get("reason", "invalid_result"))
+				+ ". Submission is locked until you verify Studio and explicitly unlock retry.")
 		_update_submit()
 		return
 	var mission_id := String(ack["id"])
