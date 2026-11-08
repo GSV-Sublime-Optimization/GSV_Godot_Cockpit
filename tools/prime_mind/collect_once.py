@@ -147,9 +147,18 @@ def _ssh_client() -> str:
     return "ssh"
 
 
+def _command() -> list[str]:
+    """The one read. GSV_MINDS_SSH_HOST picks the SSH host (default: the operator's `xanadu` alias);
+    `local` runs the same read-only script with this Python, for use on the archive host itself."""
+    host = os.environ.get("GSV_MINDS_SSH_HOST", "").strip() or SSH_HOST
+    if host == "local":
+        return [sys.executable, "-"]
+    return [_ssh_client(), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+            "-o", "ConnectTimeout=6", host, "python3 -"]
+
+
 def collect_once(*, output: Path, timeout: float = 16.0) -> dict[str, Any]:
-    cmd = [_ssh_client(), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-           "-o", "ConnectTimeout=6", SSH_HOST, "python3 -"]
+    cmd = _command()
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     result = subprocess.run(
         cmd, input=REMOTE_SCRIPT, capture_output=True, text=True,
