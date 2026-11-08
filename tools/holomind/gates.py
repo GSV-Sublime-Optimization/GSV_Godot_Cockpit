@@ -4,7 +4,7 @@ An LLM review is the colony's most expensive step. A PR that is a draft, stacked
 provenance block can't merge whatever a reviewer says, so it gets the mechanical prerequisite instead:
 
     pr fails        -> draft: "mark ready" (the author);  stacked on Y: "merge Y first" (Keath; held, never an agent's)
-    gsv missing     -> "run gsv_ci verify on head X" (a seat that can: the MSI for dev (PowerShell 7), the i3 for Furyline)
+    gsv missing     -> "run gsv_ci verify on head X" (a seat that can: the MSI for dev (PowerShell 7), and Furyline (its scene smoke hangs on the i3))
     gsv red         -> the author fixes it
     provenance      -> "add the KILOCORE-PROVENANCE-V1 block" (the author's seat)
     only review     -> a reviewer
@@ -27,8 +27,8 @@ CLOUD_ACTORS = {'gpt-6': 'agent/chatgpt-gpt6', 'codex': 'agent/codex', 'muse': '
 ACTOR_SEAT = {v: k for k, v in CLOUD_ACTORS.items()}
 AGENT_SEAT = {'GPT-6': 'gpt-6', 'Codex': 'codex', 'Muse': 'muse',          # cockpit_feed.AGENTS name -> dispatch seat
               'Claude (i3 seat)': 'claude (i3 seat)', 'Claude CLI': 'claude (msi seat)'}
-# gsv_ci.py needs PowerShell 7 for the dev repo, which the i3 lacks; Furyline verifies on the i3.
-VERIFY_SEAT = {'GSV-Sublime-Optimization/dev': 'claude (msi seat)', 'Furyline/Furyline': 'claude (i3 seat)'}
+# gsv_ci.py needs PowerShell 7 for the dev repo, which the i3 lacks. Furyline's 'Godot scene smoke checks' hang on the i3 (measured 2026-11-08: static checks and the Godot test runner pass, the smoke step never finishes in 15 min), so the MSI verifies both.
+VERIFY_SEAT = {'GSV-Sublime-Optimization/dev': 'claude (msi seat)', 'Furyline/Furyline': 'claude (msi seat)'}
 VERIFY_DEFAULT = 'claude (msi seat)'
 # Exactly gsv_review.MARKER: a review counts only when the comment STARTS with the marker.
 MARKER = re.compile(r"\A\s*<!--\s*gsv-review:\s*actor=(?P<actor>[A-Za-z0-9._/-]+)\s+"

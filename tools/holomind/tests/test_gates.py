@@ -56,10 +56,10 @@ def test_unverified_dev_pr_goes_to_the_msi_for_gsv_ci():
     assert it['id'] == f'prereq:verify:{DEV}#1@{HEAD_A[:12]}'
 
 
-def test_unverified_furyline_pr_goes_to_the_i3():
+def test_unverified_furyline_pr_goes_to_the_msi():  # its scene smoke hangs on the i3 (2026-11-08)
     p = dict(pr(), repo='Furyline')
     (it,) = classify(gate_json(HEAD_A, gsv=False), p, FURY)['items']
-    assert it['to'] == 'claude (i3 seat)'
+    assert it['to'] == 'claude (msi seat)'
 
 
 def test_missing_provenance_goes_to_the_author_agent():
