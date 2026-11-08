@@ -9,8 +9,10 @@ func _initialize() -> void:
 
 func _run() -> void:
 	var surface: Control = SCENE.instantiate()
-	root.add_child(surface)
+	# Disable the scene's full-rect anchoring before the manual test size.
+	surface.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	surface.size = Vector2(1280, 720)
+	root.add_child(surface)
 	surface.queue_redraw()
 	for i in 5:
 		await process_frame
