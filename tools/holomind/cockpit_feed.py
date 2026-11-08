@@ -1,13 +1,13 @@
 r"""HOLOMIND cockpit feeder: what the Minds see and think, what every agent is doing, and a shared channel to talk in.
 
-Every 10 s it writes C:\Users\Public\colony\mindview\feed.json (schema colony.mindview-feed/v0, plus `agents` and
+Every 10 s it writes feed.json into HOLOMIND_DIR (default C:\Users\Public\colony\mindview on Windows; see portable.py) (schema colony.mindview-feed/v0, plus `agents` and
 `channel`) from:
   - xanadu, one SSH call: Mind events (~/steward/events), heartbeats (~/steward/heartbeats) and the shared cockpit
     channel (~/steward/cockpit/channel.jsonl: any agent or person appends one JSON line {at, from, to, text});
   - GitHub, every 3 min: open PRs touched in the last 24 h across the colony's busiest repos, attributed to agents by
     branch prefix (claude-cli/, gpt6/, codex/, muse/, gordon/...);
   - this rig: the GameAttract rotation's state.
-Messages typed in HOLOMIND land in C:\Users\Public\colony\mindview\outbox.jsonl; this feeder appends them to the
+Messages typed in HOLOMIND land in HOLOMIND_DIR\outbox.jsonl; this feeder appends them to the
 shared channel, so every agent sees them.
 The Mind answers messages addressed to it ("mind", or no address) with the i3's local model, grounded only on the
 feed, unloaded right after (keep_alive 0), and never while a game is playing on the i3 screen. Its replies say so.
@@ -24,14 +24,17 @@ import sys
 import time
 import urllib.request
 
-HERE = pathlib.Path(r'C:\Users\Public\colony\mindview')
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import portable  # noqa: E402  (per-rig paths and hosts; every default is the i3's)
+
+HERE = portable.feed_dir()
 FEED = HERE / 'feed.json'
 OUTBOX = HERE / 'outbox.jsonl'
 SENT = HERE / 'outbox.sent'
 STATE = HERE / 'cockpit.state.json'
-XANADU = 'xeno@100.74.243.72'
-OLLAMA = 'http://100.102.251.35:11434'
-MODEL = 'qwen3:8b'
+XANADU = portable.xanadu()
+OLLAMA = portable.OLLAMA
+MODEL = portable.MODEL
 GAMEATTRACT = pathlib.Path.home() / 'Documents' / 'GameAttract' / 'status.json'
 SILENT_AFTER_S = 15 * 60
 REPOS = ['GSV-Sublime-Optimization/dev', 'GSV-Sublime-Optimization/GSV_Godot_Cockpit', 'GSV-Sublime-Optimization/Chronicles-of-the-Eternal-Bastion',
@@ -100,9 +103,8 @@ def age_s(stamp):
 def ssh(script, stdin=''):
     # The script travels base64-encoded so newlines and quotes arrive intact; stdin carries new channel lines.
     b64 = base64.b64encode(script.encode()).decode()
-    r = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', XANADU,
-                        f"python3 -c 'import base64; exec(base64.b64decode(\"{b64}\"))'"],
-                       input=stdin, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40, creationflags=0x08000000)
+    r = subprocess.run(portable.xanadu_python(b64), input=stdin, capture_output=True, text=True, encoding='utf-8',
+                       errors='replace', timeout=40, **portable.NO_WINDOW_KW)
     if r.returncode:
         (HERE / 'cockpit.err.txt').write_text(f'{iso()} ssh rc={r.returncode} {r.stderr[-300:]}\n')
     return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
@@ -151,7 +153,7 @@ def github_activity():
     for repo in REPOS:
         r = subprocess.run(['gh', 'pr', 'list', '-R', repo, '--state', 'open', '--limit', '60', '--json',
                             'number,title,headRefName,headRefOid,updatedAt,createdAt,isDraft,reviewDecision,url,comments,statusCheckRollup'], stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=0x08000000)
+                           capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, **portable.NO_WINDOW_KW)
         try:
             prs = json.loads(r.stdout or '[]')
         except Exception:
@@ -178,20 +180,18 @@ def github_activity():
     return sorted(agents.values(), key=lambda g: g['recent'][0]['at'], reverse=True)
 
 
-QUEUE = pathlib.Path(r'K:\quarantine\QUEUE.md')
+QUEUE = portable.QUEUE
 
 
-MSI_SSH = ['ssh', '-i', str(pathlib.Path.home() / '.ssh' / 'i3_to_msi_ed25519'), '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes',
-           '-o', 'ConnectTimeout=8', 'colony-i3@100.110.22.88', 'curl -s -m 8 http://127.0.0.1:8767/feed.json']
+MSI_SSH = portable.chorus_ssh(8)
 
 
 def chorus_facts():
     """The MSI's CHORUS cockpit measures what HOLOMIND can't: the off-box backup, the mirror and the MSI's spine
-    services. Read its feed (read-only, over the i3's SSH account) and keep only those measured facts."""
+    services. Read its feed (read-only: over HTTP on the MSI or when CHORUS_FEED_URL is set, else over the i3's
+    SSH account) and keep only those measured facts."""
     try:
-        r = subprocess.run(MSI_SSH, capture_output=True, text=True, encoding='utf-8', timeout=30, stdin=subprocess.DEVNULL,
-                           creationflags=0x08000000)
-        f = json.loads(r.stdout)
+        f = portable.chorus_feed(8)
     except Exception:
         return None
     sp = f.get('spine') or {}

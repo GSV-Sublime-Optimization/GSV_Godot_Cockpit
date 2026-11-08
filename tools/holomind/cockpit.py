@@ -22,16 +22,19 @@ import json
 import subprocess
 import sys
 import time
+import pathlib
 
-XANADU = 'xeno@100.74.243.72'
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import portable  # noqa: E402  (XANADU_SSH, or local when run on xanadu itself)
+
+XANADU = portable.xanadu()
 CH = '~/steward/cockpit/channel.jsonl'
 
 
 def remote(py, stdin=''):
     b64 = base64.b64encode(py.encode()).decode()
-    r = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', XANADU,
-                        f"python3 -c 'import base64; exec(base64.b64decode(\"{b64}\"))'"],
-                       input=stdin, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40)
+    r = subprocess.run(portable.xanadu_python(b64), input=stdin, capture_output=True, text=True, encoding='utf-8',
+                       errors='replace', timeout=40)
     if r.returncode:
         sys.exit('cockpit: xanadu unreachable: ' + r.stderr.strip()[-200:])
     return r.stdout

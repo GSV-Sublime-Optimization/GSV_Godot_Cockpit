@@ -15,16 +15,19 @@ import os
 import pathlib
 import platform
 import subprocess
+import sys
 import tkinter as tk
 import webbrowser
 from tkinter import ttk
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import portable  # noqa: E402
+
 WT = pathlib.Path(os.environ.get('BAKEOFF_WORKTREES', r'C:\dev\worktrees'))
-GODOT = os.environ.get('GODOT', r'C:\dev\tools\godot\4.7.1\Godot_v4.7.1-stable_win64.exe')
-PY = os.environ.get('PYTHON', r'C:\Users\ekene\AppData\Local\Python\pythoncore-3.14-64\python.exe')
+GODOT = os.environ.get('GODOT', r'C:\dev\tools\godot\4.7.1\Godot_v4.7.1-stable_win64.exe' if os.name == 'nt' else 'godot')
+PY = os.environ.get('PYTHON', sys.executable)
 PORTS = pathlib.Path(os.environ.get('COLONY_PORTS', r'C:\dev\active\dev\tools\colony\contracts\ports.v1.json'))
-HERE_RIG = 'msi' if platform.node().upper().startswith('MSI') else 'i3'
-NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+HERE_RIG = portable.rig()   # COLONY_RIG overrides; MSI* = msi, *L9* = l9, else i3 (as before)
 
 # Each entry: where it lives and how to run it. 'godot' entries run a scene from their own worktree.
 ENTRIES = [
@@ -151,11 +154,7 @@ class Gallery:
 
     def spine_state(self):
         try:
-            r = subprocess.run(['ssh', '-i', str(pathlib.Path.home() / '.ssh' / 'i3_to_msi_ed25519'), '-o', 'IdentitiesOnly=yes',
-                                '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', 'colony-i3@100.110.22.88',
-                                'curl -s -m 6 http://127.0.0.1:8767/feed.json'], capture_output=True, text=True,
-                               encoding='utf-8', timeout=20, stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
-            sp = json.loads(r.stdout).get('spine', {})
+            sp = portable.chorus_feed(6).get('spine', {})
             return {s['name']: ('UP' if s.get('up') else 'DOWN') for s in sp.get('services', [])}
         except Exception:
             return {}

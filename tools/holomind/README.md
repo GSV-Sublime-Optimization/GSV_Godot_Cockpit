@@ -58,3 +58,24 @@ The fixture is a frozen copy of the live feed from 2026-11-08 06:36Z, until the 
 - the games as places the Mind visits;
 - sound;
 - the Culture Ship's Council as several voices.
+
+
+## Running on other rigs
+
+The Python tools read their per-rig settings from `tools/holomind/portable.py`. Every default is the i3's value, so nothing changes on the i3. Elsewhere, set:
+
+| Env var | Default | Set it when |
+|---|---|---|
+| `HOLOMIND_DIR` | `C:\Users\Public\colony\mindview` on Windows; `$XDG_DATA_HOME/colony/mindview` (or `~/.local/share/...`) on Linux | you want the feed somewhere else. Then start Godot with `-- --feed=<HOLOMIND_DIR>/feed.json`. |
+| `XANADU_SSH` | `xeno@100.74.243.72`; `local` when the hostname is `xanadu` | your rig reaches xanadu by another name or user |
+| `OLLAMA_URL`, `OLLAMA_MODEL` | the i3's Ollama, `qwen3:8b` | the Mind should think somewhere else |
+| `CHORUS_FEED_URL` | `http://127.0.0.1:8767/feed.json` on the MSI; unset elsewhere | you can reach CHORUS over HTTP. Unset means the i3's SSH hop: `CHORUS_MSI_SSH` and `CHORUS_MSI_KEY`. |
+| `COLONY_QUARANTINE_QUEUE` | `K:\quarantine\QUEUE.md` | the queue lives elsewhere; a missing file is skipped |
+| `COLONY_RIG` | from the hostname | the hostname guess is wrong |
+| `GODOT`, `PYTHON`, `BAKEOFF_WORKTREES`, `COLONY_PORTS` | the i3's paths (`godot` and this Python off Windows) | you run `gallery.py` on another rig |
+
+What still needs a specific rig:
+- **The feeder** needs `gh` (logged in) and SSH to xanadu. The colony facts it shows (backup, mirror, spine) come from the MSI's CHORUS.
+- **The scene** writes typed messages to `C:/Users/Public/colony/mindview/outbox.jsonl`, a constant in `HoloMind.gd`. Off Windows the feed is read through `--feed=`, but the chat box cannot send.
+
+Tests: `python tools/holomind/test_portable.py` runs on Windows and Linux. It uses only the standard library and needs no network.
