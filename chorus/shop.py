@@ -38,6 +38,8 @@ def orders(channel: list[dict]) -> list[dict]:
     state: dict[str, dict] = {}
     for m in channel:
         if m.get("kind") == "order" and m.get("id"):
+            if m["id"] in state:
+                continue        # a re-posted order line must never reset an order's history
             state[m["id"]] = {"id": m["id"], "at": m.get("at"), "from": m.get("from"), "to": m.get("to", "any"),
                               "station": str(m.get("station") or "anvil")[:24],   # other cockpits add stations (ledger, act, factory)
                               "text": m.get("text", ""), "status": "posted", "by": None, "note": "", "link": "",
