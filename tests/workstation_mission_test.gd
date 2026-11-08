@@ -105,9 +105,20 @@ func _run() -> void:
 	_check(desk._title.text == "Repair weapon targeting",
 		"ambiguous failure preserves user draft")
 	desk._release_submission_guard()
+	_check(desk._submission_guard == "uncertain" and desk._submit.disabled,
+		"manual retry cannot bypass the Studio index read")
+	desk._on_index_finished(HTTPRequest.RESULT_SUCCESS, 500,
+		PackedStringArray(), PackedByteArray())
+	_check(desk._submission_guard == "uncertain" and desk._index_state == "not_checked",
+		"failed owner GET leaves retry quarantined")
+	desk._on_index_finished(HTTPRequest.RESULT_SUCCESS, 200,
+		PackedStringArray(), JSON.stringify({"missions": []}).to_utf8_buffer())
+	_check(desk._index_state == "observed_clear" and desk._submit.disabled,
+		"source GET alone cannot authorize a second POST")
+	desk._release_submission_guard()
 	desk._update_submit()
 	_check(desk._submission_guard == "draft" and not desk._submit.disabled,
-		"retry requires an explicit action")
+		"fresh bounded owner index plus explicit action unlocks retry")
 	# A clean 201 is also a one-shot transition. It cannot mint duplicate
 	# missions from the same composer merely by clicking Submit again.
 	desk._on_post_finished(HTTPRequest.RESULT_SUCCESS, 201,
@@ -121,6 +132,26 @@ func _run() -> void:
 		and desk._validator.text.is_empty()
 		and desk._project_select.get_selected_id() == 0,
 		"new draft clears previous mission and requires explicit repo choice")
+	# A matching task in the live owner index defeats retry, even if the POST's
+	# response was lost. An operator can abandon it, never repeat it blindly.
+	desk._submission_guard = "uncertain"
+	desk._expected_repo = selected["path"]
+	desk._expected_risk = "R2"
+	desk._expected_title = "Repair weapon targeting"
+	desk._expected_objective = "Fix the observable target lock bug and add a negative control."
+	var existing := {"missions": [{"id": "msn_012345abcdef",
+		"posted_by": "godot-workstation", "repo": selected["path"], "risk": "R2",
+		"title": desk._expected_title, "objective": desk._expected_objective}]}
+	desk._on_index_finished(HTTPRequest.RESULT_SUCCESS, 200,
+		PackedStringArray(), JSON.stringify(existing).to_utf8_buffer())
+	_check(desk._index_state == "conflict" and desk._submit.disabled
+		and desk._ack_id == "msn_012345abcdef", "matching stored mission prevents duplicate POST")
+	desk._release_submission_guard()
+	_check(desk._submission_guard == "uncertain", "even manual unlock cannot bypass an index match")
+	desk._on_guard_pressed()
+	_check(desk._submission_guard == "draft" and desk._title.text.is_empty()
+		and desk._project_select.get_selected_id() == 0,
+		"conflict action abandons original request rather than retries it")
 	desk.queue_free()
 	await process_frame
 	if failures.is_empty():
