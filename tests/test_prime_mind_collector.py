@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -90,6 +91,35 @@ class CollectorTests(unittest.TestCase):
             self.assertTrue(result["source_ok"])
             self.assertEqual(json.loads(out.read_text())["schema"], collector.SCHEMA)
             self.assertFalse(any(Path(tmp).glob(".prime-mind-*.tmp")))
+
+    def test_ssh_host_override_keeps_the_same_read(self):
+        with patch.dict(os.environ, {"GSV_MINDS_SSH_HOST": "xeno@100.74.243.72"}):
+            command = collector._command()
+        self.assertEqual(command[-2:], ["xeno@100.74.243.72", "python3 -"])
+        self.assertIn("StrictHostKeyChecking=yes", command)
+
+    def test_no_window_flag_only_on_windows(self):
+        # creationflags is Windows-only; on Linux subprocess raises ValueError if it is non-zero.
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+                collector.subprocess, "run",
+                return_value=SimpleNamespace(returncode=255, stdout="", stderr="")) as run:
+            with self.assertRaises(RuntimeError):
+                collector.collect_once(output=Path(tmp) / "f.json")
+        flags = run.call_args.kwargs["creationflags"]
+        self.assertEqual(flags != 0, os.name == "nt")
+
+    def test_local_mode_runs_the_read_only_script_on_a_local_archive(self):
+        # On the archive host itself (GSV_MINDS_SSH_HOST=local) the same script reads ~/steward directly.
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as tmp:
+            events = Path(home) / "steward" / "events"
+            events.mkdir(parents=True)
+            (events / "2026-11-08.jsonl").write_text(json.dumps({
+                "at": "2026-11-08T06:51:00Z", "mind": "m", "level": "notable", "line": "hi"}) + "\n", encoding="utf-8")
+            out = Path(tmp) / "feed.json"
+            with patch.dict(os.environ, {"GSV_MINDS_SSH_HOST": "local", "HOME": home, "USERPROFILE": home}):
+                result = collector.collect_once(output=out, timeout=60)
+            self.assertEqual(result["events"], 1)
+            self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["events"][0]["line"], "hi")
 
 
 if __name__ == "__main__":

@@ -75,6 +75,18 @@ python tools/prime_mind/collect_once.py --output 'C:\dev\.colony\scratch\mindvie
 & 'C:\dev\tools\godot\4.7.1\Godot_v4.7.1-stable_win64.exe' --path . --windowed res://scenes/PrimeMind.tscn -- --feed=C:\dev\.colony\scratch\mindview-prime-live.json
 ```
 
+On other rigs, and off Windows:
+
+- The collector needs Python 3.8 or later and `ssh` on PATH. On Windows it prefers Git's `ssh.exe`, and `GSV_MINDS_SSH_BIN` overrides that.
+- The host is the `xanadu` alias. A rig without that alias sets `GSV_MINDS_SSH_HOST`, for example `xeno@100.74.243.72`. On the archive host itself, `GSV_MINDS_SSH_HOST=local` runs the same read-only script with no SSH.
+- The scene needs only Godot 4.7 and a local file path:
+
+```sh
+GSV_MINDS_SSH_HOST=xeno@100.74.243.72 python3 tools/prime_mind/collect_once.py --output /tmp/mindview-prime-live.json
+godot --path . --windowed res://scenes/PrimeMind.tscn -- --feed=/tmp/mindview-prime-live.json
+python3 -m unittest tests.test_prime_mind_collector     # no SSH; also runs on Linux
+```
+
 Godot only polls that **local file** every 15 seconds, never SSH. If it
 becomes old, unreadable, malformed or absent, show that honestly. A valid
 read of Xanadu's archive doesn't certify radio service, heartbeat accuracy,
