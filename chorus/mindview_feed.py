@@ -37,8 +37,42 @@ beats = {}
 for f in glob.glob(os.path.join(home, "heartbeats", "*.json")):
     try: beats[os.path.basename(f)[:-5]] = json.load(open(f))
     except ValueError: pass
-print(json.dumps({"events": [e for e in events if not e.get("simulated")][-200:], "heartbeats": beats, "served_at": time.time()}))
+import re
+now = time.time()
+sets = sorted(f for f in glob.glob(os.path.expanduser("~/backups/colony/20*")) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", os.path.basename(f)))
+backup = {"set": os.path.basename(sets[-1]), "age_h": round((now - os.path.getmtime(sets[-1])) / 3600, 1),
+          "in_progress": bool(glob.glob(os.path.expanduser("~/backups/colony/*.partial")))} if sets else None
+recs = sorted(glob.glob(os.path.expanduser("~/mirrors/_receipts/*.json")), key=os.path.getmtime)
+mirror = None
+if recs:
+    r = json.load(open(recs[-1]))
+    mirror = {"age_h": round((now - os.path.getmtime(recs[-1])) / 3600, 1), "ok": r.get("ok"),
+              "repos": len(r.get("repos", [])), "failures": r.get("failures", 0)}
+cards = []
+for f in sorted(glob.glob(os.path.join(home, "outbox", "*.md"))):
+    head = next((l.strip("# \n") for l in open(f, encoding="utf-8", errors="replace") if l.startswith("#")), os.path.basename(f))
+    cards.append({"file": os.path.basename(f), "title": head[:140], "age_d": round((now - os.path.getmtime(f)) / 86400, 1)})
+print(json.dumps({"events": [e for e in events if not e.get("simulated")][-200:], "heartbeats": beats,
+                  "backup": backup, "mirror": mirror, "steward_cards": cards, "served_at": now}))
 PY"""
+
+PRS_EVERY = 300          # GitHub is asked at most every 5 minutes
+_prs = {"at": 0.0, "items": []}
+
+
+def waiting_prs() -> list[dict]:
+    """Open, non-draft colony PRs with no review yet: the work waiting on a second actor (read-only gh)."""
+    if time.time() - _prs["at"] < PRS_EVERY:
+        return _prs["items"]
+    r = subprocess.run(["gh", "search", "prs", "--owner", "GSV-Sublime-Optimization", "--state", "open",
+                        "--draft=false", "--review", "none", "--limit", "30", "--json",
+                        "repository,number,title,url,createdAt"],
+                       capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
+    if r.returncode == 0:
+        _prs["items"] = [{"repo": p["repository"]["name"], "number": p["number"], "title": p["title"][:110],
+                          "url": p["url"], "created": p["createdAt"]} for p in json.loads(r.stdout or "[]")]
+        _prs["at"] = time.time()
+    return _prs["items"]
 
 
 def fetch() -> dict:
@@ -46,7 +80,12 @@ def fetch() -> dict:
                        capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
     if r.returncode:
         raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
-    return json.loads(r.stdout.strip().splitlines()[-1])
+    data = json.loads(r.stdout.strip().splitlines()[-1])
+    try:
+        data["prs_waiting"] = waiting_prs()
+    except (subprocess.SubprocessError, ValueError, OSError):
+        data["prs_waiting"] = _prs["items"]
+    return data
 
 
 def write_feed(data: dict) -> None:

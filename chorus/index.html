@@ -83,6 +83,38 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
 .who { font-family: var(--f-data); font-size: 12px; color: var(--ink-dim); }
 .who b { color: var(--ink); font-weight: 600; }
 
+/* What needs you: the work list. Ranked by severity; each item says what, since when, why, your move, who. */
+.needs {
+  pointer-events: auto; align-self: start; justify-self: start; margin-top: 14px;
+  width: min(400px, 100%); max-height: calc(100% - 14px); overflow: auto;
+  background: color-mix(in srgb, var(--sky) 82%, transparent); border: 1px solid var(--hair); border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+.needs summary {
+  cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: baseline;
+  padding: 12px 14px; position: sticky; top: 0; background: color-mix(in srgb, var(--sky) 92%, transparent);
+}
+.needs summary::-webkit-details-marker { display: none; }
+.needs summary:focus-visible { outline: 2px solid var(--l9); outline-offset: -2px; }
+.needs-title { font-family: var(--f-display); font-style: italic; font-size: 19px; }
+.needs-count { font-family: var(--f-data); font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.needs-list { list-style: none; margin: 0; padding: 0 10px 10px; display: grid; gap: 8px; }
+.need { display: grid; gap: 6px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--sky-2) 85%, transparent); }
+.need-head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+.need-what { font-weight: 700; font-size: 14px; line-height: 1.3; }
+.sev { font-family: var(--f-display); font-style: italic; font-size: 13px; color: var(--c); white-space: nowrap; }
+.need-meta { font-family: var(--f-data); font-size: 11px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.need-why { font-size: 13px; color: var(--ink-dim); line-height: 1.4; }
+.move { display: flex; gap: 8px; align-items: flex-start; }
+.move code {
+  flex: 1; font-family: var(--f-data); font-size: 12px; line-height: 1.45; color: var(--ink);
+  background: var(--sky); border: 1px solid var(--hair); border-radius: 6px; padding: 6px 8px; overflow-wrap: anywhere;
+}
+.move button { padding: 5px 9px; font-size: 11px; }
+.need a { color: var(--l9); }
+.need ul { margin: 0; padding-left: 16px; font-size: 12px; display: grid; gap: 2px; }
+.clear { padding: 4px 14px 14px; color: var(--tranquillo); font-family: var(--f-display); font-style: italic; }
+@media (max-width: 720px) { .needs { max-height: 34vh; margin-top: 10px; } }
 .river { pointer-events: auto; display: grid; gap: 6px; }
 .river-head { display: flex; justify-content: space-between; font-family: var(--f-data); font-size: 11px; color: var(--ink-dim); letter-spacing: 0.08em; text-transform: uppercase; }
 .river-track {
@@ -125,7 +157,10 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
       </div>
     </div>
   </header>
-  <div></div>
+  <details class="needs" id="needs" open>
+    <summary><span class="needs-title">What needs you</span> <span class="needs-count" id="needs-count"></span></summary>
+    <ol class="needs-list" id="needs-list"></ol>
+  </details>
   <section class="thought" aria-live="polite">
     <div class="marking" id="marking">tranquillo</div>
     <p class="line" id="line">The fleet is quiet.</p>
@@ -197,7 +232,11 @@ function resize() {
   stars = Array.from({length: Math.round(W * H / 2600)}, () => ({x: Math.random() * W, y: Math.random() * H, z: Math.random(), p: Math.random() * 6.28}));
 }
 addEventListener("resize", resize); resize();
-const rigXY = id => { const r = RIGS.find(q => q.id === id); return [r.pos[0] * W, r.pos[1] * H * (W < 520 ? 0.9 : 1)]; };
+// On wide screens the sky sits right of the "What needs you" panel (420 px), so no star hides behind it.
+const rigXY = id => {
+  const r = RIGS.find(q => q.id === id), left = W >= 900 ? 440 : 0;
+  return [left + r.pos[0] * (W - left), r.pos[1] * H * (W < 520 ? 0.9 : 1)];
+};
 const ageMin = hb => hb ? (nowFn() - Date.parse(hb.at)) / 60000 : Infinity;
 function rigState(id) {
   if (id === "xanadu") return {silent: false, host: true, checks: []};   // xanadu holds the record itself
@@ -409,10 +448,102 @@ async function poll() {
     const r = await fetch("feed.json", {cache: "no-store"}); if (!r.ok) throw 0;
     const d = await r.json(); const fresh = d.events.length && d.events[d.events.length - 1].at !== events[events.length - 1]?.at;
     events = d.events; heartbeats = d.heartbeats; live = true; nowFn = () => Date.now(); setSource(); drawRiver();
+    extras = {backup: d.backup, mirror: d.mirror, steward_cards: d.steward_cards || [], prs_waiting: d.prs_waiting || []};
+    renderNeeds();
     if (fresh && !rehearsing) show(events[events.length - 1]);
   } catch { /* no feeder: stay on the snapshot */ }
 }
 if (location.protocol.startsWith("http") && !location.hostname.endsWith("claude.ai")) { poll(); setInterval(poll, 15000); }
 
-drawRiver(); show(current, false); requestAnimationFrame(frame);
+// ---------- what needs you: the runbook turns every failing fact into a move ----------
+// Each entry: what it means, the cause the colony has measured, the exact next move, and who can make it.
+const RUNBOOK = {
+  "i3:docker": {what: "Docker can't start on the i3", why: "Virtualisation (VT-x) is off in the i3's BIOS, so WSL and Docker can't run.",
+    move: "At the i3, between radio shows: reboot → Del → F7 (Advanced) → CPU Configuration → Intel Virtualization Technology → Enabled → save", owner: "Keath (hands on the i3)"},
+  "msi:dev-mentor": {what: "Terminal Depths isn't answering on MSI", why: "Its 1.1-million-row event table stalls the API. The fix is written.",
+    move: "Review and merge Dev-Mentor#286, then: docker restart kilocore-dev-mentor", owner: "a second reviewer, then Keath"},
+  "msi:i3-tunnel": {what: "MSI can't reach the i3's models", why: "The tunnel to the i3's Ollama dropped. LiteLLM's ecosystem-qwen falls back to MSI's own models.",
+    move: "wscript //B //Nologo %LOCALAPPDATA%\\KiloCore\\bin\\i3-ollama-tunnel.vbs", owner: "anyone on MSI (it also restarts at logon)"},
+  "msi:litellm": {what: "The model gateway (LiteLLM) is down", why: "Every agent's local-model calls go through :4000.",
+    move: "docker start ai-litellm", owner: "anyone on MSI"},
+  "msi:docker": {what: "Docker Desktop isn't running on MSI", why: "LiteLLM, Terminal Depths, the Culture Ship and 20+ services live there.",
+    move: "Start Docker Desktop, then check: docker ps", owner: "Keath"},
+  "i3:ollama": {what: "The i3's models aren't answering", why: "The i3's Ollama serves the colony's qwen3:8b over the tunnel.",
+    move: "Ask the i3 Claude to check Ollama on the i3 (radio first)", owner: "i3 Claude"},
+  "i3:gameattract": {what: "The i3's playtest rotation stopped", why: "GameAttract is the i3's screensaver and playtest lab.",
+    move: "Ask the i3 Claude to restart the GameAttract director", owner: "i3 Claude"},
+  "l9:ollama-mind": {what: "L9's mind isn't thinking", why: "The triage drone's model on L9 didn't answer this cycle.",
+    move: "ssh kilodesktop then check Ollama on :11435 (the drone falls back to facts only)", owner: "MSI Claude"}
+};
+const LEVEL_RANK = {alarm: 2, notable: 1, routine: 0};
+let extras = {
+  backup: {set: "2026-11-07", age_h: 1.4, in_progress: true},
+  mirror: {age_h: 1.0, ok: true, repos: 75, failures: 0},
+  steward_cards: [{title: "REQUEST 01 (CRITICAL): make xanadu's network survive a reboot", age_d: 26.6}, {title: "REQUEST 02 (HIGH): disable two unused snaps", age_d: 26.6}],
+  prs_waiting: [
+    {repo: "dev", number: 429, title: "feat(proving-ground): grade the L9 triage drone's narrations", url: "https://github.com/GSV-Sublime-Optimization/dev/pull/429"},
+    {repo: "dev", number: 428, title: "docs(colony): fork atlas", url: "https://github.com/GSV-Sublime-Optimization/dev/pull/428"},
+    {repo: "dev", number: 427, title: "feat(mirror): mirror the 20 forks that carry colony work", url: "https://github.com/GSV-Sublime-Optimization/dev/pull/427"},
+    {repo: "dev", number: 424, title: "fix(mirror): keep refs GitHub deleted or force-pushed", url: "https://github.com/GSV-Sublime-Optimization/dev/pull/424"}
+  ]
+};
+// How long has a reason been true? Walk the Minds' memory back from now.
+function since(reasonPrefix) {
+  let first = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if ((events[i].reasons || []).some(r => r.startsWith(reasonPrefix))) first = events[i].at; else if (first) break;
+  }
+  return first;
+}
+const hm = iso => new Date(iso).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+const dur = ms => { const m = Math.round(ms / 60000); return m < 60 ? `${m} min` : `${(m / 60).toFixed(m < 600 ? 1 : 0)} h`; };
+function needs() {
+  const out = [];
+  for (const r of RIGS) {
+    if (r.id === "xanadu") continue;
+    const st = rigState(r.id);
+    if (st.silent) {
+      out.push({level: "alarm", what: `${r.name} has gone silent`, meta: st.hb ? `last heard ${Math.round(st.age)} min ago` : "never reported",
+        why: "No heartbeat in 15 minutes: the rig is off, asleep, offline, or its heartbeat task stopped.",
+        move: `Check ${r.name} is on and online; then ssh ${r.id === "l9" ? "kilodesktop" : r.id} and look at its heartbeat task`, owner: "Keath or MSI Claude"});
+      continue;
+    }
+    for (const c of st.checks.filter(c => !c.ok)) {
+      const rb = RUNBOOK[`${r.id}:${c.name}`] || {what: `${r.name}: ${c.name} failing`, why: c.detail || "No runbook entry yet.", move: `Look at the ${c.name} check on ${r.name}`, owner: "unassigned"};
+      const s = since(`${r.id} failing: ${c.name}`);
+      out.push({level: "notable", ...rb, meta: s ? `noticed since ${hm(s)} · ${dur(nowFn() - Date.parse(s))}` : "failing now"});
+    }
+  }
+  const b = extras.backup;
+  if (!b || b.age_h > 36) out.push({level: "alarm", what: "Off-box backup is stale", meta: b ? `newest finished set ${b.set} · ${Math.round(b.age_h)} h old` : "no finished set",
+    why: "Local-only work (vault, memory, unpushed branches) has no copy off MSI.", move: "python C:/dev/tools/colony/offbox_backup.py run", owner: "anyone on MSI"});
+  const m = extras.mirror;
+  if (!m || m.age_h > 26 || !m.ok) out.push({level: "notable", what: "Git mirrors are behind", meta: m ? `${m.age_h} h old · ${m.failures} failed` : "no receipt",
+    why: "The off-GitHub copy of the colony's code is stale.", move: "python %LOCALAPPDATA%/KiloCore/bin/mirror_sync.py run", owner: "anyone on MSI"});
+  if (extras.prs_waiting.length) out.push({level: "notable", what: `${extras.prs_waiting.length} pull requests are waiting for a reviewer`,
+    meta: "open, not draft, no review yet", why: "Colony rule: a different agent reviews before anything merges.",
+    move: "Ask Codex, GPT-6 or the i3 Claude to review the oldest first", owner: "any second actor", list: extras.prs_waiting.slice(0, 5)});
+  if (extras.steward_cards.length) out.push({level: "routine", what: `${extras.steward_cards.length} questions from the xanadu Steward`,
+    meta: `oldest ${Math.round(Math.max(...extras.steward_cards.map(c => c.age_d || 0)))} days`, why: "Several were answered tonight; the cards were never closed.",
+    move: "Answer or close them in xanadu:~/steward/outbox/ (dev#419 has the re-checked digest)", owner: "Keath + MSI Claude"});
+  return out.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level]);
+}
+function renderNeeds() {
+  const list = document.getElementById("needs-list"), items = needs(); list.replaceChildren();
+  document.getElementById("needs-count").textContent = items.filter(i => i.level !== "routine").length ? `${items.length} items` : "all clear";
+  if (!items.length) { const p = document.createElement("li"); p.className = "clear"; p.textContent = "Nothing needs you. The fleet is in tune."; list.append(p); return; }
+  for (const it of items) {
+    const li = document.createElement("li"); li.className = "need";
+    li.innerHTML = `<div class="need-head"><span class="need-what">${esc(it.what)}</span><span class="sev" style="--c: var(${LEVEL[it.level].color})">${LEVEL[it.level].word}</span></div>
+      <div class="need-meta">${esc(it.meta || "")} · owner: ${esc(it.owner)}</div>
+      <div class="need-why">${esc(it.why)}</div>
+      <div class="move"><code>${esc(it.move)}</code><button type="button">Copy</button></div>`;
+    if (it.list) { const ul = document.createElement("ul"); for (const p of it.list) { const a = document.createElement("li"); a.innerHTML = `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.repo)}#${p.number}</a> ${esc(p.title)}`; ul.append(a); } li.append(ul); }
+    const btn = li.querySelector("button");
+    btn.onclick = () => navigator.clipboard?.writeText(it.move).then(() => { btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy", 1500); }, () => { btn.textContent = "Select it"; });
+    list.append(li);
+  }
+}
+
+drawRiver(); renderNeeds(); show(current, false); requestAnimationFrame(frame);
 </script>

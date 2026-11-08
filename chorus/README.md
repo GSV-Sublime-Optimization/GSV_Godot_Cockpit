@@ -13,6 +13,24 @@ The fleet is drawn as a night sky. Each rig is a star with its own colour and it
 
 Together the four notes make a Cmaj7 chord: the whole fleet in tune.
 
+## What needs you (the point of it)
+The panel answers the one question you open it for: **what needs me right now, and what do I do?** Each item is ranked by severity and says:
+- **what is wrong**, in plain words;
+- **how long the Minds have noticed it** ("noticed since 23:35 · 1.2 h", read from their memory, so it never claims more than they saw);
+- **why**: the cause the colony has measured;
+- **your move**: the exact next action, with a Copy button;
+- **who owns it**.
+
+The built-in **runbook** maps each health check to that cause and move. For example, i3 `docker` → VT-x is off in the BIOS → the key sequence to enable it. It covers Docker, LiteLLM, the i3 tunnel, Terminal Depths, the i3's Ollama and GameAttract, and L9's mind.
+
+Beyond the rigs, it also lists:
+- a stale off-box backup (finished sets only; an in-progress `.partial` never counts as fresh);
+- mirrors that are behind;
+- **pull requests waiting for a reviewer** (open, not draft, no review; linked);
+- the xanadu Steward's unanswered questions.
+
+When nothing needs you, it says so.
+
 ## What you see
 - **Each star breathes** with its heartbeat. A ring of arcs around it shows its health checks: thin teal when a check is ok, thick red when it fails. A rig whose heartbeat is older than 15 minutes dims, its thread to xanadu goes dashed, and its label says *silent N min*.
 - **Threads** carry heartbeats from every rig to xanadu, which keeps the record. A small pulse travels each thread.
