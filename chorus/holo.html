@@ -1084,8 +1084,7 @@ function verbs(o) {
   // o: { order, station, to, acts: [{action,target,label}], ask, link, linkLabel }
   const acts = (o.acts || []).filter(Boolean);
   return `<h3>Do something</h3><div class="verbs">
-    ${acts.map((a, i) => `<button class="act small" data-act="${i}" ${canAct() ? '' : 'disabled title="Actions need the live table (or ?mock=1)"'}>Act now: ${esc(a.label)}</button>`).join('')}
-    ${acts.map((a, i) => `<button class="small" data-actorder="${i}" ${canWrite() ? '' : 'disabled'} title="Post it as an order: the seat runs it and posts the receipt">Send as action order</button>`).join('')}
+    ${acts.map((a, i) => `<span style="display:flex;gap:4px;flex-wrap:wrap;width:100%"><button class="act small" data-act="${i}" ${canAct() ? '' : 'disabled title="Actions need the live table (or ?mock=1)"'}>Act now: ${esc(a.label)}</button><button class="small" data-actorder="${i}" ${canWrite() ? '' : 'disabled'} title="Post it as an order: a seat runs it (the allowlist is checked again) and posts the receipt">or hand it to a seat</button></span>`).join('')}
     <button class="small" data-v="order" ${canWrite() ? '' : 'disabled'}>Make this an order</button>
     <button class="small" data-v="ask" ${canWrite() ? '' : 'disabled'}>Ask Claude</button>
     <button class="small" data-v="suggest" ${canWrite() ? '' : 'disabled'} title="Tell the MSI Claude how this view or this node should improve">Suggest an improvement</button>
@@ -1373,7 +1372,7 @@ function loop(t) {
   requestAnimationFrame(loop);
   if (document.hidden) return;
   const idle = t - lastInput > 20000 && !cam.tween && !playing;
-  if (t - lastF < (idle ? 1000 / 20 : FRAME) - 1) return; lastF = t;
+  if (t - lastF < (idle ? 1000 / 15 : FRAME) - 1) return; lastF = t;
   if (playing) stepPlay(t); else lastPlay = 0;
   frame(t); renderer.render(scene, camera); camMoved = false;
 }
@@ -1553,6 +1552,7 @@ async function poll() {
 document.addEventListener('visibilitychange', () => { if (!document.hidden && HTTP && !MOCK) poll(); });
 addEventListener('resize', resize);
 (async function start() {
+  if (PERF) { resize(); apply(); runPerf(); if (HTTP) setInterval(poll, 15000); return; }   // synchronous, before load: real clocks, no network wait
   if (HTTP) { await Promise.race([poll(), new Promise((r) => setTimeout(r, 1500))]); setInterval(poll, 15000); }
   if (MOCK) seedMock();
   setInterval(() => { if (M) { renderHud(); drawTrack(); } }, 5000);
@@ -1561,15 +1561,15 @@ addEventListener('resize', resize);
   if (Q.get('focus')) { const [kind, id] = Q.get('focus').split(':'); const p = kind === 'rig' ? { kind, id } : kind === 'svc' ? { kind, name: id } : { kind }; openPick(p); }
   if (MOCK && Q.get('rehearse') === 'order') setTimeout(() => { const n = document.createElement('span'); postOrder({ text: 'MOCK · Rehearse an order: check the i3 Docker fix and post the receipt', to: 'claude (i3 seat)', station: 'quench' }, n); select({ kind: 'console' }); }, 600);
   if (MOCK && Q.get('rehearse') === 'act') setTimeout(() => { select({ kind: 'rig', id: 'xanadu' }); propose(actionFor('task', 'offbox-backup')); }, 600);
-  if (PERF) { runPerf(); return; }
   requestAnimationFrame(loop);
 })();
 // ?perf: 300 frames rendered back to back, each flushed by a 1-pixel readback; average + p95 into the title
 function runPerf() {
   const gl = renderer.getContext(), px = new Uint8Array(4), L = []; let t = performance.now();
-  for (let i = 0; i < 300; i++) { const p0 = performance.now(); t += FRAME; frame(t); renderer.render(scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); L.push(performance.now() - p0); }
+  for (let i = 0; i < 30; i++) { t += FRAME; frame(t); renderer.render(scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }   // warm-up: shader compiles are not frame cost
+  let js = 0, sub = 0; for (let i = 0; i < 300; i++) { const p0 = performance.now(); t += FRAME; frame(t); const p1 = performance.now(); js += p1 - p0; renderer.render(scene, camera); sub += performance.now() - p1; gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); L.push(performance.now() - p0); }
   L.sort((a, b) => a - b); const avg = L.reduce((a, b) => a + b, 0) / L.length;
-  const msg = `perf: avg ${avg.toFixed(2)} ms, p95 ${L[284].toFixed(2)} ms per frame @dpr ${DPR}, ${renderer.info.render.calls} draw calls, ${renderer.info.render.triangles} tris`;
+  const msg = `perf: avg ${avg.toFixed(2)} ms, p95 ${L[284].toFixed(2)} ms wall per frame incl. GPU wait; CPU: scene ${(js / 300).toFixed(2)} ms + draw submit ${(sub / 300).toFixed(2)} ms = ${((js + sub) / 300 * 3).toFixed(1)}% of one core at 30 fps @dpr ${DPR}, ${renderer.info.render.calls} draw calls, ${renderer.info.render.triangles} tris`;
   document.title = msg; console.log(msg); requestAnimationFrame(loop);
 }
 </script>
