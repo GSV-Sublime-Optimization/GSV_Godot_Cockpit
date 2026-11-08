@@ -33,11 +33,16 @@ static func parse(text: String, now_unix: int) -> Dictionary:
 		return {"state": "invalid", "tools": []}
 	var stamp: Variant = payload.get("observed_at_unix")
 	var records: Variant = payload.get("tools")
-	if typeof(stamp) != TYPE_INT or typeof(records) != TYPE_ARRAY or records.size() > MAX_ITEMS:
+	# Godot JSON deserializes integral number literals as floats on some engine builds.
+	# Require an exact whole-number timestamp rather than rejecting valid JSON.
+	if typeof(stamp) not in [TYPE_INT, TYPE_FLOAT] or typeof(records) != TYPE_ARRAY or records.size() > MAX_ITEMS:
 		return {"state": "invalid", "tools": []}
-	if stamp < 1 or stamp > now_unix + 30:
+	if not is_finite(float(stamp)) or float(stamp) != floor(float(stamp)):
 		return {"state": "invalid", "tools": []}
-	if now_unix - stamp > MAX_AGE_SECONDS:
+	var stamp_unix := int(stamp)
+	if stamp_unix < 1 or stamp_unix > now_unix + 30:
+		return {"state": "invalid", "tools": []}
+	if now_unix - stamp_unix > MAX_AGE_SECONDS:
 		return {"state": "stale", "tools": []}
 	var output: Array[Dictionary] = []
 	var seen := {}
@@ -63,6 +68,6 @@ static func parse(text: String, now_unix: int) -> Dictionary:
 		output.append({
 			"id": id, "name": name.strip_edges(), "status": state, "path": path,
 			"source": "operator local filesystem inventory",
-			"observed_at_unix": stamp
+			"observed_at_unix": stamp_unix
 		})
 	return {"state": "observed", "tools": output, "observed_at_unix": stamp}
