@@ -380,3 +380,55 @@ same gate as Slice 4.
 5. `gdparse` + headless tests at exact head, following the #8 pattern.
 6. No Godot verification until Phase B writes PHASE-B-DONE.md. Screenshot + FPS
    queued behind it.
+
+## 12. Agent workstation contribution (i3, 2026-11-08)
+
+A contribution on top of Slice 5 (and #21's fixes) that makes the room
+usable by agents and keeps it inside the bake-off idle budget.
+
+**Budget (≤ 5 % of one core idle).** `HoloBudget`: `Engine.max_fps` 30
+focused / 10 unfocused, `OS.low_processor_usage_mode`, the HoloTab
+SubViewport renders `UPDATE_WHEN_VISIBLE`, and the hologram surface shader no
+longer scrolls its scanlines with `TIME`. `HoloRoom._process` runs only while
+something moves and stops itself when everything has settled. Keath's rule —
+motion = real events only: a pull, a pointer move, a slice-axis change, or an
+observation whose honest state *changed* (one 3 s slice sweep + a 2 s pulse
+of degraded cards). Re-reads that only refresh ages move nothing. The
+continuous 14 s sweep and the always-on Skyclaw flicker are gone.
+
+**Exits.** Esc quits from anywhere (Main.gd and the standalone war room).
+`scenes/HoloWarRoom.tscn` is the war room on its own:
+`godot --path . res://scenes/HoloWarRoom.tscn -- [--offscreen] [--shot=PATH] [--quit-after=SECONDS]`.
+`--shot` renders the HoloRoom to a PNG and quits (exit 2 under `--headless`:
+no renderer). `--offscreen` sets windowed mode, then
+`DisplayServer.window_set_position(12000, 12000)` from code and prints where
+the window went (this Godot build ignores `--position`).
+
+**Honesty.** Seat verdicts are one dated MSI probe (2026-11-07): every seat
+now renders "seen 11-07 (not live)", dimmed, unless a fresh fleet snapshot
+lists its process (`probe_seat`; today Claude and Ollama carry one). The web's
+CHATDEV / OLLAMA / SKYCLAW nodes follow the same rule. The atlas header says
+"N graded · M live", and counts as live only entries a fresh telemetry probe
+observed up (overlay `live_probe`); with no fresh snapshot it says "0 live
+(no fresh probe: telemetry …)". The ledger's status block is replaced in
+place; only order events are kept below it (bounded, 6).
+
+**Assign to seat (the war room's one write — local, fail-closed).** Pulling up
+a seat, a rig card, or an atlas entry offers "Assign to seat". It appends one
+line to a local outbox JSONL (`GSV_WAR_ROOM_OUTBOX_PATH`; the conventional
+place is next to the fleet snapshot, e.g. `<state dir>/war-room-outbox.jsonl`):
+
+    {"at","from":"keath","kind":"order","id":"o-<ms>-<hex>","to":SEAT,"text":CARD_TITLE,"via":"muse-war-room"}
+
+The colony's feeder relays outbox lines to the shared channel — Godot never
+writes remotely, never POSTs, never runs a shell. URLs, UNC shares, `res://`,
+relative paths and non-`.jsonl` files are refused; a full outbox (1 MB, feeder
+not draining) disables the action. No outbox configured → the button is
+disabled and says why. When `GSV_WAR_ROOM_CHANNEL_PATH` points at a local copy
+of `channel.jsonl`, the room shows the order's status (pending → relayed →
+the latest matching `order-status` line), polled every 10 s only while an
+order is outstanding.
+
+**Tests.** `tests/war_room_agents_test.gd` (smoke-gate case `war-room`), and
+an opt-in `--shot PATH` render case in `tests/godot_smoke_gate.py` (GPU
+session; PNG signature + size checked by `assess_shot`).

@@ -12,6 +12,8 @@ extends SceneTree
 
 const HOLO_ROOM_SCENE := "res://scenes/HoloRoom.tscn"
 const SURFACE_SHADER := "res://shaders/holo_surface.gdshader"
+const FleetTelemetryProjection = preload("res://scripts/holo/FleetTelemetryProjection.gd")
+const FleetTelemetryReader = preload("res://scripts/holo/FleetTelemetryReader.gd")
 
 var _failures: PackedStringArray = []
 
@@ -64,9 +66,10 @@ func _check_view_and_clip() -> void:
 	if not view.is_equal_approx(Vector3(0.0, 0.0, -5.0)):
 		_fail("view_space_point(origin) = %s, expected (0, 0, -5)" % str(view))
 
-	# Clip space: point (0,0,-10), fov 90, aspect 16/9, near 0.1, far 100.
-	# w = 10; NDC z ~= 0.982.
-	var clip := HoloCoordinateStack.clip_space_point(camera, Vector3(0.0, 0.0, -10.0), 16.0 / 9.0)
+	# Clip space: view point (0,0,-10), fov 90, aspect 16/9, near 0.1, far 100.
+	# clip_space_point takes a WORLD point; the camera sits at z=5, so world
+	# (0,0,-5) is view (0,0,-10). w = 10; NDC z ~= 0.982.
+	var clip := HoloCoordinateStack.clip_space_point(camera, Vector3(0.0, 0.0, -5.0), 16.0 / 9.0)
 	if not is_equal_approx(clip.w, 10.0):
 		_fail("clip w = %f, expected 10.0" % clip.w)
 	if absf(clip.z / clip.w - 0.982) > 0.01:
@@ -244,6 +247,13 @@ func _check_density() -> void:
 		_fail("empty model had nonzero density at the Studio blob")
 	if HoloDensity.density_at(empty_grid, 0, 0, 0) != 0:
 		_fail("empty model had nonzero density at the origin")
+	# The raymarcher's texture must actually be built (16^3 R8). A wrong
+	# ImageTexture3D.create argument order leaves it empty ("Image format
+	# mismatch") and the thought-volume never renders.
+	var tex := HoloDensity.make_texture(empty_grid)
+	if tex.get_width() != HoloDensity.SIZE or tex.get_height() != HoloDensity.SIZE 			or tex.get_depth() != HoloDensity.SIZE or tex.get_format() != Image.FORMAT_R8:
+		_fail("make_texture built %dx%dx%d format %d, expected 16x16x16 R8" % [
+			tex.get_width(), tex.get_height(), tex.get_depth(), tex.get_format()])
 	if HoloDensity.density_at(empty_grid, -1, 0, 0) != -1:
 		_fail("density_at did not return -1 out of bounds")
 	if HoloDensity.density_at(empty_grid, 16, 0, 0) != -1:
@@ -268,8 +278,20 @@ func _check_density() -> void:
 		_fail("live Studio sense left no density at its blob")
 	if HoloDensity.density_at(live_grid, 11, 8, 8) <= 0:
 		_fail("live gateway sense left no density at its blob")
-	if HoloDensity.density_at(live_grid, 8, 4, 8) != 0:
-		_fail("unavailable constellation left density at its blob")
+	# Neighbouring Gaussian blobs (sigma 2.5) bleed into the constellation
+	# slot, so "zero there" is the wrong check. The honest check: an
+	# unavailable constellation contributes NOTHING (same grid as no
+	# constellation at all) and a live one adds density there.
+	var no_constellation := model.duplicate(true)
+	no_constellation.erase("constellation")
+	var without: PackedByteArray = HoloDensity.build_grid(no_constellation, false)["grid"]
+	if live_grid != without:
+		_fail("unavailable constellation contributed density to the field")
+	var lit := model.duplicate(true)
+	lit["constellation"] = {"state": "live"}
+	var lit_grid: PackedByteArray = HoloDensity.build_grid(lit, false)["grid"]
+	if HoloDensity.density_at(lit_grid, 8, 4, 8) <= HoloDensity.density_at(live_grid, 8, 4, 8):
+		_fail("live constellation added no density at its blob")
 	if HoloDensity.density_at(live_grid, 8, 12, 8) <= 0:
 		_fail("four fresh fleet bodies left no density at their blob")
 
@@ -406,9 +428,9 @@ func _check_fleet_projection() -> void:
 	if not bool(weird_parsed.get("ok", false)):
 		_fail("weird service value made the whole snapshot fail")
 	else:
-		var weird_rigs: Dictionary = (weird_parsed["telemetry"] as Dictionary)["rigs"]
-		var weird_services: Dictionary = (weird_rigs["msi"] as Dictionary)["services"]
-		if String(weird_services.get("studio", "")) != "unknown":
+		var parsed_rigs: Dictionary = (weird_parsed["telemetry"] as Dictionary)["rigs"]
+		var parsed_services: Dictionary = (parsed_rigs["msi"] as Dictionary)["services"]
+		if String(parsed_services.get("studio", "")) != "unknown":
 			_fail("weird service value was not mapped to unknown")
 	var sparse := good.duplicate(true)
 	(sparse["rigs"] as Dictionary).erase("l9")
@@ -429,8 +451,8 @@ func _check_fleet_projection() -> void:
 	if not bool(long_parsed.get("ok", false)):
 		_fail("over-long note made the snapshot fail")
 	else:
-		var long_rigs: Dictionary = (long_parsed["telemetry"] as Dictionary)["rigs"]
-		if String((long_rigs["msi"] as Dictionary).get("note", "")).length() > 200:
+		var long_parsed_rigs: Dictionary = (long_parsed["telemetry"] as Dictionary)["rigs"]
+		if String((long_parsed_rigs["msi"] as Dictionary).get("note", "")).length() > 200:
 			_fail("over-long note was not truncated to 200 chars")
 
 

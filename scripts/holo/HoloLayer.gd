@@ -28,6 +28,9 @@ var render_priority: int = 0
 var pull: float = 0.0
 var pull_target: float = 0.0
 var billboard: bool = true
+## Set by HoloRoom: true only while a real event is being shown. At rest a
+## degraded card holds a fixed dim alpha (motion = real events only).
+var motion_enabled: bool = false
 
 var _base_position: Vector3 = Vector3.ZERO
 var _quad: MeshInstance3D
@@ -107,7 +110,8 @@ func set_state(state: String) -> void:
 ## Per-frame: interpolate pull toward its target, move the plane toward the
 ## camera along camera-forward by pull * PULL_DISTANCE, scale by
 ## (1 + pull * PULL_KAPPA), and billboard the card at the gaze. Degraded
-## layers flicker (their desk flickers too — honest about the state).
+## layers flicker (their desk flickers too — honest about the state) — but only while
+## motion_enabled; at rest the card holds still.
 func update_frame(delta: float, camera: Camera3D) -> void:
 	pull = move_toward(pull, pull_target, delta * 1.5)
 	var fwd: Vector3 = -camera.global_transform.basis.z.normalized()
@@ -119,8 +123,18 @@ func update_frame(delta: float, camera: Camera3D) -> void:
 	else:
 		global_transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * s), target_pos)
 	if layer_state == "degraded" and _mat != null:
-		var flicker := 0.35 + 0.25 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0))
+		var flicker := 0.45
+		if motion_enabled:
+			flicker = 0.35 + 0.25 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0))
 		_mat.set_shader_parameter("base_alpha", flicker)
+
+
+func is_settled() -> bool:
+	return is_equal_approx(pull, pull_target)
+
+
+func card_title() -> String:
+	return String(HoloLayerRegistry.layer_def(layer_id).get("title", layer_id.to_upper()))
 
 
 func toggle_pull() -> void:

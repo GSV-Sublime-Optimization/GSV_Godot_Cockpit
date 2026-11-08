@@ -29,6 +29,12 @@ extends Node3D
 ## (both sides, entry follows Lane B). An entry is "live" on its card only
 ## when the reader's overlay says a fresh probe observed it (overlay
 ## "live_probe"); otherwise the card shows the static honest state.
+##
+## Header honesty: every entry is GRADED (a dated static grade); only an entry
+## a fresh telemetry probe observed up counts as LIVE. With no fresh snapshot
+## the header says "0 live" and why. A static "live" in the graded file is a
+## grade, not a reading. Degraded cards pulse only while the room is awake
+## (motion = real events only); at rest they hold a fixed dim alpha.
 
 const SURFACE_SHADER: Shader = preload("res://shaders/holo_surface.gdshader")
 
@@ -55,6 +61,10 @@ const PROVEN_GRADES: PackedStringArray = ["Q", "U", "M"]
 var pull: float = 0.0
 var pull_target: float = 0.0
 var slice_view: String = "all"
+## Telemetry state the entries were overlaid with: live / stale / unknown.
+var telemetry_state: String = "unknown"
+## Set by HoloRoom: true only while a real event is being shown.
+var motion_enabled: bool = false
 
 var _base_position: Vector3 = BASE_POSITION
 var _header: Node3D
@@ -70,7 +80,8 @@ func _ready() -> void:
 	_build_header()
 
 
-func build_from(entries: Array) -> void:
+func build_from(entries: Array, overlay_telemetry_state: String = "unknown") -> void:
+	telemetry_state = overlay_telemetry_state
 	_entries = []
 	for raw in entries:
 		if typeof(raw) == TYPE_DICTIONARY:
@@ -114,12 +125,48 @@ func unverified_count() -> int:
 	return n
 
 
+## Every parsed entry carries a grade; "graded" is the honest count of nodes.
+func graded_count() -> int:
+	return _entries.size()
+
+
+## Live = a fresh telemetry probe observed the entry up (overlay live_probe
+## AND state live). A static "live" from the graded file is not counted.
 func live_count() -> int:
 	var n := 0
 	for raw in _entries:
-		if String((raw as Dictionary).get("state", "")) == "live":
+		var entry := raw as Dictionary
+		if String(entry.get("overlay", "")) == "live_probe" and String(entry.get("state", "")) == "live":
 			n += 1
 	return n
+
+
+func header_text() -> String:
+	return _header_label.text if _header_label != null else ""
+
+
+func is_settled() -> bool:
+	return is_equal_approx(pull, pull_target)
+
+
+## The visible entry card under the screen point (only while expanded), as
+## {id, title, entry}; empty when nothing is hit.
+func entry_at(camera: Camera3D, screen_pos: Vector2) -> Dictionary:
+	if not _expanded:
+		return {}
+	for i in _entry_nodes.size():
+		var node := _entry_nodes[i] as Node3D
+		if not node.visible:
+			continue
+		var hit: Dictionary = HoloCoordinateStack.hit_layer(camera, screen_pos, node, ENTRY_SIZE * 0.5)
+		if bool(hit.get("hit", false)):
+			var entry: Dictionary = _entries[i]
+			return {
+				"id": String(entry.get("id", "")),
+				"title": "Atlas: " + String(entry.get("name", entry.get("id", "?"))),
+				"entry": entry,
+			}
+	return {}
 
 
 func header_node() -> Node3D:
@@ -185,7 +232,11 @@ func _billboard_card(node: Node3D, camera: Camera3D) -> void:
 
 
 func _flicker_degraded() -> void:
-	var flicker := 0.35 + 0.25 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0))
+	# At rest a degraded card holds a fixed dim alpha; it pulses only while
+	# the room is showing a real event.
+	var flicker := 0.45
+	if motion_enabled:
+		flicker = 0.35 + 0.25 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0))
 	for node in _entry_nodes:
 		var mat: ShaderMaterial = (node as Node3D).get_meta("holo_mat", null)
 		if mat == null:
@@ -245,8 +296,11 @@ func _build_header() -> void:
 func _refresh_header() -> void:
 	if _header_label == null:
 		return
-	_header_label.text = "CAPABILITY ATLAS\n%d entries · %d live · %d unverified (D)\nslice: %s · live-probe: %d" % [
-		entry_count(), live_count(), unverified_count(), slice_view, live_probe_count(),
+	var live_note := ""
+	if telemetry_state != "live":
+		live_note = " (no fresh probe: telemetry %s)" % telemetry_state
+	_header_label.text = "CAPABILITY ATLAS\n%d graded · %d live%s\n%d unverified (D) · slice: %s · probed: %d" % [
+		graded_count(), live_count(), live_note, unverified_count(), slice_view, live_probe_count(),
 	]
 
 

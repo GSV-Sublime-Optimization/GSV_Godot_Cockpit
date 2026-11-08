@@ -77,10 +77,15 @@ static func layer_def(layer_id: String) -> Dictionary:
 	return {}
 
 
-## Verified seats (Lane B). "creature" = a working/dimmed figure at the desk;
-## false = an empty chair or an empty desk with an honest reason. The war-room
-## spirit (embodied agents, visible work) with the hologram form: the seats
-## ring the table the volume floats above.
+## Verified seats (Lane B). "creature" = a figure at the desk; false = an
+## empty chair or an empty desk with an honest reason. The war-room spirit
+## (embodied agents, visible work) with the hologram form: the seats ring the
+## table the volume floats above.
+##
+## "state" is Lane B's VERDICT from one MSI probe on 2026-11-07 — dated
+## evidence, not a live reading. The room renders it through seat_view():
+## a static verdict never shows as "live"; only a fresh fleet-snapshot probe
+## ("probe_seat" found in a rig's seats list) makes a seat live.
 static func seat_defs() -> Array[Dictionary]:
 	return [
 		{"id": "openclaw", "name": "OpenClaw", "state": "live",
@@ -91,7 +96,7 @@ static func seat_defs() -> Array[Dictionary]:
 			"creature": true},
 		{"id": "claude", "name": "Claude", "state": "dimmed",
 			"note": "live process, rate-limited, OAuth expired",
-			"creature": true},
+			"creature": true, "probe_seat": "claude"},
 		{"id": "codex", "name": "Codex", "state": "live",
 			"note": "app-server daemon 0.167.0",
 			"creature": true},
@@ -103,7 +108,7 @@ static func seat_defs() -> Array[Dictionary]:
 			"creature": true},
 		{"id": "ollama", "name": "Ollama", "state": "live",
 			"note": "the model shelf",
-			"creature": true},
+			"creature": true, "probe_seat": "ollama"},
 		{"id": "devmentor", "name": "Dev-Mentor MCP", "state": "live",
 			"note": "MCP server + launcher",
 			"creature": true},
@@ -132,6 +137,71 @@ static func seat_defs() -> Array[Dictionary]:
 			"note": "not detected — empty desk",
 			"creature": false},
 	]
+
+
+## The date every seat verdict above was observed (Lane B, MSI probe).
+const SEAT_VERDICT_DATE := "11-07"
+
+
+static func seat_ids() -> PackedStringArray:
+	var out := PackedStringArray()
+	for seat in seat_defs():
+		out.append(String(seat.get("id", "")))
+	return out
+
+
+static func is_seat_id(seat_id: String) -> bool:
+	return not seat_id.is_empty() and seat_ids().has(seat_id)
+
+
+static func seat_def(seat_id: String) -> Dictionary:
+	for seat in seat_defs():
+		if String(seat.get("id", "")) == seat_id:
+			return seat
+	return {}
+
+
+## How a seat renders, given the seat tokens a FRESH fleet snapshot lists
+## (empty when there is no fresh snapshot). {state, label, dimmed, probed}:
+##   - probe_seat present in a fresh snapshot -> "live", "live (probe)";
+##   - a static "live"/"dimmed"/"degraded" verdict -> "dimmed",
+##     "seen 11-07 (not live)" — a creature that was there, drawn dimmed;
+##   - away / not_detected / awaiting keep their verdict, dated.
+static func seat_view(seat: Dictionary, fresh_seat_tokens: PackedStringArray) -> Dictionary:
+	var probe := String(seat.get("probe_seat", "")).to_lower()
+	if not probe.is_empty() and fresh_seat_tokens.has(probe):
+		return {"state": "live", "label": "live (probe)", "dimmed": false, "probed": true}
+	var verdict := String(seat.get("state", "unknown"))
+	match verdict:
+		"live", "dimmed", "degraded":
+			var label := "seen %s (not live)" % SEAT_VERDICT_DATE
+			if verdict != "live":
+				label = "seen %s %s (not live)" % [SEAT_VERDICT_DATE, verdict]
+			return {"state": "dimmed", "label": label, "dimmed": true, "probed": false}
+	return {
+		"state": verdict,
+		"label": "%s (%s)" % [verdict.replace("_", " "), SEAT_VERDICT_DATE],
+		"dimmed": true,
+		"probed": false,
+	}
+
+
+## Seat tokens from a fleet telemetry dict, only when it is fresh ("live").
+## Lower-case, comma-split, de-duplicated across rigs.
+static func fresh_seat_tokens(telemetry: Dictionary) -> PackedStringArray:
+	var out := PackedStringArray()
+	if String(telemetry.get("state", "")) != "live":
+		return out
+	var rigs: Dictionary = telemetry.get("rigs", {})
+	for rig_id in rigs.keys():
+		var rig: Dictionary = rigs.get(rig_id, {})
+		if String(rig.get("state", "")) != "live":
+			continue
+		for token in String(rig.get("seats", "")).split(","):
+			var t := token.strip_edges().to_lower()
+			if not t.is_empty() and not out.has(t):
+				out.append(t)
+	return out
 
 
 ## States a layer or seat may honestly carry. Anything else is a bug.

@@ -37,6 +37,9 @@ var _last_bridge_ok: bool = false
 var _lazy_fillers: Dictionary = {}
 
 func _ready() -> void:
+	# Idle budget (30 fps, 10 unfocused, no redraw of a still screen) and the
+	# stated exit: Esc quits from any tab. See scripts/holo/HoloBudget.gd.
+	HoloBudget.apply()
 	_build_ui()
 	_status_bar.text = "● online"
 	_status_bar.modulate = Color(0.4, 1.0, 0.4)
@@ -46,6 +49,20 @@ func _ready() -> void:
 	_append_status("─────────────────────────────────────")
 	# refresh_status() blocks on a bridge call measured at ~21 s. Paint first.
 	_probe_after_first_paint()
+
+## Esc quits from anywhere: _input runs before any focused control (a LineEdit
+## included) can swallow the key.
+func _input(event: InputEvent) -> void:
+	if HoloBudget.is_quit_event(event):
+		get_viewport().set_input_as_handled()
+		get_tree().quit(0)
+
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_FOCUS_IN:
+			HoloBudget.set_focused(true)
+		NOTIFICATION_APPLICATION_FOCUS_OUT:
+			HoloBudget.set_focused(false)
 
 ## Runs the opening status probe once the cockpit is actually on screen.
 func _probe_after_first_paint() -> void:

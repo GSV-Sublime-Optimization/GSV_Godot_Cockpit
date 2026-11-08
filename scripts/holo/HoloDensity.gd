@@ -142,5 +142,6 @@ static func make_texture(grid: PackedByteArray) -> ImageTexture3D:
 				img.set_pixel(x, y, Color(v / 255.0, 0.0, 0.0, 1.0))
 		slices.append(img)
 	var tex := ImageTexture3D.new()
-	tex.create(SIZE, SIZE, SIZE, false, Image.FORMAT_R8, slices)
+	# Godot 4 order: create(format, width, height, depth, use_mipmaps, data).
+	tex.create(Image.FORMAT_R8, SIZE, SIZE, SIZE, false, slices)
 	return tex
