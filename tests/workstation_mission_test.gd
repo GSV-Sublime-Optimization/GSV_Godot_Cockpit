@@ -112,6 +112,10 @@ func _run() -> void:
 	_check(desk._submission_guard == "uncertain" and desk._index_state == "not_checked",
 		"failed owner GET leaves retry quarantined")
 	desk._on_index_finished(HTTPRequest.RESULT_SUCCESS, 200,
+		PackedStringArray(), JSON.stringify({"missions": [{"id": "msn_012345abcdef", "repo": selected["path"]}]}).to_utf8_buffer())
+	_check(desk._submission_guard == "uncertain" and desk._index_state == "not_checked",
+		"incomplete index entries cannot falsely clear an ambiguous POST")
+	desk._on_index_finished(HTTPRequest.RESULT_SUCCESS, 200,
 		PackedStringArray(), JSON.stringify({"missions": []}).to_utf8_buffer())
 	_check(desk._index_state == "observed_clear" and desk._submit.disabled,
 		"source GET alone cannot authorize a second POST")
