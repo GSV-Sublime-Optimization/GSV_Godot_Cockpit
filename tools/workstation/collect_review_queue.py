@@ -314,7 +314,7 @@ def dump_atomic(dest: Path, data: dict[str, Any]) -> None:
 def run(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--output", type=Path, required=True,
-                    help="Explicit local JSON destination, e.g. %APPDATA%/Godot/app_userdata/.../review_queue.json")
+                    help="Explicit local JSON destination, e.g. %%APPDATA%%/Godot/app_userdata/.../review_queue.json")
     ap.add_argument("--limit", type=int, default=24)
     ap.add_argument("--details", type=int, default=12)
     ap.add_argument("--availability", type=Path, help="Optional TTL-bound actor availability JSON")
