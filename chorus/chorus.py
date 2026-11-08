@@ -157,13 +157,21 @@ def work_view(d: dict) -> None:
         print(f"  {r['label']:<42} {r['branch'][:34]:<34} ahead {r['ahead']:>3} dirty {r['dirty']:>4} last {r['last_commit_h']} h")
 
 
+CLOSED_SHOWN = 5
+
+
 def orders_view(d: dict, mine: bool) -> None:
-    from shop import orders
+    """Every OPEN order first (posted/taken/working, oldest first), then at most the last 5 closed,
+    so open work never scrolls off behind finished tickets."""
+    from shop import CLOSED, orders
     os_ = [o for o in orders(d.get("channel", [])) if not mine or o["to"] in (SEAT, "any")]
-    from shop import CLOSED
-    open_ = [o for o in os_ if o["status"] not in CLOSED]
+    open_ = sorted((o for o in os_ if o["status"] not in CLOSED), key=lambda o: o["at"] or "")
+    closed = sorted((o for o in os_ if o["status"] in CLOSED),
+                    key=lambda o: (o["history"][-1].get("at") or "") if o["history"] else (o["at"] or ""))[-CLOSED_SHOWN:]
     print(f"Work orders: {len(open_)} open" + (" for this seat" if mine else ""))
-    for o in os_[-15:]:
+    for o in open_ + closed:
+        if o is (closed[0] if closed else None):
+            print(f"  -- last {len(closed)} closed --")
         print(f"  {o['id']}  [{o['status']:<8}] {o['station']:<7} to {o['to']:<18} by {o['by'] or '-':<18} {o['text'][:90]}")
         if o["note"] or o["link"]:
             print(f"      {o['note'][:120]} {o['link']}")
