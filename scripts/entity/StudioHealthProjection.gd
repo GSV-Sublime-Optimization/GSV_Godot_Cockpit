@@ -5,8 +5,11 @@ extends RefCounted
 
 const EXPECTED_SCHEMA := "kilocore-studio.cockpit-health.v2"
 const MAX_REASON_LENGTH := 120
+const MAX_BODY_CHARS := 131072
 
 static func parse_health(json_text: String) -> Dictionary:
+	if json_text.length() > MAX_BODY_CHARS:
+		return _invalid("health_response_too_large")
 	var parser := JSON.new()
 	if parser.parse(json_text) != OK:
 		return _invalid("malformed_json")

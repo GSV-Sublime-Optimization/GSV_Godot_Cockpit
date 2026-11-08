@@ -6,3 +6,11 @@
 script = ExtResource("1_session")
 auto_observe = true
 observe_period_seconds = 15.0
+
+[node name="StatusReadout" type="Label" parent="."]
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 648.0
+offset_bottom = 128.0
+theme_override_font_sizes/font_size = 16
+text = "Colony Entity - starting..."

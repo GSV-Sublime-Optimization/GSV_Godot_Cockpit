@@ -56,7 +56,11 @@ func refresh() -> void:
 	_header.text = "probing…"
 
 	var raw := _ps_get(DISPATCH_URL)
-	var tasks = JSON.parse_string(raw)
+	var tasks: Variant = null
+	if not raw.is_empty():
+		var parser := JSON.new()
+		if parser.parse(raw) == OK:
+			tasks = parser.data
 
 	# Dispatch may return {"queue": [...]} or a bare array
 	if typeof(tasks) == TYPE_DICTIONARY:
@@ -109,9 +113,19 @@ func _status_color(status: String) -> Color:
 
 func _ps_get(url: String) -> String:
 	var output: Array = []
-	OS.execute("pwsh", ["-NoProfile", "-Command",
-		"try{(Invoke-WebRequest '%s' -UseBasicParsing -TimeoutSec 4).Content}catch{'[]'}" % url],
-		output, true, false)
-	var t := ""
-	for line in output: t += str(line)
-	return t.strip_edges()
+	var code: int
+	if OS.has_feature("windows"):
+		var args := ["-NoProfile", "-Command",
+			"try{(Invoke-WebRequest '%s' -UseBasicParsing -TimeoutSec 4).Content}catch{''}" % url]
+		code = OS.execute("pwsh", args, output, true, false)
+		if code != 0:
+			output.clear()
+			code = OS.execute("powershell", args, output, true, false)
+	else:
+		code = OS.execute("curl", ["--fail", "--silent", "--max-time", "4", url], output, true, false)
+	if code != 0:
+		return ""
+	var result := ""
+	for line in output:
+		result += str(line)
+	return result.strip_edges()
