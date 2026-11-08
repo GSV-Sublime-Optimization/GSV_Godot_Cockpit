@@ -22,6 +22,7 @@ var _acceptance: TextEdit
 var _risk: OptionButton
 var _submit: Button
 var _view_mission: Button
+var _guard_action: Button
 var _response: RichTextLabel
 var _ack_id := ""
 var _projects: Array[Dictionary] = []
@@ -29,6 +30,9 @@ var _projects_state := "unknown"
 var _observed_at := 0
 var _projects_busy := false
 var _post_busy := false
+# An acknowledged or ambiguous POST is a one-shot boundary.
+# A retry requires a separate deliberate operator interaction.
+var _submission_guard := "draft"
 var _expected_repo := ""
 var _expected_risk := ""
 var _port := 7340
@@ -148,6 +152,13 @@ func _build() -> void:
 	open_studio.pressed.connect(func():
 		OS.shell_open("http://127.0.0.1:%d/" % _port))
 	controls.add_child(open_studio)
+	_guard_action = Button.new()
+	_guard_action.visible = false
+	_guard_action.modulate = Color("#f3ad91")
+	_guard_action.tooltip_text = ("Before retrying, inspect Studio's canonical mission index. "
+		+ "An ambiguous POST may already have created a mission.")
+	_guard_action.pressed.connect(_release_submission_guard)
+	column.add_child(_guard_action)
 
 	_response = RichTextLabel.new()
 	_response.bbcode_enabled = false
@@ -233,17 +244,42 @@ func _risk_code() -> String:
 func _update_submit() -> void:
 	if _submit == null:
 		return
+	if _guard_action != null:
+		_guard_action.visible = _submission_guard in ["uncertain", "acknowledged"]
+		_guard_action.text = ("CHECK STUDIO, THEN AUTHORIZE RETRY (DUPLICATE RISK)"
+			if _submission_guard == "uncertain" else
+			"START A NEW MISSION DRAFT")
 	var valid_source := _fresh()
 	if _projects_state == "observed" and not valid_source and _project_state != null:
 		_project_state.text = "PROJECT SOURCE STALE / rescan before submitting. NO POST."
 	var spec: Dictionary = CONTRACT.make_spec(_selected_project(),
 		_title.text, _objective.text, _acceptance.text, _risk_code())
-	_submit.disabled = _projects_busy or _post_busy or not valid_source or not spec.get("ok", false)
+	_submit.disabled = (_projects_busy or _post_busy or _submission_guard != "draft"
+		or not valid_source or not spec.get("ok", false))
 	_submit.tooltip_text = ("Ready for explicit Studio submission" if not _submit.disabled
-		else String(spec.get("reason", "Project source is not fresh")))
+		else "Submission locked: verify Studio before another POST" if
+		_submission_guard != "draft" else
+		String(spec.get("reason", "Project source is not fresh")))
+
+func _release_submission_guard() -> void:
+	if _post_busy or _submission_guard == "draft":
+		return
+	if _submission_guard == "acknowledged":
+		_ack_id = ""
+		_view_mission.visible = false
+		_title.clear()
+		_objective.clear()
+		_acceptance.clear()
+		_project_select.select(0)
+		_response.text = "NEW DRAFT / select a fresh observed repository and write a new objective."
+	else:
+		_response.text = ("RETRY UNLOCKED BY OPERATOR / verify in Studio first: "
+			+ "a previous POST may already have created a mission.")
+	_submission_guard = "draft"
+	_update_submit()
 
 func _submit_mission() -> void:
-	if _post_busy or not _fresh():
+	if _post_busy or _submission_guard != "draft" or not _fresh():
 		return
 	var project := _selected_project()
 	var spec: Dictionary = CONTRACT.make_spec(project, _title.text,
@@ -270,18 +306,22 @@ func _on_post_finished(result: int, status: int, _headers: PackedStringArray,
 		bytes: PackedByteArray) -> void:
 	_post_busy = false
 	if result != HTTPRequest.RESULT_SUCCESS or bytes.size() > 65536:
-		_response.text = "NOT ACKNOWLEDGED / Studio unavailable or oversized reply. Verify in Studio before retrying."
+		_submission_guard = "uncertain"
+		_response.text = "NOT ACKNOWLEDGED / Studio may have created the mission. Verify in Studio before retrying."
 		_update_submit()
 		return
 	var ack: Dictionary = CONTRACT.parse_post_result(
 		status, bytes.get_string_from_utf8(), _expected_repo, _expected_risk)
 	if not ack.get("ok", false):
-		_response.text = "NOT ACKNOWLEDGED / " + String(ack.get("reason", "invalid_result")) + ". Check Studio before resending."
+		_submission_guard = "uncertain"
+		_response.text = ("NOT ACKNOWLEDGED / " + String(ack.get("reason", "invalid_result"))
+			+ ". Submission is locked until you verify Studio and explicitly unlock retry.")
 		_update_submit()
 		return
 	var mission_id := String(ack["id"])
 	var state := String(ack["status"])
 	_ack_id = mission_id
+	_submission_guard = "acknowledged"
 	_view_mission.visible = true
 	_response.text = ("ACKNOWLEDGED BY STUDIO\nID: %s\nSTATE: %s\nRISK: %s\nREPOSITORY: %s\n\n"
 		+ "This is a stored mission, NOT proof of a running agent, passing test or merge.\n"

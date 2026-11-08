@@ -14,12 +14,18 @@ var _read_log: Button
 var _read_evidence: Button
 var _evidence_http: HTTPRequest
 var _terminal: TextEdit
+var _port := 7340
 
 func configure(selected: Dictionary, studio_client: Node) -> void:
 	entry = selected.duplicate(true)
 	client = studio_client
 
 func _ready() -> void:
+	var supplied := OS.get_environment("GSV_STUDIO_ENTITY_PORT")
+	if supplied.is_valid_int() and not supplied.is_empty():
+		var candidate := int(supplied)
+		if candidate >= 1 and candidate <= 65535:
+			_port = candidate
 	_evidence_http = HTTPRequest.new()
 	_evidence_http.timeout = 6.0
 	_evidence_http.max_redirects = 0
@@ -62,7 +68,7 @@ func _ready() -> void:
 	toolbar.add_child(_read_evidence)
 	var studio_button := Button.new()
 	studio_button.text = "OPEN STUDIO"
-	studio_button.pressed.connect(func(): OS.shell_open("http://127.0.0.1:7340/"))
+	studio_button.pressed.connect(func(): OS.shell_open("http://127.0.0.1:%d/" % _port))
 	toolbar.add_child(studio_button)
 
 	_terminal = TextEdit.new()
@@ -131,15 +137,9 @@ func refresh_evidence() -> void:
 	var id := String(entry.get("id", ""))
 	if not CATALOG.valid_mission_id(id):
 		return
-	var port := 7340
-	var supplied := OS.get_environment("GSV_STUDIO_ENTITY_PORT")
-	if supplied.is_valid_int() and not supplied.is_empty():
-		var candidate := int(supplied)
-		if candidate >= 1 and candidate <= 65535:
-			port = candidate
 	_read_evidence.disabled = true
 	_terminal.text = "Reading the owning Studio mission result and validator evidence..."
-	var code := _evidence_http.request("http://127.0.0.1:%d/api/missions/%s" % [port, id],
+	var code := _evidence_http.request("http://127.0.0.1:%d/api/missions/%s" % [_port, id],
 		PackedStringArray(["Accept: application/json"]), HTTPClient.METHOD_GET)
 	if code != OK:
 		_read_evidence.disabled = false

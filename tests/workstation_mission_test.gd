@@ -67,6 +67,39 @@ func _run() -> void:
 	_check(desk._submit.disabled, "stale project disables posting")
 	desk._submit_mission()
 	_check(not desk._post_busy, "stale project never starts POST")
+	desk._observed_at = Time.get_ticks_msec()
+	desk._update_submit()
+	_check(not desk._submit.disabled, "fresh draft can submit")
+	desk._expected_repo = selected["path"]
+	desk._expected_risk = "R2"
+	# A 200 or broken acknowledgement MAY have already stored a mission.
+	# Never permit an automatic second POST without a separate operator act.
+	desk._on_post_finished(HTTPRequest.RESULT_SUCCESS, 200,
+		PackedStringArray(), PackedByteArray())
+	_check(desk._submission_guard == "uncertain" and desk._submit.disabled,
+		"ambiguous acknowledgement quarantines repeat POST")
+	_check(desk._guard_action.visible and desk._guard_action.text.contains("RETRY"),
+		"warning presents an explicit retry control")
+	desk._submit_mission()
+	_check(not desk._post_busy, "quarantine defeats programmatic duplicate POST")
+	_check(desk._title.text == "Repair weapon targeting",
+		"ambiguous failure preserves user draft")
+	desk._release_submission_guard()
+	desk._update_submit()
+	_check(desk._submission_guard == "draft" and not desk._submit.disabled,
+		"retry requires an explicit action")
+	# A clean 201 is also a one-shot transition. It cannot mint duplicate
+	# missions from the same composer merely by clicking Submit again.
+	desk._on_post_finished(HTTPRequest.RESULT_SUCCESS, 201,
+		PackedStringArray(), ack.to_utf8_buffer())
+	_check(desk._submission_guard == "acknowledged" and desk._submit.disabled,
+		"successful creation locks repeat POST")
+	_check(desk._ack_id == "msn_012345abcdef", "verified mission ID retained")
+	desk._release_submission_guard()
+	_check(desk._submission_guard == "draft" and desk._title.text.is_empty()
+		and desk._objective.text.is_empty() and desk._acceptance.text.is_empty()
+		and desk._project_select.get_selected_id() == 0,
+		"new draft clears previous mission and requires explicit repo choice")
 	desk.queue_free()
 	await process_frame
 	if failures.is_empty():

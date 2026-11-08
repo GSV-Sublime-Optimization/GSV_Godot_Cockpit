@@ -44,11 +44,17 @@ func _run() -> void:
 	var bare: Dictionary = EVIDENCE.parse(JSON.stringify(sample), id)
 	_check(bare.get("ok", false) and EVIDENCE.format(bare["proof"]).contains("NOT REPORTED"),
 		"success status with missing receipt is not presented as proven")
+	# The mission pane must use the same configurable loopback port
+	# for both the source GET and OPEN STUDIO, not a hardcoded 7340.
+	var previous_port := OS.get_environment("GSV_STUDIO_ENTITY_PORT")
+	OS.set_environment("GSV_STUDIO_ENTITY_PORT", "17341")
 	var pane: PanelContainer = PANE.new()
 	pane.configure({"session_kind": "mission_log", "id": id, "name": "Fixture",
 		"status": "succeeded"}, null)
 	root.add_child(pane)
 	await process_frame
+	_check(pane._port == 17341, "pane obeys configured same-host Studio port")
+	OS.set_environment("GSV_STUDIO_ENTITY_PORT", previous_port)
 	_check(pane._read_evidence != null and not pane._read_evidence.disabled,
 		"mission exposes explicitly requested evidence read")
 	_check(pane._terminal.text.contains("No live terminal"), "no fake PTY")
