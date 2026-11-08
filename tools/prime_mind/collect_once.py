@@ -131,8 +131,24 @@ def project(remote: dict[str, Any], *, now: dt.datetime) -> dict[str, Any]:
     }
 
 
+def _ssh_client() -> str:
+    """Use the existing Git SSH configuration on Windows when available.
+
+    The stock Windows OpenSSH binary may use different config/key behavior.
+    This selects a binary, not a credential or a remote authority grant.
+    """
+    explicit = os.environ.get("GSV_MINDS_SSH_BIN", "")
+    if explicit and Path(explicit).is_file():
+        return explicit
+    if os.name == "nt":
+        candidate = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git" / "usr" / "bin" / "ssh.exe"
+        if candidate.is_file():
+            return str(candidate)
+    return "ssh"
+
+
 def collect_once(*, output: Path, timeout: float = 16.0) -> dict[str, Any]:
-    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+    cmd = [_ssh_client(), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
            "-o", "ConnectTimeout=6", SSH_HOST, "python3 -"]
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     result = subprocess.run(
