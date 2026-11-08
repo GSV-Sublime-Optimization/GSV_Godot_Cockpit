@@ -17,6 +17,14 @@ func _run() -> void:
 	_check(ui._tabs.get_tab_count() == 1, "fleet opens as first tab")
 	_check(ui._rig_labels.size() == 4, "all four rig cards")
 	_check(ui._palette_commands.size() >= 8, "command palette actions registered")
+	_check(ui._palette != null and ui._palette_results != null, "command palette constructed")
+	if ui._palette_results != null:
+		_check(ui._palette_results.item_count >= 8, "palette actions actually visible")
+		ui._palette_search.text = "fleet"
+		ui._fill_palette()
+		_check(ui._palette_results.item_count == 1, "palette filters action list")
+		ui._palette_search.text = ""
+		ui._fill_palette()
 	_check(ui._pages.has("fleet:fleet"), "fleet workspace pinned")
 	_check(not ui._activity.text.contains("running agent"), "no fake agent alive banner")
 	var fake := {
@@ -63,6 +71,8 @@ func _run() -> void:
 	ui._apply_layout(0)
 	_check(ui._inspector_panel.visible and ui._activity_panel.visible, "colony layout")
 	ui.queue_free()
+	await process_frame
+	await process_frame
 	if failures.is_empty():
 		print("WORKSTATION_UI_PASS")
 		quit(0)
