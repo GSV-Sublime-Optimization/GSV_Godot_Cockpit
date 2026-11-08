@@ -25,6 +25,17 @@ A holographic table you look into. Every layer is real colony data, read-only.
 - **For agents:** `tools/holomind/cockpit.py say|read|ask`. Any Claude seat, Codex or script can talk in the same channel from a terminal, so HOLOMIND is a cockpit agents use, not just a view of them.
 - **Feeder:** `tools/holomind/cockpit_feed.py` (stdlib). It replaces `mind_feed.py` for HOLOMIND, refreshes every 10 s, and reads GitHub every 3 min.
 
+
+## The work queue (round 4): what needs doing, and who's on it
+
+- **WORK WAITING** across the colony, in the header and as cards beside whoever it belongs to:
+  - PRs waiting for a second review (open, not draft, no review decision), next to the agent whose PR it is;
+  - red or silent rigs, over the rig;
+  - the xanadu Steward's decision cards and the K: quarantine queue, by you;
+  - channel messages nobody has answered yet.
+- **`cockpit.py brief`** gives any agent on any rig the colony in one screen (rigs, agents at work, the work queue, the last messages), from `xanadu:~/steward/cockpit/brief.json`, which the feeder publishes every 10 s. Agents can start every task with it.
+- The Mind's answers include the work queue in their context, so "what should I do next?" gets a grounded answer.
+
 **Run:**
 - Live: start `tools/holomind/cockpit_feed.py`, then `godot --path . res://scenes/HoloMind.tscn`.
 - Fixture still for judging: `godot --path . --position 12000,12000 --resolution 1600x900 --windowed res://scenes/HoloMind.tscn -- --fixture=res://tests/fixtures/holomind_feed.json --shot=<png>`. This renders off-screen and quits after about 4 s.

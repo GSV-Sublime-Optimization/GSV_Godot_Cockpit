@@ -64,7 +64,31 @@ def main():
     s = sub.add_parser('say'); s.add_argument('text'); s.add_argument('--as', dest='who', required=True); s.add_argument('--to', default='all')
     r = sub.add_parser('read'); r.add_argument('--last', type=int, default=20); r.add_argument('--for', dest='who')
     q = sub.add_parser('ask'); q.add_argument('text'); q.add_argument('--as', dest='who', required=True)
+    b = sub.add_parser('brief', help='the colony in one screen: rigs, agents at work, the work queue, the last messages')
+    b.add_argument('--json', action='store_true')
     args = a.parse_args()
+    if args.cmd == 'brief':
+        raw = remote('import os; p = os.path.expanduser("~/steward/cockpit/brief.json"); print(open(p, encoding="utf-8").read() if os.path.exists(p) else "{}")')
+        d = json.loads(raw or '{}')
+        if args.json or not d:
+            print(json.dumps(d, indent=1, ensure_ascii=False) if d else '(no brief yet: is cockpit_feed.py running on the i3?)')
+            return
+        print(f"COLONY BRIEF {d.get('at')}  ·  i3 screen: {d.get('screen')}")
+        print('rigs: ' + '  '.join(f"{k}={v['status']}" + (f"({','.join(v['failing'])})" if v['failing'] else '') for k, v in d.get('rigs', {}).items()))
+        print('agents at work:')
+        for g in d.get('agents', []):
+            print(f"  {g['agent']:<18} {g['latest'][:90]}")
+        acts = d.get('actions', [])
+        kinds = {}
+        for x in acts:
+            kinds[x['kind']] = kinds.get(x['kind'], 0) + 1
+        print(f"work waiting ({len(acts)}: " + ', '.join(f'{v} {k}' for k, v in kinds.items()) + '):')
+        for x in acts:
+            print(f"  [{x['kind']:<8}] {x['where']:<12} {x['title'][:100]}" + (f"  {x['url']}" if x.get('url') else ''))
+        print('last messages:')
+        for m in d.get('channel', [])[-5:]:
+            print(f"  {str(m.get('at', ''))[11:16]} {m.get('from')} -> {m.get('to')}: {str(m.get('text'))[:100]}")
+        return
     if args.cmd == 'say':
         print(json.dumps(say(args.text, args.who, args.to), ensure_ascii=False))
     elif args.cmd == 'read':

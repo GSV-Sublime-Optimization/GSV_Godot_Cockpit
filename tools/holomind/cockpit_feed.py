@@ -56,9 +56,22 @@ for h in glob.glob(os.path.expanduser("~/steward/heartbeats/*.json")):
     except Exception: pass
 ch = os.path.expanduser("~/steward/cockpit/channel.jsonl")
 os.makedirs(os.path.dirname(ch), exist_ok=True)
-new = sys.stdin.read()
+raw = sys.stdin.read()
+try: data = json.loads(raw) if raw.strip() else {}
+except Exception: data = {}
+new = data.get("append", "")
 if new.strip():
     with open(ch, "a", encoding="utf-8") as f: f.write(new if new.endswith("\n") else new + "\n")
+if data.get("brief"):
+    tmp = os.path.expanduser("~/steward/cockpit/brief.json.tmp")
+    json.dump(data["brief"], open(tmp, "w", encoding="utf-8"), ensure_ascii=False)
+    os.replace(tmp, os.path.expanduser("~/steward/cockpit/brief.json"))
+out["cards"] = []
+for c in sorted(glob.glob(os.path.expanduser("~/steward/outbox/*.md"))):
+    try:
+        first = next((l.strip("# ").strip() for l in open(c, encoding="utf-8") if l.strip()), os.path.basename(c))
+        out["cards"].append({"file": os.path.basename(c), "title": first[:100]})
+    except Exception: pass
 if os.path.exists(ch):
     for l in open(ch, encoding="utf-8").read().splitlines()[-80:]:
         try: out["channel"].append(json.loads(l))
@@ -101,28 +114,64 @@ def agent_of(branch):
 
 
 def github_activity():
-    acts = []
+    """Agents' latest PRs (last 24 h) and every open, non-draft PR still waiting for a second review."""
+    acts, awaiting = [], []
     since = now() - dt.timedelta(hours=24)
     for repo in REPOS:
-        r = subprocess.run(['gh', 'pr', 'list', '-R', repo, '--state', 'open', '--limit', '40', '--json', 'number,title,headRefName,updatedAt,isDraft'], stdin=subprocess.DEVNULL,
+        r = subprocess.run(['gh', 'pr', 'list', '-R', repo, '--state', 'open', '--limit', '60', '--json',
+                            'number,title,headRefName,updatedAt,isDraft,reviewDecision,url'], stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=0x08000000)
         try:
             prs = json.loads(r.stdout or '[]')
         except Exception:
             continue
         for p in prs:
+            name, home = agent_of(p['headRefName'])
+            if not p['isDraft'] and p.get('reviewDecision') in (None, '', 'REVIEW_REQUIRED'):
+                awaiting.append({'repo': repo, 'number': p['number'], 'title': p['title'][:80], 'agent': name or 'unattributed',
+                                 'url': p['url'], 'at': p['updatedAt']})
             if dt.datetime.fromisoformat(p['updatedAt'].replace('Z', '+00:00')) < since:
                 continue
-            name, home = agent_of(p['headRefName'])
             if name:
                 acts.append({'agent': name, 'home': home, 'at': p['updatedAt'], 'repo': repo.split('/')[1], 'number': p['number'],
                              'title': p['title'][:90], 'draft': p['isDraft']})
+    github_activity.awaiting = sorted(awaiting, key=lambda a: a['at'], reverse=True)
     agents = {}
     for a in sorted(acts, key=lambda a: a['at'], reverse=True):
         g = agents.setdefault(a['agent'], {'agent': a['agent'], 'home': a['home'], 'recent': []})
         if len(g['recent']) < 4:
             g['recent'].append(a)
     return sorted(agents.values(), key=lambda g: g['recent'][0]['at'], reverse=True)
+
+
+QUEUE = pathlib.Path(r'K:\quarantine\QUEUE.md')
+
+
+def actions(bodies, awaiting, cards, channel):
+    """The colony's work queue: what needs doing, where it lives in the cockpit, and who it's for."""
+    out = []
+    for rid, b in bodies.items():
+        if b['status'] in ('red', 'silent'):
+            out.append({'kind': 'rig', 'where': rid, 'title': f"{b['label']} is {b['status']}" + (f": {', '.join(b['failing'])}" if b['failing'] else '')})
+    for a in awaiting[:12]:
+        out.append({'kind': 'review', 'where': a['agent'], 'title': f"{a['repo'].split('/')[1]}#{a['number']} awaits a second review: {a['title']}", 'url': a['url']})
+    for c in cards[:8]:
+        out.append({'kind': 'decision', 'where': 'keath', 'title': f"xanadu card {c['file']}: {c['title']}"})
+    try:
+        for l in QUEUE.read_text(encoding='utf-8').splitlines():
+            if l.startswith('|') and ('waiting for Keath' in l or '| open |' in l):
+                out.append({'kind': 'decision', 'where': 'keath', 'title': 'quarantine: ' + l.split('|')[1].strip()[:80]})
+    except OSError:
+        pass
+    # Messages to a person or agent that nobody has answered yet.
+    for i, m in enumerate(channel):
+        to = str(m.get('to', '')).lower()
+        if to in ('', 'all', 'mind'):
+            continue
+        replied = any(str(n.get('from', '')).lower().startswith(to.split(' ')[0]) for n in channel[i + 1:])
+        if not replied and age_s(m.get('at')) is not None and age_s(m.get('at')) < 86400:
+            out.append({'kind': 'reply', 'where': to, 'title': f"{m.get('from')} asked {to}: {str(m.get('text'))[:70]}"})
+    return out
 
 
 def ask_mind(question, feed):
@@ -132,7 +181,8 @@ def ask_mind(question, feed):
     bodies = '; '.join(f"{b['label']} {b['status']}" + (f" (failing {', '.join(b['failing'])})" if b['failing'] else '') for b in feed['bodies'].values())
     thoughts = ' | '.join(f"{e.get('mind')}: {e.get('line')}" for e in feed['events'][-6:])
     agents = ' | '.join(f"{g['agent']}: {g['recent'][0]['title']} ({g['recent'][0]['repo']} #{g['recent'][0]['number']})" for g in feed.get('agents', [])[:8])
-    context = f"FLEET: {bodies}\nRECENT THOUGHTS: {thoughts}\nAGENTS AT WORK: {agents}\nSCREEN: {feed.get('screen')}"
+    actions = ' | '.join(f"[{a['kind']}] {a['title']}" for a in feed.get('actions', [])[:12])
+    context = f"FLEET: {bodies}\nRECENT THOUGHTS: {thoughts}\nAGENTS AT WORK: {agents}\nWORK WAITING: {actions}\nSCREEN: {feed.get('screen')}"
     body = {'model': MODEL, 'stream': False, 'think': False, 'keep_alive': 0, 'options': {'num_predict': 160, 'temperature': 0.3},
             'messages': [{'role': 'system', 'content': 'You are the i3 Mind of the GSV colony, observing its fleet and agents. Answer in 1-3 short sentences, '
                                                       'only from CONTEXT. If CONTEXT does not say, say you cannot see that yet. You cannot act; you only observe.'},
@@ -150,12 +200,13 @@ def tick(state):
     lines = OUTBOX.read_text(encoding='utf-8').splitlines() if OUTBOX.exists() else []
     sent = int(state.get('outbox_sent', 0))
     pending = lines[sent:]
-    remote = ssh(REMOTE, '\n'.join(pending))
+    remote = ssh(REMOTE, json.dumps({'append': '\n'.join(pending), 'brief': state.get('brief')}))
     if remote is None:
         return None
     state['outbox_sent'] = len(lines)
     if time.time() - state.get('gh_at', 0) > 180:
         state['agents'] = github_activity()
+        state['awaiting'] = getattr(github_activity, 'awaiting', [])
         state['gh_at'] = time.time()
     bodies = {}
     for bid, (label, role) in BODIES.items():
@@ -183,6 +234,7 @@ def tick(state):
     feed = {'schema': 'colony.mindview-feed/v0', 'at': iso(), 'source_ok': True, 'bodies': bodies, 'events': events[-40:],
             'attention': (events[-1] if events else {}).get('focus', 'xanadu'), 'screen': screen,
             'agents': state.get('agents', []), 'channel': channel[-40:]}
+    feed['actions'] = actions(bodies, state.get('awaiting', []), remote.get('cards', []), channel)
     # The Mind answers new messages addressed to it (or to nobody in particular).
     answered = set(state.get('answered', []))
     for m in channel:
@@ -199,6 +251,12 @@ def tick(state):
         answered.add(key)
     state['answered'] = sorted(answered)[-200:]
     feed['channel'] = channel[-40:]
+    # The brief: the colony's state and work queue in one small document any agent can read from xanadu.
+    state['brief'] = {'schema': 'colony.cockpit-brief/v0', 'at': feed['at'], 'screen': screen,
+                      'rigs': {k: {'status': v['status'], 'failing': v['failing']} for k, v in bodies.items()},
+                      'agents': [{'agent': g['agent'], 'latest': f"{g['recent'][0]['repo']}#{g['recent'][0]['number']} {g['recent'][0]['title']}"}
+                                 for g in feed['agents']],
+                      'actions': feed['actions'][:30], 'channel': channel[-8:]}
     tmp = FEED.with_suffix('.tmp')
     tmp.write_text(json.dumps(feed, ensure_ascii=False), encoding='utf-8')
     tmp.replace(FEED)

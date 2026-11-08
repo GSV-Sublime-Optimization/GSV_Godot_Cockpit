@@ -66,6 +66,8 @@ var _you_bubble: Label3D
 var _chat: RichTextLabel
 var _typebox: LineEdit
 var _speaker: String = "keath"
+var _actions_root: Node3D
+const KIND_COLOURS := {"rig": Color(1.0, 0.4, 0.4), "review": Color(0.5, 0.75, 1.0), "decision": Color(1.0, 0.78, 0.35), "reply": Color(0.95, 0.95, 1.0)}
 var _seen_channel: int = 0
 
 
@@ -276,7 +278,47 @@ func _term_text(id: String) -> String:
 	return "\n".join(lines)
 
 
+func _rebuild_actions() -> void:
+	# The work queue as cards beside whoever it belongs to: rigs, agents, or you (decisions).
+	for c in _actions_root.get_children():
+		c.queue_free()
+	var groups := {}
+	for a: Variant in feed.get("actions", []):
+		var d: Dictionary = a
+		var where := String(d.get("where", "")).to_lower()
+		if not groups.has(where):
+			groups[where] = []
+		(groups[where] as Array).append(d)
+	for where: String in groups:
+		var items: Array = groups[where]
+		var anchor := Vector3(0, 2.0, 0)
+		if where in BODY_PLACES:
+			anchor = (BODY_PLACES[where] as Vector3) + Vector3(0, 3.6, 0)
+		elif where == "keath" or where == _speaker.to_lower():
+			anchor = Vector3.ZERO   # follows you; positioned each frame
+		else:
+			for name: String in _agent_nodes:
+				if name.to_lower().begins_with(where.get_slice(" ", 0)) or where.begins_with(name.to_lower().get_slice(" ", 0)):
+					anchor = ((_agent_nodes[name] as Dictionary)["node"] as Node3D).position + _agents_root.position + Vector3(0, 1.5, 0)
+					break
+		var stack := Node3D.new()
+		stack.position = anchor
+		stack.set_meta("where", where)
+		_actions_root.add_child(stack)
+		var shown := mini(items.size(), 3)
+		for i in shown:
+			var it: Dictionary = items[i]
+			var kind := String(it.get("kind", ""))
+			var col: Color = KIND_COLOURS.get(kind, Color.WHITE)
+			var lbl := _label("● %s  %s" % [kind.to_upper(), String(it.get("title", "")).left(64)], 20, col, Vector3(0, 0.34 * i, 0), stack)
+			lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		if items.size() > shown:
+			_label("+%d more waiting" % (items.size() - shown), 18, Color(0.75, 0.82, 1.0), Vector3(0, 0.34 * shown, 0), stack)
+
+
 func _build_cockpit() -> void:
+	_actions_root = Node3D.new()
+	add_child(_actions_root)
 	_agents_root = Node3D.new()
 	_agents_root.position.y = 1.2
 	add_child(_agents_root)
@@ -338,6 +380,7 @@ func _rebuild_agents() -> void:
 			bubble.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			_agent_nodes[name] = {"node": node, "label": lbl, "act": act, "bubble": bubble, "latest": "", "pulse": 0.0}
 		var rec: Dictionary = _agent_nodes[name]
+		rec["home"] = String(a.get("home", "cloud"))
 		(rec["node"] as Node3D).position = _agent_place(i, agents.size(), String(a.get("home", "cloud")))
 		(rec["act"] as Label3D).text = activity
 		if String(rec["latest"]) != String(top.get("at", "")):
@@ -364,9 +407,19 @@ func _speaker_node(who: String) -> Node3D:
 		return _mind
 	if w == _speaker.to_lower() or w == "keath":
 		return _you
+	# A seat names its rig ("claude (msi seat)"): match the agent that runs there first, then by first word.
+	for rig: String in ["i3", "msi"]:
+		if w.contains("(" + rig) or w.contains(rig + " seat"):
+			for name: String in _agent_nodes:
+				var rec: Dictionary = _agent_nodes[name]
+				if String(rec.get("home", "")) == rig and name.to_lower().get_slice(" ", 0) == w.get_slice(" ", 0):
+					return rec["node"]
+	for name: String in _agent_nodes:
+		if name.to_lower() == w:
+			return (_agent_nodes[name] as Dictionary)["node"]
 	for name: String in _agent_nodes:
 		var key := name.to_lower().get_slice(" ", 0)
-		if w.begins_with(key) or key.begins_with(w.get_slice(" ", 0)):
+		if (w.begins_with(key) or key.begins_with(w.get_slice(" ", 0))) and String((_agent_nodes[name] as Dictionary).get("home", "")) == "cloud":
 			return (_agent_nodes[name] as Dictionary)["node"]
 	return null
 
@@ -432,6 +485,10 @@ func _send(text: String) -> void:
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	var backing := ColorRect.new()   # a dark glass behind the channel so it reads over the hologram
+	backing.color = Color(0.02, 0.03, 0.07, 0.72)
+	backing.name = "chat_backing"
+	layer.add_child(backing)
 	_chat = RichTextLabel.new()
 	_chat.bbcode_enabled = true
 	_chat.scroll_following = true
@@ -512,6 +569,7 @@ func _apply_feed() -> void:
 	_rebuild_stars(bodies)
 	_rebuild_memory()
 	_rebuild_agents()
+	_rebuild_actions()
 	_apply_channel()
 	var events: Array = feed.get("events", [])
 	if not events.is_empty():
@@ -656,18 +714,32 @@ func _process(delta: float) -> void:
 	_subtitle.size = Vector2(vp.x * 0.66, 60)
 	_chat.position = Vector2(vp.x * 0.72, 80)
 	_chat.size = Vector2(vp.x * 0.27, vp.y - 170)
+	var backing := _chat.get_parent().get_node("chat_backing") as ColorRect
+	backing.position = _chat.position - Vector2(10, 8)
+	backing.size = _chat.size + Vector2(20, 16)
 	_typebox.position = Vector2(vp.x * 0.04, vp.y - 54)
 	_typebox.size = Vector2(vp.x * 0.92, 38)
 	# You stand at the front edge, nearest the camera; agents breathe and flare on new activity.
 	var front := Vector3(_cam.position.x, 0, _cam.position.z).normalized() * 6.8
 	_you.position = front + Vector3(0, 0.9, 0)
+	for s in _actions_root.get_children():
+		if String(s.get_meta("where", "")) in ["keath", _speaker.to_lower()]:
+			# Your decisions float over the table's near edge, not in front of the camera.
+			(s as Node3D).position = front * 0.55 + Vector3(0, 3.0, 0)
 	for name: String in _agent_nodes:
 		var rec: Dictionary = _agent_nodes[name]
 		rec["pulse"] = maxf(0.0, float(rec["pulse"]) - delta * 0.25)
 		var node: Node3D = rec["node"]
 		node.scale = Vector3.ONE * (1.0 + 0.5 * float(rec["pulse"]) + 0.04 * sin(_t * 2.0 + float(node.get_index())))
-	_hud.text = "HOLOMIND · Mind View bakeoff entry #1 (i3 Claude) · observation only · 0 actuators · %s\n%s · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · F11: fullscreen · Esc: quit" % [
-		feed_note, ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"]
+	var counts := {}
+	for a: Variant in feed.get("actions", []):
+		var k := String((a as Dictionary).get("kind", ""))
+		counts[k] = int(counts.get(k, 0)) + 1
+	var waiting := PackedStringArray()
+	for k: String in counts:
+		waiting.append("%d %s" % [int(counts[k]), k])
+	_hud.text = "HOLOMIND · the colony cockpit (i3 Claude) · talks, never acts · %s · WORK WAITING: %s\n%s · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · F11: fullscreen · Esc: quit" % [
+		feed_note, (", ".join(waiting) if not waiting.is_empty() else "none"), ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"]
 	if shot_path != "" and _t > 4.0:
 		_shoot()
 
