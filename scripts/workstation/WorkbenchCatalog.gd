@@ -106,7 +106,7 @@ static func parse_mission_log(text: String, expected_id: String) -> Dictionary:
 	for line in lines.slice(maxi(0, lines.size() - 100)):
 		if typeof(line) != TYPE_STRING:
 			return {"ok": false, "reason": "invalid_log_line"}
-		out.append(line.substr(0, 800).replace("\u0000", ""))
+		out.append(line.substr(0, 800).strip_escapes())
 	return {"ok": true, "lines": out}
 
 static func parse_services(text: String) -> Dictionary:
