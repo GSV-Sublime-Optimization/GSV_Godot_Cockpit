@@ -147,12 +147,33 @@ def github_activity():
 QUEUE = pathlib.Path(r'K:\quarantine\QUEUE.md')
 
 
-def actions(bodies, awaiting, cards, channel):
+MSI_SSH = ['ssh', '-i', str(pathlib.Path.home() / '.ssh' / 'i3_to_msi_ed25519'), '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes',
+           '-o', 'ConnectTimeout=8', 'colony-i3@100.110.22.88', 'curl -s -m 8 http://127.0.0.1:8767/feed.json']
+
+
+def chorus_facts():
+    """The MSI's CHORUS cockpit measures what HOLOMIND can't: the off-box backup, the mirror and the MSI's spine
+    services. Read its feed (read-only, over the i3's SSH account) and keep only those measured facts."""
+    try:
+        r = subprocess.run(MSI_SSH, capture_output=True, text=True, encoding='utf-8', timeout=30, stdin=subprocess.DEVNULL,
+                           creationflags=0x08000000)
+        f = json.loads(r.stdout)
+    except Exception:
+        return None
+    sp = f.get('spine') or {}
+    return {'at': iso(), 'backup': f.get('backup'), 'mirror': {k: v for k, v in (f.get('mirror') or {}).items() if k != 'repos'},
+            'spine': {'up': sp.get('up'), 'total': sp.get('total'),
+                      'down': [x.get('name') for x in sp.get('services', []) if not x.get('up', True)]}}
+
+
+def actions(bodies, awaiting, cards, channel, colony=None):
     """The colony's work queue: what needs doing, where it lives in the cockpit, and who it's for."""
     out = []
     for rid, b in bodies.items():
         if b['status'] in ('red', 'silent'):
             out.append({'kind': 'rig', 'where': rid, 'title': f"{b['label']} is {b['status']}" + (f": {', '.join(b['failing'])}" if b['failing'] else '')})
+    for name in ((colony or {}).get('spine') or {}).get('down', []):
+        out.append({'kind': 'rig', 'where': 'msi', 'title': f"MSI spine service down: {name}"})
     for a in awaiting[:12]:
         out.append({'kind': 'review', 'where': a['agent'], 'title': f"{a['repo'].split('/')[1]}#{a['number']} awaits a second review: {a['title']}", 'url': a['url']})
     for c in cards[:8]:
@@ -185,7 +206,7 @@ def ask_mind(question, feed):
     context = f"FLEET: {bodies}\nRECENT THOUGHTS: {thoughts}\nAGENTS AT WORK: {agents}\nWORK WAITING: {actions}\nSCREEN: {feed.get('screen')}"
     body = {'model': MODEL, 'stream': False, 'think': False, 'keep_alive': 0, 'options': {'num_predict': 160, 'temperature': 0.3},
             'messages': [{'role': 'system', 'content': 'You are the i3 Mind of the GSV colony, observing its fleet and agents. Answer in 1-3 short sentences, '
-                                                      'only from CONTEXT. If CONTEXT does not say, say you cannot see that yet. You cannot act; you only observe.'},
+                                                      'only from CONTEXT. MEASURED NOW facts override older RECENT THOUGHTS. If CONTEXT does not say, say you cannot see that yet. You cannot act; you only observe.'},
                          {'role': 'user', 'content': f'CONTEXT:\n{context}\n\nQUESTION: {question}'}]}
     try:
         req = urllib.request.Request(OLLAMA + '/api/chat', data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
@@ -254,7 +275,14 @@ def tick(state):
     feed = {'schema': 'colony.mindview-feed/v0', 'at': iso(), 'source_ok': True, 'bodies': bodies, 'events': events[-40:],
             'attention': (events[-1] if events else {}).get('focus', 'xanadu'), 'screen': screen,
             'agents': state.get('agents', []), 'channel': channel[-40:]}
-    feed['actions'] = actions(bodies, state.get('awaiting', []), remote.get('cards', []), channel)
+    if time.time() - state.get('chorus_at', 0) > 60:
+        state['chorus_at'] = time.time()
+        fresh, prev = chorus_facts(), state.get('colony') or {}
+        if fresh and fresh['spine']['up'] is None and prev.get('spine'):
+            fresh['spine'] = prev['spine']   # CHORUS omitted it this pass: keep the last measurement
+        state['colony'] = fresh or state.get('colony')
+    feed['colony'] = state.get('colony')
+    feed['actions'] = actions(bodies, state.get('awaiting', []), remote.get('cards', []), channel, feed['colony'])
     def publish():
         tmp = FEED.with_suffix('.tmp')
         tmp.write_text(json.dumps(feed, ensure_ascii=False), encoding='utf-8')

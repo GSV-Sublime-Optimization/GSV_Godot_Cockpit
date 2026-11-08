@@ -858,6 +858,7 @@ func _process(delta: float) -> void:
 
 
 var _waiting_text: String = "none"
+var _colony_text: String = ""
 
 
 func _count_waiting() -> void:
@@ -869,6 +870,18 @@ func _count_waiting() -> void:
 	for k: String in counts:
 		waiting.append("%d %s" % [int(counts[k]), k])
 	_waiting_text = ", ".join(waiting) if not waiting.is_empty() else "none"
+	# Measured colony facts (from the MSI's CHORUS): backup, mirror, spine.
+	var c: Dictionary = feed.get("colony", {}) if feed.get("colony") is Dictionary else {}
+	_colony_text = ""
+	if not c.is_empty():
+		var b: Dictionary = c.get("backup", {}) if c.get("backup") is Dictionary else {}
+		var m: Dictionary = c.get("mirror", {}) if c.get("mirror") is Dictionary else {}
+		var sp: Dictionary = c.get("spine", {}) if c.get("spine") is Dictionary else {}
+		var down: Array = sp.get("down", [])
+		_colony_text = "
+backup %s h old%s · mirror %s h, %s failures · MSI spine %s/%s up%s" % [str(b.get("age_h", "?")), " (running)" if bool(b.get("in_progress", false)) else "",
+			str(m.get("age_h", "?")), str(m.get("failures", "?")), str(sp.get("up", "?")), str(sp.get("total", "?")),
+			(" (down: " + ", ".join(PackedStringArray(down)) + ")") if not down.is_empty() else ""]
 	var thinking := int(feed.get("mind_thinking", 0))
 	if thinking > 0:
 		_waiting_text += " · the Mind is thinking (%d message%s queued)" % [thinking, "" if thinking == 1 else "s"]
@@ -876,7 +889,7 @@ func _count_waiting() -> void:
 
 func _update_hud() -> void:
 	_hud.text = "HOLOMIND · the colony cockpit (i3 Claude) · talks, never acts · %s · WORK WAITING: %s\n%s · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · F11: fullscreen · Esc: quit" % [
-		feed_note, _waiting_text, ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"]
+		feed_note, _waiting_text, ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"] + _colony_text
 
 
 func _layout_ui() -> void:
