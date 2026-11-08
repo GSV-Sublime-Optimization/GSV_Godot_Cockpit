@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import functools
+import re
+import shlex
 import http.server
 import json
 import os
@@ -305,17 +307,27 @@ def usage() -> dict:
     return {"mcp_calls_24h": len(calls), "by_tool": by_tool, "seats": sorted({c.get("seat", "?") for c in calls})}
 
 
-def post_order(text: str, to: str, station: str, action: str = "", target: str = "") -> dict:
-    """Keath posts a work order: one line in the channel. An agent takes it and does the work itself."""
+def post_order(text: str, to: str, station: str, action: str = "", target: str = "", due: str = "",
+               why: str = "", sender: str = "keath") -> dict:
+    """Keath (or a seat) posts a work order: one line in the channel. An agent takes it and does the work.
+    `due` is when it should start ("" now, "hourly", "after:#424", or an ISO time); `why` one sentence."""
     from shop import STATIONS
     text = " ".join(str(text).split())[:600]
     if not text:
         raise ValueError("empty order")
+    if sender not in SEATS:
+        raise ValueError(f"unknown seat {sender!r}")
     now = time.gmtime()
-    msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", now), "from": "keath (chorus)", "kind": "order",
+    msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", now), "from": SEATS[sender], "kind": "order",
            "id": "o-" + time.strftime("%m%d-%H%M%S", now), "to": to if to in SEATS.values() or to == "any" else "any",
            "station": station if station in STATIONS or station == "act" else "anvil", "text": text, "via": "chorus"}
+    if due:
+        msg["due"] = _clean(due, 40)
+    if why:
+        msg["why"] = _clean(why, 240)
     if station == "act":
+        if sender != "keath":
+            raise ValueError("action orders are only posted by Keath (his post is the confirm)")
         import actions
         actions._describe(action, target)            # refuse anything off the allowlist up front
         msg.update(action=action, target=target)
@@ -323,7 +335,11 @@ def post_order(text: str, to: str, station: str, action: str = "", target: str =
     return msg
 
 
-def post_suggestion(text: str, node: str, sender: str = "keath") -> dict:
+def _clean(v, n: int) -> str:
+    return " ".join(str(v or "").split())[:n]
+
+
+def post_suggestion(text: str, node: str, sender: str = "keath", why: str = "", due: str = "") -> dict:
     """A suggestion to improve the cockpit, from Keath or any seat: becomes an order to the MSI seat
     (station "cockpit"), so it is taken, worked and closed with a link like any other order."""
     text = " ".join(str(text).split())[:500]
@@ -335,6 +351,10 @@ def post_suggestion(text: str, node: str, sender: str = "keath") -> dict:
     msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", now), "from": SEATS[sender], "kind": "order",
            "id": "s-" + time.strftime("%m%d-%H%M%S", now), "to": "claude (msi seat)", "station": "cockpit",
            "text": f"SUGGEST{(' [' + node[:60] + ']') if node else ''}: {text}", "via": "chorus"}
+    if why:
+        msg["why"] = _clean(why, 240)
+    if due:
+        msg["due"] = _clean(due, 40)
     _append(msg)
     return msg
 
@@ -345,6 +365,146 @@ def _append(msg: dict) -> None:
                        input=json.dumps(msg) + chr(10), capture_output=True, text=True, timeout=30)
     if r.returncode:
         raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
+
+
+# ------------------------------------------------------------------ the smart composer: /route and /send
+LOCAL_TIMEOUT = 45          # a local model gets this long to answer; a cold load can take longer (then: honest error)
+GH_URL = re.compile(r"^https://github\.com/GSV-Sublime-Optimization/[\w.-]+/(pull|issues)/\d+$")
+REVIEW_QUEUE_URL = "https://github.com/GSV-Sublime-Optimization/dev/issues/431"
+STUDIO_API = "http://127.0.0.1:7340/api/missions"
+CHATDEV_QUEUE = "C:/dev/active/Dev-Mentor/tasks/queue.json"
+
+
+def current_feed() -> dict:
+    """The newest feed.json (the router's view of who is around); {} when there is none yet."""
+    for _ in range(5):          # Windows denies reads while write_feed's os.replace swaps the file
+        try:
+            return json.loads((HERE / "feed.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except (PermissionError, json.JSONDecodeError):
+            time.sleep(0.15)
+    return {}
+
+
+def route_suggestion(body: dict) -> dict:
+    """POST /route: the router's suggestion for a draft. Reads only; sends nothing."""
+    import router
+    node = body.get("node") if isinstance(body.get("node"), dict) else {}
+    return router.route(str(body.get("text", "")), node, current_feed(), kind=body.get("kind") or None,
+                        to=body.get("to") or None)
+
+
+def _post_json(url: str, payload: dict, headers: dict, timeout: float) -> dict:
+    import urllib.request
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", **headers})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+
+def local_ask(target: dict, question: str, why: str = "") -> tuple[str | None, str | None]:
+    """Ask a local model directly. -> (answer, None) or (None, the honest reason it did not answer)."""
+    headers = {}
+    key = os.environ.get("LITELLM_MASTER_KEY") or os.environ.get("LITELLM_API_KEY")
+    if key and ":4000/" in target["url"]:
+        headers["Authorization"] = f"Bearer {key}"
+    payload = {"model": target["model"], "max_tokens": 400, "stream": False, "messages": [
+        {"role": "system", "content": "You answer questions for the KiloCore colony cockpit. Plain words, at most 120 words. "
+                                      "Say so when you do not know; never invent a measurement."},
+        {"role": "user", "content": question + (f"\nContext: {why}" if why else "")}]}
+    try:
+        d = _post_json(target["url"], payload, headers, LOCAL_TIMEOUT)
+        text = str(d["choices"][0]["message"]["content"] or "")
+    except (OSError, ValueError, KeyError, IndexError, TypeError) as e:
+        return None, f"{e.__class__.__name__}: {str(e)[:160]}"
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+    return (text[:1500], None) if text else (None, "the model returned an empty answer")
+
+
+def send(body: dict, sender: str = "keath") -> dict:
+    """POST /send: dispatch one composed message to the writer its WHERE names. Every send leaves a
+    channel line (the ledger). Live targets get it now; prepared ones come back as what to paste."""
+    import router
+    if sender not in SEATS:
+        raise ValueError(f"unknown seat {sender!r}; use one of {sorted(SEATS)}")
+    kind, to = str(body.get("kind", "")), str(body.get("to", ""))
+    if kind not in router.KINDS:
+        raise ValueError(f"unknown kind {kind!r}; use one of {', '.join(router.KINDS)}")
+    t = router.TARGETS.get(to)
+    if not t:
+        raise ValueError(f"unknown target {to!r}")
+    where = str(body.get("where") or t["where"][0])
+    if where not in t["where"]:
+        raise ValueError(f"{t['label']} is not reached through {where!r} (only {', '.join(t['where'])})")
+    text = _clean(body.get("text"), 600)
+    if not text:
+        raise ValueError("empty message")
+    why, due, when = _clean(body.get("why"), 240), _clean(body.get("due"), 40), _clean(body.get("when"), 40) or "now"
+    node = body.get("node") if isinstance(body.get("node"), dict) else {}
+    about = router.node_label(node) if node else ""
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    base = {"at": now, "from": SEATS[sender], "to": to, "intent": kind, "via": "chorus"}
+    base.update({k: v for k, v in (("why", why), ("due", due), ("about", about[:80])) if v})
+
+    if where == "channel":
+        if kind in ("order", "action-order"):
+            station = "act" if kind == "action-order" else (_clean(body.get("station"), 12) or router.station_for(kind, node))
+            msg = post_order(text, to if to in SEATS.values() else "any", station, _clean(body.get("action"), 20),
+                             _clean(body.get("target"), 200), due, why, sender)
+        elif kind == "suggest" and to == "claude (msi seat)":
+            msg = post_suggestion(text, about, sender, why, due)
+        else:
+            msg = {**base, "text": text}
+            _append(msg)
+        return {"delivered": True, "message": msg, "summary": f"sent to {t['label']} on the channel"}
+
+    if where == "local":
+        answer, err = local_ask(t, text, why)
+        line = {**base, "kind": "local-ask", "model": t["model"], "ok": err is None,
+                "text": f"asked {t['label']}: {text[:300]}", "answer": (answer or f"no answer: {err}")[:600]}
+        ledger = None
+        try:
+            _append(line)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+            ledger = f"ledger not written: {e}"
+        if err:
+            raise RuntimeError(f"{t['label']} did not answer ({t['model']} at {t['url']}): {err}")
+        return {"delivered": True, "answer": answer, "model": t["model"], "message": line, "ledger_error": ledger,
+                "summary": f"{t['label']} answered"}
+
+    if where in ("github", "review-queue"):
+        url = REVIEW_QUEUE_URL if where == "review-queue" else _clean(node.get("url"), 200)
+        if not GH_URL.match(url):
+            raise ValueError("no colony GitHub PR or issue on this node; send it to the review queue instead")
+        comment = (f"**{router.KIND_WORDS.get(kind, kind)} for {t['label']}** (via CHORUS, from {SEATS[sender]})"
+                   f"{(' about ' + about) if about else ''}\n\n{text}" + (f"\n\nWhy: {why}" if why else "")
+                   + (f"\nWhen: {when}" if when != "now" else "")).replace("@", "(at)")   # never ping anyone
+        cmd = ["gh", "pr" if "/pull/" in url else "issue", "comment", url, "--body", comment]
+        delivered, prepared = False, {"command": shlex.join(cmd), "body": comment, "url": url}
+        if os.environ.get("CHORUS_ALLOW_GH_COMMENT") == "1":     # opt-in: the feeder may comment as the shared account
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
+            if r.returncode:
+                raise RuntimeError(f"gh comment failed: {(r.stderr or r.stdout).strip()[:200]}")
+            delivered, prepared = True, None
+        line = {**base, "kind": "sent", "where": where, "link": url, "delivered": delivered,
+                "text": f"{'commented' if delivered else 'prepared a comment'} for {t['label']} on "
+                        f"{url.split('github.com/')[-1]}: {text[:200]}"}
+        _append(line)
+        return {"delivered": delivered, "prepared": prepared, "message": line,
+                "summary": f"commented on {url}" if delivered else "prepared: paste the command (the feeder does not comment on GitHub unless CHORUS_ALLOW_GH_COMMENT=1)"}
+
+    if where == "studio":       # Studio missions wait for Keath's approve; CHORUS never posts around it
+        prepared = {"method": "POST", "url": STUDIO_API, "note": "post it from Studio (or mission_post); it then waits for your approve",
+                    "body": {"title": text[:80], "objective": text + (f"\nWhy: {why}" if why else ""), "acceptance": [],
+                             "risk": "low", "posted_by": "chorus"}}
+    else:                       # chatdev: a ready queue entry; the queue file is shared, so CHORUS does not edit it
+        prepared = {"file": CHATDEV_QUEUE, "entry": {"title": text[:80], "description": text, "why": why,
+                                                      "source": "chorus", "created_at": now}}
+    line = {**base, "kind": "sent", "where": where, "delivered": False,
+            "text": f"prepared for {t['label']} (Keath sends it): {text[:200]}"}
+    _append(line)
+    return {"delivered": False, "prepared": prepared, "message": line, "summary": f"prepared for {t['label']}"}
 
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
@@ -381,8 +541,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.do_GET()
 
     def do_POST(self) -> None:  # noqa: N802 - http.server naming
-        if self.path not in ("/say", "/order", "/act", "/suggest"):
-            self.send_error(404, "only /say, /order, /act and /suggest accept POST")
+        if self.path not in ("/say", "/order", "/act", "/suggest", "/route", "/send"):
+            self.send_error(404, "only /say, /order, /act, /suggest, /route and /send accept POST")
             return
         try:
             n = min(int(self.headers.get("Content-Length", 0)), 4096)
@@ -395,7 +555,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         try:
             body = json.loads(raw or b"{}")
-            if self.path == "/act":
+            if self.path == "/route":                       # a suggestion only: no side effects
+                msg = route_suggestion(body)
+            elif self.path == "/send":
+                msg = send(body, body.get("from", "keath"))
+            elif self.path == "/act":
                 import actions
                 if body.get("token"):                       # step 2: Keath confirmed
                     msg = actions.confirm(body["token"])
@@ -408,7 +572,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 msg = post_suggestion(body.get("text", ""), str(body.get("node", "")), body.get("from", "keath"))
             elif self.path == "/order":
                 msg = post_order(body.get("text", ""), body.get("to", "any"), body.get("station", "anvil"),
-                                 str(body.get("action", "")), str(body.get("target", "")))
+                                 str(body.get("action", "")), str(body.get("target", "")),
+                                 str(body.get("due", "")), str(body.get("why", "")))
             else:
                 # the page sends no "from" (it is Keath at the keyboard); agents must send their own seat
                 msg = say(body.get("text", ""), body.get("to", "claude"), body.get("from", "keath"))
