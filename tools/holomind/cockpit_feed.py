@@ -163,6 +163,7 @@ def chorus_facts():
         return None
     sp = f.get('spine') or {}
     return {'at': iso(), 'backup': f.get('backup'), 'mirror': {k: v for k, v in (f.get('mirror') or {}).items() if k != 'repos'},
+            'doctor': [{'key': d.get('key'), 'verdict': d.get('verdict'), 'evidence': (d.get('evidence') or [])[:2]} for d in (f.get('doctor') or [])][:20],
             'spine': {'up': sp.get('up'), 'total': sp.get('total'),
                       'down': [x.get('name') for x in sp.get('services', []) if not x.get('up', True)]}}
 
@@ -371,7 +372,7 @@ def tick(state):
                       'rigs': {k: {'status': v['status'], 'failing': v['failing']} for k, v in bodies.items()},
                       'agents': [{'agent': g['agent'], 'latest': f"{g['recent'][0]['repo']}#{g['recent'][0]['number']} {g['recent'][0]['title']}"}
                                  for g in feed['agents']],
-                      'actions': feed['actions'][:30], 'orders': [o for o in orders if o['status'] not in ('done', 'declined')][-20:], 'activity': feed.get('activity', [])[-8:], 'channel': channel[-8:]}
+                      'actions': feed['actions'][:30], 'orders': [o for o in orders if o['status'] not in ('done', 'declined')][-20:], 'activity': feed.get('activity', [])[-8:], 'colony': feed.get('colony'), 'channel': channel[-8:]}
     feed['mind_thinking'] = max(0, len(pending) - (1 - budget))
     publish()
     return feed

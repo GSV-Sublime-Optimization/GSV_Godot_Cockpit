@@ -177,3 +177,10 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+def fold_orders_all(lines):
+    """Every order (open or closed), folded from channel lines."""
+    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent))
+    from cockpit_feed import fold_orders
+    return fold_orders(lines)
