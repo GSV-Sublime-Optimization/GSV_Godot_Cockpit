@@ -22,7 +22,7 @@ import re
 import time
 from datetime import datetime
 
-STATIONS = ("anvil", "quench", "bellows", "pegs", "vault", "hearth")
+STATIONS = ("anvil", "quench", "bellows", "pegs", "vault", "hearth", "cockpit")
 TEST_WORDS = re.compile(r"\b(test|pytest|verify|check|probe|smoke|doctor|lint|scan|trivy)\b", re.I)
 PR_WORDS = re.compile(r"\b(pr|pull request|review|merge|push)\b", re.I)
 

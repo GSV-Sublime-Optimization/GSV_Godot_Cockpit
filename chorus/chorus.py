@@ -202,6 +202,17 @@ def act_orders(d: dict) -> None:
                      f"{res['action']} {res['target']}: {'ok' if res['ok'] else 'failed'} in {res['ms']} ms - {res['result'][:200]}", "")
 
 
+def suggest(text: str, node: str) -> None:
+    """Suggest an improvement to the cockpit itself; it lands as an order for the MSI seat."""
+    text = " ".join(text.split())[:500]
+    if not text:
+        sys.exit("empty suggestion")
+    now = time.gmtime()
+    _post({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", now), "from": SEAT, "kind": "order",
+           "id": "s-" + time.strftime("%m%d-%H%M%S", now), "to": "claude (msi seat)", "station": "cockpit",
+           "text": f"SUGGEST{(' [' + node[:60] + ']') if node else ''}: {text}"})
+
+
 def say(text: str, to: str) -> None:
     text = " ".join(text.split())[:600]
     if not text:
@@ -217,7 +228,7 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "work", "doctor", "act-orders", "orders", "take", "working", "done", "decline"])
+    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "suggest", "work", "doctor", "act-orders", "orders", "take", "working", "done", "decline"])
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--to", default="all")
     ap.add_argument("--json", action="store_true")
@@ -227,6 +238,8 @@ def main() -> None:
     a = ap.parse_args()
     if a.cmd == "say":
         say(a.arg or "", a.to)
+    elif a.cmd == "suggest":
+        suggest(a.arg or "", a.to if a.to != "all" else "")
     elif a.cmd == "act-orders":
         act_orders(load())
     elif a.cmd == "orders":

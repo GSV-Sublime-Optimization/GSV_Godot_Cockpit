@@ -213,6 +213,11 @@ def fetch() -> dict:
     import actions
     data["actions"] = actions.catalog()
     data["impact"] = impact(data)
+    try:
+        from knowledge import knowledge     # atlas, code graphs, vault, decisions, rival cockpits (cached 10 min)
+        data["knowledge"] = knowledge()
+    except Exception as e:  # noqa: BLE001
+        data["knowledge"] = {"error": str(e)[:200]}
     data["usage"] = usage()
     data["smiths"] = smiths(data)
     data["claude_activity"] = claude_activity()
@@ -318,6 +323,22 @@ def post_order(text: str, to: str, station: str, action: str = "", target: str =
     return msg
 
 
+def post_suggestion(text: str, node: str, sender: str = "keath") -> dict:
+    """A suggestion to improve the cockpit, from Keath or any seat: becomes an order to the MSI seat
+    (station "cockpit"), so it is taken, worked and closed with a link like any other order."""
+    text = " ".join(str(text).split())[:500]
+    if not text:
+        raise ValueError("empty suggestion")
+    if sender not in SEATS:
+        raise ValueError(f"unknown seat {sender!r}")
+    now = time.gmtime()
+    msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", now), "from": SEATS[sender], "kind": "order",
+           "id": "s-" + time.strftime("%m%d-%H%M%S", now), "to": "claude (msi seat)", "station": "cockpit",
+           "text": f"SUGGEST{(' [' + node[:60] + ']') if node else ''}: {text}", "via": "chorus"}
+    _append(msg)
+    return msg
+
+
 def _append(msg: dict) -> None:
     r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
                         "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
@@ -360,8 +381,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.do_GET()
 
     def do_POST(self) -> None:  # noqa: N802 - http.server naming
-        if self.path not in ("/say", "/order", "/act"):
-            self.send_error(404, "only /say, /order and /act accept POST")
+        if self.path not in ("/say", "/order", "/act", "/suggest"):
+            self.send_error(404, "only /say, /order, /act and /suggest accept POST")
             return
         try:
             n = min(int(self.headers.get("Content-Length", 0)), 4096)
@@ -383,6 +404,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                              "text": f"{'did' if msg['ok'] else 'tried'} {msg['action']} {msg['target']}: {msg['result'][:200]}"})
                 else:                                       # step 1: describe it, hand back a token
                     msg = actions.propose(body.get("action", ""), body.get("target", ""))
+            elif self.path == "/suggest":
+                msg = post_suggestion(body.get("text", ""), str(body.get("node", "")), body.get("from", "keath"))
             elif self.path == "/order":
                 msg = post_order(body.get("text", ""), body.get("to", "any"), body.get("station", "anvil"),
                                  str(body.get("action", "")), str(body.get("target", "")))

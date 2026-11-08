@@ -41,6 +41,10 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "id": {"type": "string"}, "status": {"type": "string", "enum": ["taken", "working", "done", "declined"]},
          "note": {"type": "string"}, "link": {"type": "string"}}, "required": ["id", "status"]}},
+    {"name": "chorus_suggest", "description": "Suggest an improvement, fix or correction to the CHORUS cockpit itself; it becomes a work order for the MSI seat. Name the node or view it concerns.",
+     "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}, "node": {"type": "string"}}, "required": ["text"]}},
+    {"name": "chorus_knowledge", "description": "The colony's knowledge layer: capability atlas counts and dead lanes, GitNexus code graphs and staleness, vault recent notes, latest decisions, rival bakeoff cockpits.",
+     "inputSchema": {"type": "object", "properties": {}}},
     {"name": "chorus_say", "description": "Post a message to the shared cockpit channel as this seat.",
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string"}, "to": {"type": "string", "description": "a seat, e.g. 'claude (i3 seat)', 'keath (chorus)', or 'all'"}},
@@ -74,6 +78,11 @@ def call(name: str, a: dict) -> str:
         return _capture(chorus.orders_view, chorus.load(), not a.get("all"))
     if name == "chorus_order_status":
         return _capture(chorus.order_status, a["id"], a["status"], a.get("note", ""), a.get("link", ""))
+    if name == "chorus_suggest":
+        return _capture(chorus.suggest, a["text"], a.get("node", ""))
+    if name == "chorus_knowledge":
+        from knowledge import knowledge
+        return json.dumps(knowledge(), indent=1, default=str)[:12000]
     if name == "chorus_say":
         return _capture(chorus.say, a["text"], a.get("to", "all"))
     raise KeyError(name)
