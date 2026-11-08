@@ -16,8 +16,17 @@ A holographic table you look into. Every layer is real colony data, read-only.
 - read-only, one local feed file (`colony.mindview-feed/v0`), 0 actuators;
 - `--background` (and every `--shot` render) makes the window unfocusable, so it never steals focus.
 
+
+## The cockpit (round 3): talk to it, see the agents, use it as an agent
+
+- **Type to the colony.** The box at the bottom sends to the shared **cockpit channel** (`xanadu:~/steward/cockpit/channel.jsonl`). `@mind` is the default; `@claude`, `@msi`, `@muse` and the rest address an agent. It can only **talk**: nothing in the cockpit can run a command or change a system.
+- **The Mind answers** messages addressed to it, using the i3's local model (qwen3:8b). It's grounded only on the feed (fleet, thoughts, agent activity), unloaded straight after (keep_alive 0), and **never runs while a game is playing**, because the GPU is shared. Every reply names its model.
+- **The agents at work:** Claude, GPT-6, Codex, Muse, Gordon and others appear as avatars on the outer ring, or beside the rig they run on. Each shows its latest PR, from branch prefixes across the colony's busiest repos, and flares when there's new activity. Each one's latest words float above it as a speech bubble.
+- **For agents:** `tools/holomind/cockpit.py say|read|ask`. Any Claude seat, Codex or script can talk in the same channel from a terminal, so HOLOMIND is a cockpit agents use, not just a view of them.
+- **Feeder:** `tools/holomind/cockpit_feed.py` (stdlib). It replaces `mind_feed.py` for HOLOMIND, refreshes every 10 s, and reads GitHub every 3 min.
+
 **Run:**
-- Live: start `tools/mindview/mind_feed.py`, then `godot --path . res://scenes/HoloMind.tscn`.
+- Live: start `tools/holomind/cockpit_feed.py`, then `godot --path . res://scenes/HoloMind.tscn`.
 - Fixture still for judging: `godot --path . --position 12000,12000 --resolution 1600x900 --windowed res://scenes/HoloMind.tscn -- --fixture=res://tests/fixtures/holomind_feed.json --shot=<png>`. This renders off-screen and quits after about 4 s.
 
 **Receipts (i3, Godot 4.7.1, GTX 1070 Ti):**

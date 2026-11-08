@@ -1,0 +1,226 @@
+r"""HOLOMIND cockpit feeder: what the Minds see and think, what every agent is doing, and a shared channel to talk in.
+
+Every 10 s it writes C:\Users\Public\colony\mindview\feed.json (schema colony.mindview-feed/v0, plus `agents` and
+`channel`) from:
+  - xanadu, one SSH call: Mind events (~/steward/events), heartbeats (~/steward/heartbeats) and the shared cockpit
+    channel (~/steward/cockpit/channel.jsonl: any agent or person appends one JSON line {at, from, to, text});
+  - GitHub, every 3 min: open PRs touched in the last 24 h across the colony's busiest repos, attributed to agents by
+    branch prefix (claude-cli/, gpt6/, codex/, muse/, gordon/...);
+  - this rig: the GameAttract rotation's state.
+Messages typed in HOLOMIND land in C:\Users\Public\colony\mindview\outbox.jsonl; this feeder appends them to the
+shared channel, so every agent sees them.
+The Mind answers messages addressed to it ("mind", or no address) with the i3's local model, grounded only on the
+feed, unloaded right after (keep_alive 0), and never while a game is playing on the i3 screen. Its replies say so.
+Nothing here can run commands or change systems: the only writes are chat lines and the local feed file.
+"""
+import base64
+import datetime as dt
+import json
+import pathlib
+import subprocess
+import sys
+import time
+import urllib.request
+
+HERE = pathlib.Path(r'C:\Users\Public\colony\mindview')
+FEED = HERE / 'feed.json'
+OUTBOX = HERE / 'outbox.jsonl'
+SENT = HERE / 'outbox.sent'
+STATE = HERE / 'cockpit.state.json'
+XANADU = 'xeno@100.74.243.72'
+OLLAMA = 'http://100.102.251.35:11434'
+MODEL = 'qwen3:8b'
+GAMEATTRACT = pathlib.Path.home() / 'Documents' / 'GameAttract' / 'status.json'
+SILENT_AFTER_S = 15 * 60
+REPOS = ['GSV-Sublime-Optimization/dev', 'GSV-Sublime-Optimization/GSV_Godot_Cockpit', 'GSV-Sublime-Optimization/Chronicles-of-the-Eternal-Bastion',
+         'GSV-Sublime-Optimization/Dev-Mentor', 'GSV-Sublime-Optimization/Kilo_Core', 'GSV-Sublime-Optimization/FleetBridge',
+         'Furyline/Furyline', 'Ash-and-Anvil/Ash-and-Anvil', 'Echoes-Of-Elevation/echoes-of-elevation', 'Project-144/project-144']
+AGENTS = [  # (branch prefix, agent, where it runs)
+    ('bakeoff/mindview-i3claude', 'Claude (i3 seat)', 'i3'), ('claude-cli/', 'Claude CLI', 'msi'), ('claude/', 'Claude', 'cloud'),
+    ('agent/chatgpt-gpt6', 'GPT-6', 'cloud'), ('gpt6/', 'GPT-6', 'cloud'), ('codex/', 'Codex', 'cloud'), ('muse/', 'Muse', 'cloud'),
+    ('gordon/', 'Gordon', 'cloud'), ('autopilot/', 'Autopilot lane', 'cloud'), ('procgen/', 'Procgen lane', 'cloud'),
+]
+BODIES = {'msi': ('MSI', 'workshop'), 'i3': ('i3', 'engine room'), 'l9': ('L9', 'second engine'), 'xanadu': ('xanadu', 'librarian + watchman')}
+REMOTE = r'''
+import json, glob, os, sys
+out = {"events": [], "heartbeats": {}, "channel": []}
+days = sorted(glob.glob(os.path.expanduser("~/steward/events/*.jsonl")))[-2:]
+lines = []
+for d in days:
+    lines += open(d, encoding="utf-8").read().splitlines()
+for l in lines[-60:]:
+    try: out["events"].append(json.loads(l))
+    except Exception: pass
+for h in glob.glob(os.path.expanduser("~/steward/heartbeats/*.json")):
+    try: out["heartbeats"][os.path.basename(h)[:-5]] = json.load(open(h, encoding="utf-8"))
+    except Exception: pass
+ch = os.path.expanduser("~/steward/cockpit/channel.jsonl")
+os.makedirs(os.path.dirname(ch), exist_ok=True)
+new = sys.stdin.read()
+if new.strip():
+    with open(ch, "a", encoding="utf-8") as f: f.write(new if new.endswith("\n") else new + "\n")
+if os.path.exists(ch):
+    for l in open(ch, encoding="utf-8").read().splitlines()[-80:]:
+        try: out["channel"].append(json.loads(l))
+        except Exception: pass
+print(json.dumps(out))
+'''
+
+
+def now():
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def iso(t=None):
+    return (t or now()).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def age_s(stamp):
+    try:
+        return int((now() - dt.datetime.fromisoformat(str(stamp).replace('Z', '+00:00'))).total_seconds())
+    except Exception:
+        return None
+
+
+def ssh(script, stdin=''):
+    # The script travels base64-encoded so newlines and quotes arrive intact; stdin carries new channel lines.
+    b64 = base64.b64encode(script.encode()).decode()
+    r = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', XANADU,
+                        f"python3 -c 'import base64; exec(base64.b64decode(\"{b64}\"))'"],
+                       input=stdin, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40, creationflags=0x08000000)
+    if r.returncode:
+        (HERE / 'cockpit.err.txt').write_text(f'{iso()} ssh rc={r.returncode} {r.stderr[-300:]}\n')
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+
+
+def agent_of(branch):
+    for prefix, name, home in AGENTS:
+        if branch.startswith(prefix):
+            return name, home
+    return None, None
+
+
+def github_activity():
+    acts = []
+    since = now() - dt.timedelta(hours=24)
+    for repo in REPOS:
+        r = subprocess.run(['gh', 'pr', 'list', '-R', repo, '--state', 'open', '--limit', '40', '--json', 'number,title,headRefName,updatedAt,isDraft'],
+                           capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=0x08000000)
+        try:
+            prs = json.loads(r.stdout or '[]')
+        except Exception:
+            continue
+        for p in prs:
+            if dt.datetime.fromisoformat(p['updatedAt'].replace('Z', '+00:00')) < since:
+                continue
+            name, home = agent_of(p['headRefName'])
+            if name:
+                acts.append({'agent': name, 'home': home, 'at': p['updatedAt'], 'repo': repo.split('/')[1], 'number': p['number'],
+                             'title': p['title'][:90], 'draft': p['isDraft']})
+    agents = {}
+    for a in sorted(acts, key=lambda a: a['at'], reverse=True):
+        g = agents.setdefault(a['agent'], {'agent': a['agent'], 'home': a['home'], 'recent': []})
+        if len(g['recent']) < 4:
+            g['recent'].append(a)
+    return sorted(agents.values(), key=lambda g: g['recent'][0]['at'], reverse=True)
+
+
+def ask_mind(question, feed):
+    """The i3 Mind answers from the feed only. Never while a game is playing (GPU is shared)."""
+    if 'playing' in str(feed.get('screen', '')):
+        return "I'll answer after the current playtest; the engine room's GPU is busy with the game."
+    bodies = '; '.join(f"{b['label']} {b['status']}" + (f" (failing {', '.join(b['failing'])})" if b['failing'] else '') for b in feed['bodies'].values())
+    thoughts = ' | '.join(f"{e.get('mind')}: {e.get('line')}" for e in feed['events'][-6:])
+    agents = ' | '.join(f"{g['agent']}: {g['recent'][0]['title']} ({g['recent'][0]['repo']} #{g['recent'][0]['number']})" for g in feed.get('agents', [])[:8])
+    context = f"FLEET: {bodies}\nRECENT THOUGHTS: {thoughts}\nAGENTS AT WORK: {agents}\nSCREEN: {feed.get('screen')}"
+    body = {'model': MODEL, 'stream': False, 'think': False, 'keep_alive': 0, 'options': {'num_predict': 160, 'temperature': 0.3},
+            'messages': [{'role': 'system', 'content': 'You are the i3 Mind of the GSV colony, observing its fleet and agents. Answer in 1-3 short sentences, '
+                                                      'only from CONTEXT. If CONTEXT does not say, say you cannot see that yet. You cannot act; you only observe.'},
+                         {'role': 'user', 'content': f'CONTEXT:\n{context}\n\nQUESTION: {question}'}]}
+    try:
+        req = urllib.request.Request(OLLAMA + '/api/chat', data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read())['message']['content'].strip()
+    except Exception as exc:
+        return f'(the i3 Mind could not think just now: {str(exc)[:80]})'
+
+
+def tick(state):
+    # Messages typed in HOLOMIND since the last tick go to the shared channel.
+    lines = OUTBOX.read_text(encoding='utf-8').splitlines() if OUTBOX.exists() else []
+    sent = int(state.get('outbox_sent', 0))
+    pending = lines[sent:]
+    remote = ssh(REMOTE, '\n'.join(pending))
+    if remote is None:
+        return None
+    state['outbox_sent'] = len(lines)
+    if time.time() - state.get('gh_at', 0) > 180:
+        state['agents'] = github_activity()
+        state['gh_at'] = time.time()
+    bodies = {}
+    for bid, (label, role) in BODIES.items():
+        bodies[bid] = {'label': label, 'role': role, 'status': 'unknown', 'failing': [], 'age_s': None, 'detail': ''}
+    for rig, hb in remote.get('heartbeats', {}).items():
+        if rig in bodies:
+            a = age_s(hb.get('at'))
+            failing = [c['name'] for c in hb.get('checks', []) if not c.get('ok')]
+            disks = ', '.join(f"{k}: {v.get('pct_free')}% free" for k, v in (hb.get('disks') or {}).items())
+            parts = ([f"RAM {hb['ram_avail_mb']} MB free"] if hb.get('ram_avail_mb') is not None else []) + ([disks] if disks else [])
+            bodies[rig].update(status='silent' if a is None or a > SILENT_AFTER_S else ('green' if hb.get('green') else 'red'),
+                               failing=failing, age_s=a, detail='; '.join(parts))
+    bodies['xanadu'].update(status='green', age_s=0, detail='answering')
+    screen = ''
+    try:
+        s = json.loads(GAMEATTRACT.read_text(encoding='utf-8'))
+        screen = f"playing {s.get('game')}" if s.get('state') == 'playing' else f"rotation {s.get('state')}"
+    except Exception:
+        pass
+    events = remote.get('events', [])
+    for e in events:
+        text = (' '.join(e.get('reasons', [])) + ' ' + e.get('line', '')).lower()
+        e['focus'] = e.get('focus') or next((b for b in ('i3', 'msi', 'l9', 'xanadu') if b in text), 'xanadu')
+    channel = remote.get('channel', [])
+    feed = {'schema': 'colony.mindview-feed/v0', 'at': iso(), 'source_ok': True, 'bodies': bodies, 'events': events[-40:],
+            'attention': (events[-1] if events else {}).get('focus', 'xanadu'), 'screen': screen,
+            'agents': state.get('agents', []), 'channel': channel[-40:]}
+    # The Mind answers new messages addressed to it (or to nobody in particular).
+    answered = set(state.get('answered', []))
+    for m in channel:
+        key = f"{m.get('at')}|{m.get('from')}|{m.get('text')}"
+        if key in answered or m.get('from', '').endswith('mind') or str(m.get('to', 'mind')).lower() not in ('mind', '', 'all'):
+            continue
+        if age_s(m.get('at')) is not None and age_s(m.get('at')) > 600:
+            answered.add(key)
+            continue
+        reply = ask_mind(m.get('text', ''), feed)
+        line = {'at': iso(), 'from': 'i3-mind', 'model': MODEL, 'to': m.get('from'), 'text': reply}
+        ssh(REMOTE, json.dumps(line))
+        channel.append(line)
+        answered.add(key)
+    state['answered'] = sorted(answered)[-200:]
+    feed['channel'] = channel[-40:]
+    tmp = FEED.with_suffix('.tmp')
+    tmp.write_text(json.dumps(feed, ensure_ascii=False), encoding='utf-8')
+    tmp.replace(FEED)
+    return feed
+
+
+if __name__ == '__main__':
+    HERE.mkdir(parents=True, exist_ok=True)
+    try:
+        state = json.loads(STATE.read_text())
+    except Exception:
+        state = {}
+    while True:
+        try:
+            f = tick(state)
+            STATE.write_text(json.dumps(state))
+            if '--once' in sys.argv:
+                print(json.dumps({'agents': [(g['agent'], g['home'], g['recent'][0]['title']) for g in (f or {}).get('agents', [])],
+                                  'channel': len((f or {}).get('channel', []))}, indent=1)[:2500])
+                break
+        except Exception as exc:
+            (HERE / 'cockpit.err.txt').write_text(f'{iso()} {exc}\n')
+            if '--once' in sys.argv:
+                raise
+        time.sleep(10)

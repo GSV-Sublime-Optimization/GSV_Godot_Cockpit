@@ -55,6 +55,18 @@ var _term_shown: float = 0.0   # 0 = put away, 1 = fully raised
 var _hud: Label
 var _subtitle: Label
 var _frames: int = 0
+# The cockpit: agents around the table, a shared channel to talk in, speech in space.
+const OUTBOX := "C:/Users/Public/colony/mindview/outbox.jsonl"
+const AGENT_RING := 8.3
+const HOME_PLACES := {"i3": Vector3(-3.6, 0, 2.4), "msi": Vector3(-3.6, 0, -2.2)}
+var _agents_root: Node3D
+var _agent_nodes: Dictionary = {}   # agent name -> {node: Node3D, label: Label3D, bubble: Label3D, latest: String, pulse: float}
+var _you: Node3D
+var _you_bubble: Label3D
+var _chat: RichTextLabel
+var _typebox: LineEdit
+var _speaker: String = "keath"
+var _seen_channel: int = 0
 
 
 func _ready() -> void:
@@ -70,9 +82,13 @@ func _ready() -> void:
 	# Renders and measurements must never take focus from whatever the person at the machine is doing.
 	if background or shot_path != "":
 		get_window().unfocusable = true
+	for arg: String in OS.get_cmdline_user_args():
+		if arg.begins_with("--as="):
+			_speaker = arg.get_slice("=", 1)
 	_build_room()
 	_build_layers()
 	_build_mind()
+	_build_cockpit()
 	_build_hud()
 	_read_feed()
 
@@ -260,9 +276,175 @@ func _term_text(id: String) -> String:
 	return "\n".join(lines)
 
 
+func _build_cockpit() -> void:
+	_agents_root = Node3D.new()
+	_agents_root.position.y = 1.2
+	add_child(_agents_root)
+	# You, at the front edge of the table.
+	_you = Node3D.new()
+	add_child(_you)
+	var ym := SphereMesh.new()
+	ym.radius = 0.32
+	ym.height = 0.64
+	_mesh(ym, _holo(Color(1.0, 0.85, 0.55), 1.3), Vector3.ZERO, _you)
+	_label(_speaker.to_upper(), 30, Color(1.0, 0.88, 0.6), Vector3(0, -0.6, 0), _you)
+	_you_bubble = _label("", 30, Color(1.0, 0.92, 0.75), Vector3(0, 0.75, 0), _you)
+	_you_bubble.width = 520
+	_you_bubble.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+func _agent_place(i: int, n: int, home: String) -> Vector3:
+	if home in HOME_PLACES:
+		# Agents that run on a rig stand just outside it, beyond the table's edge, spread apart.
+		var h: Vector3 = HOME_PLACES[home]
+		var out := Vector3(h.x, 0, h.z).normalized()
+		var across := out.cross(Vector3.UP)
+		return out * (h.length() + 3.4) + across * (float(i % 3) - 1.0) * 1.6 + Vector3(0, 0.3, 0)
+	var ang := PI * 0.15 + TAU * float(i) / float(maxi(n, 1))
+	return Vector3(cos(ang) * AGENT_RING, 0.4 * sin(float(i) * 1.7), sin(ang) * AGENT_RING)
+
+
+func _rebuild_agents() -> void:
+	var agents: Array = feed.get("agents", [])
+	var names := PackedStringArray()
+	for a: Variant in agents:
+		names.append(String((a as Dictionary).get("agent", "?")))
+	# Agents who stopped appearing fade away; new ones appear; existing ones move to their place.
+	for name: String in _agent_nodes.keys():
+		if not names.has(name):
+			((_agent_nodes[name] as Dictionary)["node"] as Node3D).queue_free()
+			_agent_nodes.erase(name)
+	for i in agents.size():
+		var a: Dictionary = agents[i]
+		var name := String(a.get("agent", "?"))
+		var recent: Array = a.get("recent", [])
+		var top: Dictionary = recent[0] if not recent.is_empty() else {}
+		var activity := "%s #%s · %s" % [String(top.get("repo", "")), str(top.get("number", "")), String(top.get("title", "")).left(54)]
+		if not _agent_nodes.has(name):
+			var node := Node3D.new()
+			_agents_root.add_child(node)
+			var g := SphereMesh.new()
+			g.radius = 0.36
+			g.height = 0.72
+			g.radial_segments = 8
+			g.rings = 4
+			_mesh(g, _holo(_agent_color(name), 1.2), Vector3.ZERO, node)
+			var lbl := _label(name, 30, _agent_color(name).lightened(0.3), Vector3(0, -0.62, 0), node)
+			var act := _label("", 22, Color(0.75, 0.85, 1.0, 0.85), Vector3(0, -0.98, 0), node)
+			act.width = 520
+			act.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			var bubble := _label("", 28, Color(1, 1, 1), Vector3(0, 0.8, 0), node)
+			bubble.width = 520
+			bubble.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			_agent_nodes[name] = {"node": node, "label": lbl, "act": act, "bubble": bubble, "latest": "", "pulse": 0.0}
+		var rec: Dictionary = _agent_nodes[name]
+		(rec["node"] as Node3D).position = _agent_place(i, agents.size(), String(a.get("home", "cloud")))
+		(rec["act"] as Label3D).text = activity
+		if String(rec["latest"]) != String(top.get("at", "")):
+			rec["latest"] = String(top.get("at", ""))
+			rec["pulse"] = 1.0   # new activity: the avatar flares
+
+
+func _agent_color(name: String) -> Color:
+	var n := name.to_lower()
+	if n.begins_with("claude"):
+		return Color(1.0, 0.62, 0.38)
+	if n.begins_with("gpt"):
+		return Color(0.45, 0.95, 0.75)
+	if n.begins_with("muse"):
+		return Color(0.85, 0.55, 1.0)
+	if n.begins_with("codex"):
+		return Color(0.55, 0.75, 1.0)
+	return Color(0.8, 0.8, 0.9)
+
+
+func _speaker_node(who: String) -> Node3D:
+	var w := who.to_lower()
+	if w.ends_with("mind"):
+		return _mind
+	if w == _speaker.to_lower() or w == "keath":
+		return _you
+	for name: String in _agent_nodes:
+		var key := name.to_lower().get_slice(" ", 0)
+		if w.begins_with(key) or key.begins_with(w.get_slice(" ", 0)):
+			return (_agent_nodes[name] as Dictionary)["node"]
+	return null
+
+
+func _apply_channel() -> void:
+	var channel: Array = feed.get("channel", [])
+	var b := PackedStringArray()
+	b.append("[color=#7d8aa8]COCKPIT CHANNEL · shared with every agent · @mind (default), @claude, @msi...[/color]")
+	for m: Variant in channel.slice(-14):
+		var d: Dictionary = m
+		var who := String(d.get("from", "?"))
+		var col := "ffd27a" if who.to_lower() == _speaker.to_lower() else ("9fd8ff" if who.ends_with("mind") else "ffb07a")
+		var model: Variant = d.get("model")
+		b.append("[color=#%s]%s[/color]%s [color=#7d8aa8]→ %s[/color]\n%s" % [col, _esc(who), ("" if model == null else " [color=#7d8aa8](" + _esc(model) + ")[/color]"),
+			_esc(d.get("to", "all")), _esc(d.get("text", ""))])
+	_chat.text = "\n".join(b)
+	# Speech in space: each speaker's latest words appear by their avatar.
+	var latest := {}
+	for m: Variant in channel.slice(-10):
+		latest[String((m as Dictionary).get("from", ""))] = String((m as Dictionary).get("text", ""))
+	for who: String in latest:
+		var node := _speaker_node(who)
+		var text := String(latest[who]).left(140)
+		if node == _you:
+			_you_bubble.text = text
+		elif node == _mind:
+			_card_label.text = "%s\n%s" % [who, text]
+			_card.scale = Vector3.ONE * 0.4 if channel.size() != _seen_channel else _card.scale
+		elif node != null:
+			for name: String in _agent_nodes:
+				if (_agent_nodes[name] as Dictionary)["node"] == node:
+					((_agent_nodes[name] as Dictionary)["bubble"] as Label3D).text = text
+	_seen_channel = channel.size()
+
+
+func _esc(s: Variant) -> String:
+	return String(s).replace("[", "[lb]")
+
+
+func _send(text: String) -> void:
+	var t := text.strip_edges()
+	if t == "" or shot_path != "":
+		return
+	var to := "mind"
+	if t.begins_with("@"):
+		to = t.get_slice(" ", 0).trim_prefix("@")
+		t = t.substr(t.find(" ") + 1).strip_edges() if t.find(" ") > 0 else ""
+		if t == "":
+			return
+	var line := {"at": Time.get_datetime_string_from_system(true) + "Z", "from": _speaker, "to": to, "text": t}
+	var mode := FileAccess.READ_WRITE if FileAccess.file_exists(OUTBOX) else FileAccess.WRITE
+	var f := FileAccess.open(OUTBOX, mode)
+	if f == null:
+		_subtitle.text = "(could not write the outbox: is the feeder folder there?)"
+		return
+	f.seek_end()
+	f.store_line(JSON.stringify(line))
+	f.close()
+	_you_bubble.text = t
+	_subtitle.text = "you → %s: “%s”  (sent; the channel syncs every 10 s)" % [to, t]
+
+
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	_chat = RichTextLabel.new()
+	_chat.bbcode_enabled = true
+	_chat.scroll_following = true
+	_chat.add_theme_font_size_override("normal_font_size", 15)
+	_chat.add_theme_color_override("default_color", Color(0.85, 0.9, 1.0))
+	layer.add_child(_chat)
+	_typebox = LineEdit.new()
+	_typebox.placeholder_text = "Type to the colony… (@mind is the default; @claude, @msi, @muse…) · Enter to send · it can only talk, never act"
+	_typebox.add_theme_font_size_override("font_size", 17)
+	_typebox.text_submitted.connect(func(t: String) -> void:
+		_send(t)
+		_typebox.clear())
+	layer.add_child(_typebox)
 	_hud = Label.new()
 	_hud.position = Vector2(18, 12)
 	_hud.add_theme_font_size_override("font_size", 16)
@@ -329,6 +511,8 @@ func _apply_feed() -> void:
 		label.modulate = col.lightened(0.3)
 	_rebuild_stars(bodies)
 	_rebuild_memory()
+	_rebuild_agents()
+	_apply_channel()
 	var events: Array = feed.get("events", [])
 	if not events.is_empty():
 		var last: Dictionary = events[-1]
@@ -454,8 +638,9 @@ func _process(delta: float) -> void:
 	if _term_focus != "":
 		_term_shown = minf(1.0, _term_shown + delta * 0.8)
 		var host: Vector3 = BODY_PLACES.get(_term_focus, Vector3.ZERO)
-		var side := (_cam.position - host).cross(Vector3.UP).normalized()
-		_term.position = host + side * 3.3 + Vector3(0, 1.0 + 1.2 * _term_shown, 0)
+		# Agents stand outside their rig, so the console rises on the inner side, toward the table's centre.
+		var inward := -Vector3(host.x, 0, host.z).normalized() if host.length() > 0.1 else Vector3(0, 0, 1)
+		_term.position = host + inward * 1.9 + Vector3(0, 1.6 + 1.0 * _term_shown, 0)
 		if _cam.position.distance_to(_term.position) > 0.01:
 			_term.look_at(_cam.position, Vector3.UP)   # squarely facing the viewer
 			_term.rotate_object_local(Vector3.UP, PI)
@@ -467,8 +652,20 @@ func _process(delta: float) -> void:
 		if c is Label3D and c.has_meta("detail"):
 			(c as Label3D).text = String(c.get_meta("detail")) if focus_layer == 1 else "vitals"
 	var vp := get_viewport().get_visible_rect().size
-	_subtitle.position = Vector2(vp.x * 0.1, vp.y - 90)
-	_subtitle.size = Vector2(vp.x * 0.8, 70)
+	_subtitle.position = Vector2(vp.x * 0.04, vp.y - 120)
+	_subtitle.size = Vector2(vp.x * 0.66, 60)
+	_chat.position = Vector2(vp.x * 0.72, 80)
+	_chat.size = Vector2(vp.x * 0.27, vp.y - 170)
+	_typebox.position = Vector2(vp.x * 0.04, vp.y - 54)
+	_typebox.size = Vector2(vp.x * 0.92, 38)
+	# You stand at the front edge, nearest the camera; agents breathe and flare on new activity.
+	var front := Vector3(_cam.position.x, 0, _cam.position.z).normalized() * 6.8
+	_you.position = front + Vector3(0, 0.9, 0)
+	for name: String in _agent_nodes:
+		var rec: Dictionary = _agent_nodes[name]
+		rec["pulse"] = maxf(0.0, float(rec["pulse"]) - delta * 0.25)
+		var node: Node3D = rec["node"]
+		node.scale = Vector3.ONE * (1.0 + 0.5 * float(rec["pulse"]) + 0.04 * sin(_t * 2.0 + float(node.get_index())))
 	_hud.text = "HOLOMIND · Mind View bakeoff entry #1 (i3 Claude) · observation only · 0 actuators · %s\n%s · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · F11: fullscreen · Esc: quit" % [
 		feed_note, ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"]
 	if shot_path != "" and _t > 4.0:
@@ -480,6 +677,12 @@ func _shoot() -> void:
 	img.save_png(shot_path)
 	print("HOLOMIND_SHOT ", shot_path, " ", img.get_width(), "x", img.get_height(), " frames=", _frames)
 	get_tree().quit(0)
+
+
+func _input(event: InputEvent) -> void:
+	# Esc always quits, even while typing (brief: never trap the screen).
+	if event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_ESCAPE:
+		get_tree().quit(0)
 
 
 func _unhandled_input(event: InputEvent) -> void:
