@@ -648,9 +648,12 @@ function drawComet(c, t) {
   const tr = c.trail, n = tr.length / 2;
   if (n > 2) {
     // tapered tail: a ribbon whose half-width grows from 0 at the end to 5 px at the head
-    cx.fillStyle = hexA(c.c, 0.55); cx.beginPath();
-    for (let i = 0; i < n; i++) { const [nx, ny] = normal(tr, i), w = 5 * i / (n - 1); cx.lineTo(tr[2 * i] + nx * w, tr[2 * i + 1] + ny * w); }
-    for (let i = n - 1; i >= 0; i--) { const [nx, ny] = normal(tr, i), w = 5 * i / (n - 1); cx.lineTo(tr[2 * i] - nx * w, tr[2 * i + 1] - ny * w); }
+    // the tail fades from the head back to nothing (a gradient only while a comet is in flight)
+    const tg = cx.createLinearGradient(tr[0], tr[1], tr[2 * n - 2], tr[2 * n - 1]);
+    tg.addColorStop(0, hexA(c.c, 0)); tg.addColorStop(0.7, hexA(c.c, 0.35)); tg.addColorStop(1, hexA(c.c, 0.85));
+    cx.fillStyle = tg; cx.beginPath();
+    for (let i = 0; i < n; i++) { const [nx, ny] = normal(tr, i), w = 4 * Math.pow(i / (n - 1), 1.6); cx.lineTo(tr[2 * i] + nx * w, tr[2 * i + 1] + ny * w); }
+    for (let i = n - 1; i >= 0; i--) { const [nx, ny] = normal(tr, i), w = 4 * Math.pow(i / (n - 1), 1.6); cx.lineTo(tr[2 * i] - nx * w, tr[2 * i + 1] - ny * w); }
     cx.fill();
     for (let i = 0; i < n; i += 3) { cx.globalAlpha = 0.5 * i / n; blit(c.img, tr[2 * i], tr[2 * i + 1], 6 + 14 * i / n); }
     cx.globalAlpha = 1;

@@ -43,9 +43,14 @@ CHORUS is also where you talk to the colony, and where the MSI Claude shows its 
 `hooks/claude_activity.py` (a PostToolUse hook) records only the tool name and a short label: a command's *description*, a file's name, a search's first 40 characters, an agent's description. It never records command text, file contents or output, stays on MSI (`%LOCALAPPDATA%/KiloCore/chorus/`), and rotates at 512 KB. Any hook error exits 0: the cockpit can never block the work it watches.
 
 ## What you see
-- **Each star breathes** with its heartbeat. A ring of arcs around it shows its health checks: thin teal when a check is ok, thick red when it fails. A rig whose heartbeat is older than 15 minutes dims, its thread to xanadu goes dashed, and its label says *silent N min*.
-- **Threads** carry heartbeats from every rig to xanadu, which keeps the record. A small pulse travels each thread.
-- **When a Mind thinks,** a comet leaves its home rig (L9 for the triage drone, MSI for the Culture Ship, i3 for the engine-room Mind) and lands on the rig it is about, with a ripple.
+Every mark in the sky is data; nothing is there for decoration.
+- **Each rig is a star.** Its corona breathes with its heartbeat, and the corona's reach is the RAM the rig has free (a starved rig's light shrinks). A ring of arcs shows its health checks: thin teal when ok, thick red when failing, and a failing check sends out a **red shockwave** every couple of seconds. A rig silent for over 15 minutes goes dark, its thread turns dashed and its label says *silent N min*.
+- **xanadu's ring** shows the two records it keeps: the off-box backup (fresh within 36 h) and the git mirror (fresh within 26 h).
+- **Threads** are light streams from every rig to xanadu. The beads travelling each one are that rig's **health checks**, one bead per check, teal ok and red failing; they travel faster the fresher the heartbeat.
+- **The near stars are the mirrored repos,** one per repo the off-GitHub mirror keeps (75 tonight). They twinkle while the mirror is fresh, go dull when it falls behind, and a mirror failure turns that many of them red.
+- **The galactic band takes the colour of the current marking** (teal, amber, red), and the glow rising from the horizon is the mood. In *agitato* the sky's edges red-shift and pulse.
+- **Around MSI:** the spine moons on a tilted orbit (they pass behind MSI and in front of it; dim when the spine is only *last known*); **MSI Claude** as a bright satellite whose light trail is as long as the steps it took in the last two minutes; and **claimed work** as small craft further out, one per repo someone holds on the colony claims board, sized by files claimed and tinted by who holds it (hover for the repo).
+- **When a Mind thinks,** a comet in the marking's colour leaves its home rig (L9 for the triage drone, MSI for the Culture Ship, i3 for the engine-room Mind), trailing a tapered tail and sparks, and lands on the rig it is about with a ripple.
 - **The thought is engraved bottom-centre like a score marking:**
   - *tranquillo* (routine, teal);
   - *attento* (notable, amber);
@@ -76,7 +81,7 @@ CHORUS is also where you talk to the colony, and where the MSI Claude shows its 
 - **Windowed:** an ordinary browser tab. It is never topmost and never takes the screen; fullscreen is opt-in.
 - **No actuators:** it starts, stops and changes nothing. The single write is your own message to the shared channel.
 - **Never on the i3 screen or rotation** without Keath's OK.
-- **Budget:** a single static page (no framework, Google Fonts only) drawing at most 30 fps on a 2D canvas, paused by the browser when hidden. The feeder is the Python standard library plus one SSH call per 15 s. Per-process RAM and CPU in a real browser are still to be measured on MSI.
+- **Budget:** a single static page (no framework, Google Fonts only) drawing at most 30 fps on a 2D canvas, skipped while the tab is hidden, one still frame a second with reduced motion. The backdrop (sky, band, far stars, vignette) is its own canvas, painted only on resize, DPR change or a new mood, and moved for parallax by a compositor transform; every glow is a pre-rendered sprite. `index.html?perf` draws 300 rasterised frames and puts the average and p95 frame cost in the title and console: about 2.5 ms at 1x and 6.7 ms at 2x in headless Edge (software raster), down from 5.1 ms and 23 ms (p95 49 ms) before. The feeder is the Python standard library plus one SSH call per 15 s. Per-process RAM and CPU in a real browser are still to be measured on MSI.
 
 ## Receipts
 - `receipts/chorus-fixture-1600x900.png`: desktop, rendered headless from the shared fixture.
