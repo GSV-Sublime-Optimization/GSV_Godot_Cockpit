@@ -85,23 +85,44 @@ _spine = {"at": 0.0, "data": None}
 def spine() -> dict | None:
     """Dev-Mentor's live spine (the colony's service registry) on this machine, cached 60 s:
     it probes ~18 services live and takes about 6 s (measured 2026-11-08)."""
-    if time.time() - _spine["at"] < 60:
+    if time.time() - _spine["at"] < _spine.get("wait", 60):
         return _spine["data"]
     _spine["at"] = time.time()
-    _spine["data"] = _spine_fetch() or _spine["data"]
+    fresh = _spine_fetch()
+    # back off when Dev-Mentor is struggling: a cockpit must not add load to the thing it watches
+    _spine["wait"] = 60 if fresh else 300
+    if fresh:
+        _spine["data"] = fresh
+    elif _spine["data"]:
+        _spine["data"] = {**_spine["data"], "stale": True}
     return _spine["data"]
 
 
 def _spine_fetch() -> dict | None:
     try:
         import urllib.request
-        with urllib.request.urlopen("http://127.0.0.1:7337/api/spine/services", timeout=12) as r:
+        with urllib.request.urlopen("http://127.0.0.1:7337/api/spine/services", timeout=8) as r:
             d = json.loads(r.read().decode("utf-8", "replace"))
         return {"up": d.get("services_up"), "total": d.get("services_total"),
                 "services": [{"name": s.get("name"), "tier": s.get("tier"), "up": s.get("up"), "ms": s.get("ms")}
                              for s in d.get("services", [])]}
     except (OSError, ValueError):
         return None
+
+_doc = {"at": 0.0, "items": []}
+
+
+def doctor_cached(data: dict) -> list[dict]:
+    """Read-only diagnosis of failing checks (doctor.py), at most every 5 minutes."""
+    if time.time() - _doc["at"] > 300:
+        _doc["at"] = time.time()
+        try:
+            from doctor import diagnose
+            _doc["items"] = diagnose(data)
+        except Exception as e:  # noqa: BLE001 - a broken probe must not stop the feed
+            _doc["items"] = [{"key": "doctor", "verdict": f"unknown: doctor failed ({e.__class__.__name__})", "evidence": []}]
+    return _doc["items"]
+
 
 PRS_EVERY = 300          # GitHub is asked at most every 5 minutes
 _prs = {"at": 0.0, "items": []}
@@ -138,6 +159,7 @@ def fetch() -> dict:
         data["work"] = work()
     except Exception as e:              # noqa: BLE001 - a broken probe must not stop the feed
         data["work"] = {"error": str(e)[:200]}
+    data["doctor"] = doctor_cached(data)
     data["claude_activity"] = claude_activity()
     data["spine"] = spine()
     # cache the shared channel locally so the Claude prompt hook can read it without a network call

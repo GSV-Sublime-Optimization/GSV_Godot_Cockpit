@@ -2,6 +2,7 @@
 """chorus.py: the CHORUS cockpit as text, for agents in a terminal (and for Keath on a phone).
 
     python chorus/chorus.py              # brief: what needs attention, the Minds, the channel, the spine
+    python chorus/chorus.py doctor       # measure the cause of each failing check (read-only)
     python chorus/chorus.py work         # who edits what; checkouts holding unsaved work
     python chorus/chorus.py rig i3       # one rig in detail: checks, disks, RAM, what the Minds said
     python chorus/chorus.py say "text" [--to all|claude (i3 seat)|i3-mind]   # speak as this seat
@@ -61,7 +62,9 @@ def needs(d: dict) -> list[dict]:
             continue
         for c in hb.get("checks", []):
             if not c.get("ok"):
-                out.append({"level": "notable", "what": f"{rig}: {c['name']} failing", "detail": str(c.get("detail", ""))[:120]})
+                dx = next((x for x in d.get("doctor") or [] if x.get("key") == f"{rig}:{c['name']}"), None)
+                out.append({"level": "notable", "what": f"{rig}: {c['name']} failing",
+                            "detail": dx["verdict"] if dx else str(c.get("detail", ""))[:120]})
     b = d.get("backup")
     if not b or b.get("age_h", 99) > 36:
         out.append({"level": "alarm", "what": "off-box backup stale", "detail": f"newest {b['set']} {b['age_h']} h" if b else "none"})
@@ -158,13 +161,19 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "work"])
+    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "work", "doctor"])
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--to", default="all")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     if a.cmd == "say":
         say(a.arg or "", a.to)
+    elif a.cmd == "doctor":
+        from doctor import diagnose
+        for x in diagnose(load()):
+            print(f"{x['key']}: {x['verdict']}")
+            for e in x["evidence"]:
+                print(f"    {e}")
     elif a.cmd == "work":
         work_view(load())
     elif a.cmd == "rig":
