@@ -138,7 +138,7 @@ def tick():
     minds = (remote or {}).get('events', [])
     for e in minds:   # the Minds name rigs in their reasons; point the attention at the first one they mention
         text = ' '.join(e.get('reasons', [])) + ' ' + e.get('line', '')
-        e['focus'] = next((b for b in ('i3', 'msi', 'l9', 'xanadu') if b in text.lower()), 'xanadu')
+        e['focus'] = e.get('focus') or next((b for b in ('i3', 'msi', 'l9', 'xanadu') if b in text.lower()), 'xanadu')
     events = sorted(minds + observer, key=lambda e: e.get('at', ''))[-80:]
     latest = events[-1] if events else None
     feed = {'schema': 'colony.mindview-feed/v0', 'at': iso(now()), 'source_ok': remote is not None, 'bodies': bodies,

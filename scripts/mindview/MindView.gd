@@ -20,6 +20,8 @@ const C_AMBER := Color("f5b041")
 const C_SILENT := Color("6b7280")
 const C_LINK := Color("2a3a66")
 const LEVEL_COLOURS := {"calm": "46d38a", "watch": "f5b041", "alarm": "ff5a5a"}
+# The Minds' own words (the triage drone and its evals use routine/notable/alarm) map onto the view's three colours.
+const LEVEL_ALIASES := {"routine": "calm", "notable": "watch", "alert": "alarm", "critical": "alarm"}
 const STATUS_COLOURS := {"green": C_GREEN, "red": C_RED, "silent": C_SILENT, "unknown": Color("3b4256")}
 
 # Where each body sits on the map, as a fraction of the map area. xanadu is the hub: every heartbeat flows to it.
@@ -140,6 +142,11 @@ func _read_feed() -> void:
 	_refresh_text()
 
 
+func _view_level(raw: Variant) -> String:
+	var l := String(raw).to_lower()
+	return String(LEVEL_ALIASES.get(l, l))
+
+
 func _esc(s: Variant) -> String:
 	# Text from the feed is data, never markup.
 	return String(s).replace("[", "[lb]")
@@ -165,7 +172,7 @@ func _refresh_text() -> void:
 		b.append("[color=#7d8aa8]Nothing yet. The Minds speak when something changes or on their schedule.[/color]")
 	for e in events:
 		var ev: Dictionary = e
-		var level := String(ev.get("level", "calm"))
+		var level := _view_level(ev.get("level", "calm"))
 		var col: String = LEVEL_COLOURS.get(level, "d7e1f5")
 		var mind := String(ev.get("mind", "?"))
 		var who := mind + ("" if ev.get("model") == null else " · " + String(ev.get("model")))
@@ -180,7 +187,7 @@ func _refresh_text() -> void:
 		_thought.text = "[color=#7d8aa8]%s[/color]" % _esc(feed_error if feed_error != "" else "The Minds are quiet.")
 	else:
 		var last: Dictionary = events[-1]
-		var lv := String(last.get("level", "calm"))
+		var lv := _view_level(last.get("level", "calm"))
 		_thought.text = "[color=#7d8aa8]LATEST THOUGHT · %s · %s[/color]\n[color=#%s]%s[/color]" % [
 			_esc(last.get("mind", "?")), _local_hhmm(String(last.get("at", ""))), LEVEL_COLOURS.get(lv, "d7e1f5"),
 			_esc(last.get("line", ""))]
