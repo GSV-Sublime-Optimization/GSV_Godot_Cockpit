@@ -172,6 +172,36 @@ def _post(msg: dict) -> None:
     print("sent" if r.returncode == 0 else f"not sent (ssh exit {r.returncode})")
 
 
+def act_orders(d: dict) -> None:
+    """Run action orders addressed to this seat: {kind: order, station: act, action, target}.
+    Only orders Keath posted count (his posting is the confirm); the action must be on the
+    allowlist in actions.py. Each run posts the {kind: action} receipt and closes the order."""
+    import actions
+    from shop import orders
+    raw = {m.get("id"): m for m in d.get("channel", []) if m.get("kind") == "order"}
+    todo = [o for o in orders(d.get("channel", [])) if o["status"] == "posted" and o["to"] in (SEAT, "any")
+            and o["station"] == "act"]
+    if not todo:
+        print("no action orders")
+        return
+    for o in todo:
+        m = raw.get(o["id"], {})
+        if not str(m.get("from", "")).startswith("keath"):
+            order_status(o["id"], "declined", "action orders are only run when Keath posts them", "")
+            continue
+        order_status(o["id"], "taken", f"running {m.get('action')} {m.get('target')}", "")
+        try:
+            tok = actions.propose(str(m.get("action", "")), str(m.get("target", "")))
+            res = actions.confirm(tok["token"])
+        except ValueError as e:
+            order_status(o["id"], "declined", f"not run: {e}", "")
+            continue
+        _post({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": SEAT, "kind": "action", "to": "all",
+               "order": o["id"], **res, "text": f"{'did' if res['ok'] else 'tried'} {res['action']} {res['target']}: {res['result'][:200]}"})
+        order_status(o["id"], "done" if res["ok"] else "declined",
+                     f"{res['action']} {res['target']}: {'ok' if res['ok'] else 'failed'} in {res['ms']} ms - {res['result'][:200]}", "")
+
+
 def say(text: str, to: str) -> None:
     text = " ".join(text.split())[:600]
     if not text:
@@ -187,7 +217,7 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "work", "doctor", "orders", "take", "working", "done", "decline"])
+    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "work", "doctor", "act-orders", "orders", "take", "working", "done", "decline"])
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--to", default="all")
     ap.add_argument("--json", action="store_true")
@@ -197,6 +227,8 @@ def main() -> None:
     a = ap.parse_args()
     if a.cmd == "say":
         say(a.arg or "", a.to)
+    elif a.cmd == "act-orders":
+        act_orders(load())
     elif a.cmd == "orders":
         orders_view(load(), not a.all)
     elif a.cmd in ("take", "working", "done", "decline"):

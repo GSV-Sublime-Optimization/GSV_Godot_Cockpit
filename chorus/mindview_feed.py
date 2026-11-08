@@ -212,6 +212,8 @@ def fetch() -> dict:
     data["orders"] = orders(data.get("channel", []))
     import actions
     data["actions"] = actions.catalog()
+    data["impact"] = impact(data)
+    data["usage"] = usage()
     data["smiths"] = smiths(data)
     data["claude_activity"] = claude_activity()
     data["spine"] = spine()
@@ -262,7 +264,43 @@ def say(text: str, to: str, sender: str = "keath") -> dict:
     return msg
 
 
-def post_order(text: str, to: str, station: str) -> dict:
+def impact(data: dict, limit: int = 20) -> list[dict]:
+    """What the cockpit actually changed, newest first: actions run, orders finished, agent PRs merged."""
+    out = []
+    for m in data.get("channel", []):
+        if m.get("kind") == "action":
+            out.append({"at": m.get("at"), "kind": "action", "who": m.get("from"), "ok": m.get("ok"),
+                        "what": f"{m.get('action')} {m.get('target')}", "detail": str(m.get("result", ""))[:160]})
+        elif m.get("kind") == "order-status" and m.get("status") in ("done", "declined"):
+            out.append({"at": m.get("at"), "kind": f"order {m.get('status')}", "who": m.get("from"), "ok": m.get("status") == "done",
+                        "what": m.get("id"), "detail": str(m.get("note", ""))[:160], "link": m.get("link", "")})
+    for p in data.get("prs_recent") or []:
+        if p.get("state") == "MERGED":
+            out.append({"at": p.get("updated"), "kind": "merged", "who": p.get("agent"), "ok": True,
+                        "what": f"{p['repo']}#{p['number']}", "detail": p.get("title", ""), "link": p.get("url", "")})
+    return sorted(out, key=lambda x: x.get("at") or "", reverse=True)[:limit]
+
+
+def usage() -> dict:
+    """How much agents used the cockpit in the last 24 h (MCP tool calls, CLI/hook reads)."""
+    f = LOCAL / "mcp_calls.jsonl"
+    cutoff = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 86400))
+    calls = []
+    if f.exists():
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines()[-2000:]:
+            try:
+                c = json.loads(line)
+            except ValueError:
+                continue
+            if c.get("at", "") >= cutoff:
+                calls.append(c)
+    by_tool: dict[str, int] = {}
+    for c in calls:
+        by_tool[c["tool"]] = by_tool.get(c["tool"], 0) + 1
+    return {"mcp_calls_24h": len(calls), "by_tool": by_tool, "seats": sorted({c.get("seat", "?") for c in calls})}
+
+
+def post_order(text: str, to: str, station: str, action: str = "", target: str = "") -> dict:
     """Keath posts a work order: one line in the channel. An agent takes it and does the work itself."""
     from shop import STATIONS
     text = " ".join(str(text).split())[:600]
@@ -271,7 +309,11 @@ def post_order(text: str, to: str, station: str) -> dict:
     now = time.gmtime()
     msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", now), "from": "keath (chorus)", "kind": "order",
            "id": "o-" + time.strftime("%m%d-%H%M%S", now), "to": to if to in SEATS.values() or to == "any" else "any",
-           "station": station if station in STATIONS else "anvil", "text": text, "via": "chorus"}
+           "station": station if station in STATIONS or station == "act" else "anvil", "text": text, "via": "chorus"}
+    if station == "act":
+        import actions
+        actions._describe(action, target)            # refuse anything off the allowlist up front
+        msg.update(action=action, target=target)
     _append(msg)
     return msg
 
@@ -342,7 +384,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 else:                                       # step 1: describe it, hand back a token
                     msg = actions.propose(body.get("action", ""), body.get("target", ""))
             elif self.path == "/order":
-                msg = post_order(body.get("text", ""), body.get("to", "any"), body.get("station", "anvil"))
+                msg = post_order(body.get("text", ""), body.get("to", "any"), body.get("station", "anvil"),
+                                 str(body.get("action", "")), str(body.get("target", "")))
             else:
                 # the page sends no "from" (it is Keath at the keyboard); agents must send their own seat
                 msg = say(body.get("text", ""), body.get("to", "claude"), body.get("from", "keath"))

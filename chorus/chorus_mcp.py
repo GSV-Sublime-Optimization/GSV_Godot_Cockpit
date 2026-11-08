@@ -79,6 +79,19 @@ def call(name: str, a: dict) -> str:
     raise KeyError(name)
 
 
+def _log_call(tool: str) -> None:
+    """Usage proof for the cockpit: which seat called which tool, when (never the arguments)."""
+    try:
+        import os, time
+        f = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "KiloCore" / "chorus" / "mcp_calls.jsonl"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with f.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "tool": tool,
+                                 "seat": chorus.SEAT}) + chr(10))
+    except OSError:
+        pass
+
+
 def handle(msg: dict) -> dict | None:
     mid, method = msg.get("id"), msg.get("method")
     if method == "initialize":
@@ -90,6 +103,7 @@ def handle(msg: dict) -> dict | None:
         return {"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}}
     if method == "tools/call":
         p = msg.get("params", {})
+        _log_call(p.get("name", "?"))
         try:
             text, err = call(p.get("name", ""), p.get("arguments") or {}), False
         except KeyError as e:
