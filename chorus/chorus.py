@@ -7,10 +7,12 @@
     python chorus/chorus.py work         # who edits what; checkouts holding unsaved work
     python chorus/chorus.py rig i3       # one rig in detail: checks, disks, RAM, what the Minds said
     python chorus/chorus.py say "text" [--to all|claude (i3 seat)|i3-mind]   # speak as this seat
+    python chorus/chorus.py route "text" [--node check:i3/docker]   # who/where/when/why the router suggests
+    python chorus/chorus.py send "text" [--node ..] [--to ..] [--where ..] [--kind ..] [--when ..]   # route + send
     python chorus/chorus.py --json       # the brief as JSON (for other tools)
 
 It reads feed.json (written every 15 s by mindview_feed.py). If that is older than 2 minutes it
-refreshes it once with `mindview_feed.py --once`. Read-only except `say`.
+refreshes it once with `mindview_feed.py --once`. Read-only except `say`, `send` and order moves.
 """
 from __future__ import annotations
 
@@ -231,22 +233,107 @@ def say(text: str, to: str) -> None:
     print("sent" if r.returncode == 0 else f"not sent (ssh exit {r.returncode})")
 
 
+def node_from_ref(d: dict, ref: str | None) -> dict | None:
+    """--node: JSON, or a short ref read against the feed: rig:i3, check:i3/docker, pr:dev#429, svc:litellm."""
+    if not ref:
+        return None
+    ref = ref.strip()
+    if ref.startswith("{"):
+        return json.loads(ref)
+    kind, _, rest = ref.partition(":")
+    if kind == "rig":
+        hb = d.get("heartbeats", {}).get(rest) or {}
+        bad = [c for c in hb.get("checks", []) if not c.get("ok")]
+        return {"kind": "rig", "id": rest, "rig": rest, "failing": bool(bad),
+                "detail": "; ".join(f"{c['name']} failing" for c in bad)}
+    if kind == "check":
+        rig_id, _, check = rest.partition("/")
+        c = next((x for x in (d.get("heartbeats", {}).get(rig_id) or {}).get("checks", []) if x.get("name") == check), {})
+        dx = next((x for x in d.get("doctor") or [] if x.get("key") == f"{rig_id}:{check}"), {})
+        return {"kind": "check", "rig": rig_id, "check": check, "name": f"{rig_id} {check}", "ok": c.get("ok", False),
+                "detail": str(c.get("detail", ""))[:140], "verdict": dx.get("verdict", "")}
+    if kind == "pr":
+        repo, _, num = rest.partition("#")
+        waiting = next((p for p in d.get("prs_waiting") or [] if p["repo"] == repo and str(p["number"]) == num), None)
+        recent = next((p for p in d.get("prs_recent") or [] if p["repo"] == repo and str(p["number"]) == num), None)
+        p = waiting or recent or {}
+        return {"kind": "pr", "repo": repo, "number": num, "title": p.get("title", ""), "waiting": bool(waiting),
+                "agent": (recent or {}).get("agent", ""), "state": (recent or {}).get("state", ""),
+                "url": p.get("url") or f"https://github.com/GSV-Sublime-Optimization/{repo}/pull/{num}"}
+    if kind == "svc":
+        s = next((x for x in (d.get("spine") or {}).get("services", []) if x.get("name") == rest), {})
+        return {"kind": "svc", "name": rest, "down": s.get("up") is False and rest not in EXPECTED_DOWN}
+    return {"kind": kind or "node", "name": rest or ref}
+
+
+def route_cmd(d: dict, text: str, node_ref: str | None, as_json: bool) -> dict:
+    import router
+    r = router.route(text, node_from_ref(d, node_ref), d)
+    if as_json:
+        print(json.dumps(r, indent=1))
+        return r
+    print(r["preview"])
+    print(f"  kind {r['draft']['kind']} · to {r['to']} · where {r['where']} ({r['reach']}) · when {r['when']}"
+          f" · confidence {r['confidence']}")
+    print(f"  draft: {r['draft']['text']}")
+    if r["why"]:
+        print(f"  why: {r['why']}")
+    print(f"  because: {r['reasons']}")
+    for a in r["alternatives"]:
+        print(f"  or {a['label']} via {a['where']} ({a['reach']}, score {a['score']}): {a['because']}")
+    for c in r["capability"]:
+        print(f"  atlas: {c['id']}")
+    return r
+
+
+def send_cmd(d: dict, text: str, node_ref: str | None, to: str | None, where: str | None, kind: str | None,
+             when: str | None, why: str | None) -> dict:
+    """Route, apply the overrides, dispatch as this seat (never as Keath)."""
+    import router
+    import mindview_feed
+    node = node_from_ref(d, node_ref)
+    r = router.route(f"{text} {when}" if when else text, node, d, kind=kind, to=to)
+    if when:
+        r["when"], r["due"] = router.parse_when(when)
+    body = {"kind": r["draft"]["kind"], "to": r["to"], "where": where or r["where"], "text": r["draft"]["text"],
+            "why": why or r["why"], "due": r["due"], "when": r["when"], "node": node or {}, "station": r["draft"]["station"]}
+    res = mindview_feed.send(body, SEAT)
+    print(res.get("summary", "sent"))
+    if res.get("answer"):
+        print(res["answer"])
+    if res.get("prepared"):
+        print(json.dumps(res["prepared"], indent=1))
+    return res
+
+
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "suggest", "work", "doctor", "act-orders", "orders", "take", "working", "done", "decline"])
+    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "suggest", "work", "doctor", "act-orders", "orders", "take", "working", "done", "decline", "route", "send"])
     ap.add_argument("arg", nargs="?")
-    ap.add_argument("--to", default="all")
+    ap.add_argument("--to", default=None)
+    ap.add_argument("--node", default=None, help="route/send: JSON or rig:i3, check:i3/docker, pr:dev#429, svc:litellm")
+    ap.add_argument("--where", default=None)
+    ap.add_argument("--kind", default=None)
+    ap.add_argument("--when", default=None)
+    ap.add_argument("--why", default=None)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--note", default="")
     ap.add_argument("--link", default="")
     ap.add_argument("--all", action="store_true", help="orders: show every seat's orders")
     a = ap.parse_args()
     if a.cmd == "say":
-        say(a.arg or "", a.to)
+        say(a.arg or "", a.to or "all")
     elif a.cmd == "suggest":
-        suggest(a.arg or "", a.to if a.to != "all" else "")
+        suggest(a.arg or "", a.to or "")
+    elif a.cmd == "route":
+        route_cmd(load(), a.arg or "", a.node, a.json)
+    elif a.cmd == "send":
+        try:
+            send_cmd(load(), a.arg or "", a.node, a.to, a.where, a.kind, a.when, a.why)
+        except (ValueError, RuntimeError) as e:
+            sys.exit(f"not sent: {e}")
     elif a.cmd == "act-orders":
         act_orders(load())
     elif a.cmd == "orders":

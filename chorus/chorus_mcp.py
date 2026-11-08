@@ -9,6 +9,8 @@ Stdio MCP server (JSON-RPC 2.0, one message per line), standard library only. It
     chorus_orders       work orders for this seat (or all)
     chorus_order_status take / working / done / decline an order, with a note and a link
     chorus_say          post to the shared cockpit channel as this seat
+    chorus_route        where should this message go (who/where/when/why), no side effects
+    chorus_send         route and send as this seat
 
 The seat comes from CHORUS_SEAT (default "claude (msi seat)"); an agent never speaks as Keath.
 Register with Claude Code:
@@ -45,6 +47,14 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}, "node": {"type": "string"}}, "required": ["text"]}},
     {"name": "chorus_knowledge", "description": "The colony's knowledge layer: capability atlas counts and dead lanes, GitNexus code graphs and staleness, vault recent notes, latest decisions, rival bakeoff cockpits.",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "chorus_route", "description": "Ask the CHORUS router where a message should go: kind (ask/order/suggest/status/review-request/handoff), who (seat, local model, cloud agent via GitHub, Studio, ChatDev, all), where, when and why, with alternatives. No side effects.",
+     "inputSchema": {"type": "object", "properties": {
+         "text": {"type": "string"}, "node": {"type": "string", "description": "optional: rig:i3, check:i3/docker, pr:dev#429, svc:litellm, or JSON"}},
+         "required": ["text"]}},
+    {"name": "chorus_send", "description": "Route and send as this seat. Overrides: to (a target id such as 'claude (i3 seat)', 'local:l9', 'gpt6', 'all'), where, kind, when ('after #424', 'at 14:30', 'next hourly cycle'), why. Local models answer inline; GitHub/Studio/ChatDev come back prepared.",
+     "inputSchema": {"type": "object", "properties": {
+         "text": {"type": "string"}, "node": {"type": "string"}, "to": {"type": "string"}, "where": {"type": "string"},
+         "kind": {"type": "string"}, "when": {"type": "string"}, "why": {"type": "string"}}, "required": ["text"]}},
     {"name": "chorus_say", "description": "Post a message to the shared cockpit channel as this seat.",
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string"}, "to": {"type": "string", "description": "a seat, e.g. 'claude (i3 seat)', 'keath (chorus)', or 'all'"}},
@@ -83,9 +93,21 @@ def call(name: str, a: dict) -> str:
     if name == "chorus_knowledge":
         from knowledge import knowledge
         return json.dumps(knowledge(), indent=1, default=str)[:12000]
+    if name == "chorus_route":
+        return _capture(chorus.route_cmd, chorus.load(), a["text"], a.get("node"), True)
+    if name == "chorus_send":
+        return _capture(_send, a)
     if name == "chorus_say":
         return _capture(chorus.say, a["text"], a.get("to", "all"))
     raise KeyError(name)
+
+
+def _send(a: dict) -> None:
+    try:
+        chorus.send_cmd(chorus.load(), a["text"], a.get("node"), a.get("to"), a.get("where"), a.get("kind"),
+                        a.get("when"), a.get("why"))
+    except (ValueError, RuntimeError) as e:
+        print(f"not sent: {e}")
 
 
 def _log_call(tool: str) -> None:
