@@ -133,6 +133,11 @@ def fetch() -> dict:
     except (subprocess.SubprocessError, ValueError, OSError):
         data["prs_waiting"] = _prs["items"]
     flush_acks()
+    try:
+        from work import work           # colony claims + checkouts holding unsaved work
+        data["work"] = work()
+    except Exception as e:              # noqa: BLE001 - a broken probe must not stop the feed
+        data["work"] = {"error": str(e)[:200]}
     data["claude_activity"] = claude_activity()
     data["spine"] = spine()
     # cache the shared channel locally so the Claude prompt hook can read it without a network call

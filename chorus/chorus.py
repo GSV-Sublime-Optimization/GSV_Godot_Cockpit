@@ -2,6 +2,7 @@
 """chorus.py: the CHORUS cockpit as text, for agents in a terminal (and for Keath on a phone).
 
     python chorus/chorus.py              # brief: what needs attention, the Minds, the channel, the spine
+    python chorus/chorus.py work         # who edits what; checkouts holding unsaved work
     python chorus/chorus.py rig i3       # one rig in detail: checks, disks, RAM, what the Minds said
     python chorus/chorus.py say "text" [--to all|claude (i3 seat)|i3-mind]   # speak as this seat
     python chorus/chorus.py --json       # the brief as JSON (for other tools)
@@ -75,6 +76,10 @@ def needs(d: dict) -> list[dict]:
     if prs:
         out.append({"level": "notable", "what": f"{len(prs)} PRs wait for a reviewer",
                     "detail": ", ".join(f"{p['repo']}#{p['number']}" for p in prs[:6])})
+    risky = [w for w in (d.get("work") or {}).get("at_risk", []) if w["ahead"] >= 3 or (w["ahead"] and w["dirty"] >= 20)]
+    for w in risky[:3]:
+        out.append({"level": "notable", "what": f"unpushed work in {w['label']}",
+                    "detail": f"{w['branch']} is {w['ahead']} commits ahead, {w['dirty']} files uncommitted, last commit {w['last_commit_h']} h ago"})
     cards = d.get("steward_cards") or []
     if cards:
         out.append({"level": "routine", "what": f"{len(cards)} Steward questions open", "detail": cards[0]["title"][:90]})
@@ -84,7 +89,8 @@ def needs(d: dict) -> list[dict]:
 
 def unseen(d: dict) -> list[dict]:
     last = SEEN.read_text().strip() if SEEN.exists() else ""
-    return [m for m in d.get("channel", []) if m.get("at", "") > last and m.get("from") != SEAT]
+    return [m for m in d.get("channel", []) if m.get("at", "") > last and m.get("from") != SEAT
+            and m.get("kind") != "read" and str(m.get("text") or "").strip()]
 
 
 def brief(d: dict, as_json: bool) -> None:
@@ -125,6 +131,18 @@ def rig(d: dict, rid: str) -> None:
             print(f"    {ago(ts(e.get('at')))} {e.get('mind')}: {e.get('line')}  (reasons: {', '.join(e.get('reasons', [])) or 'none'})")
 
 
+def work_view(d: dict) -> None:
+    w = d.get("work") or {}
+    print("Who is working on what (colony claims):")
+    for c in w.get("claims", []):
+        print(f"  {c['agent']}  {c['repo']}: {', '.join(c['files'][:6])}{' ...' if len(c['files']) > 6 else ''}  ({c['age_min']} min)")
+    risk = w.get("at_risk", [])
+    print(f"Work at risk: {len(risk)} checkouts, {sum(r['dirty'] for r in risk)} uncommitted files, "
+          f"{sum(1 for r in risk if r['ahead'])} with unpushed commits")
+    for r in risk[:12]:
+        print(f"  {r['label']:<42} {r['branch'][:34]:<34} ahead {r['ahead']:>3} dirty {r['dirty']:>4} last {r['last_commit_h']} h")
+
+
 def say(text: str, to: str) -> None:
     text = " ".join(text.split())[:600]
     if not text:
@@ -140,13 +158,15 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say"])
+    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "work"])
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--to", default="all")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     if a.cmd == "say":
         say(a.arg or "", a.to)
+    elif a.cmd == "work":
+        work_view(load())
     elif a.cmd == "rig":
         rig(load(), (a.arg or "msi").lower())
     else:
