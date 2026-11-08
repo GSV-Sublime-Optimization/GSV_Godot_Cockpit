@@ -9,6 +9,7 @@ signal self_model_changed(model: Dictionary)
 const STUDIO_SENSOR = preload("res://scripts/entity/StudioObservationBridge.gd")
 const FLEET_SENSOR = preload("res://scripts/entity/FleetBodiesBridge.gd")
 const CONSTELLATION_SENSOR = preload("res://scripts/entity/StudioConstellationBridge.gd")
+const GATEWAY_SENSOR = preload("res://scripts/entity/GatewayObservationBridge.gd")
 const MAX_HISTORY := 64
 const SELF_SCHEMA := "kilocore.entity-session.v0"
 const DEFAULT_CONSTELLATION_PERIOD_SECONDS := 180.0
@@ -19,6 +20,7 @@ const DEFAULT_CONSTELLATION_PERIOD_SECONDS := 180.0
 var _sensor: Node
 var _fleet_sensor: Node
 var _constellation: Node
+var _gateway: Node
 var _tick: int = 0
 var _time_to_observe: float = 0.0
 var _time_to_constellation: float = 0.0
@@ -34,12 +36,16 @@ func _ready() -> void:
 	_constellation = CONSTELLATION_SENSOR.new()
 	add_child(_constellation)
 	_constellation.observation_changed.connect(_on_constellation_observation)
+	_gateway = GATEWAY_SENSOR.new()
+	add_child(_gateway)
+	_gateway.observation_changed.connect(_on_gateway_observation)
 	_time_to_observe = observe_period_seconds
 	_time_to_constellation = DEFAULT_CONSTELLATION_PERIOD_SECONDS
 	if auto_observe:
 		_sensor.observe()
 		_fleet_sensor.observe()
 		_constellation.observe()
+		_gateway.observe()
 
 func _physics_process(delta: float) -> void:
 	_tick += 1
@@ -50,6 +56,7 @@ func _physics_process(delta: float) -> void:
 		_time_to_observe = maxf(2.0, observe_period_seconds)
 		_sensor.observe()  # one request in flight; skip instead of stacking
 		_fleet_sensor.observe()
+		_gateway.observe()  # fast health sense; shares the 15s tick
 	_time_to_constellation -= delta
 	if _time_to_constellation <= 0.0:
 		_time_to_constellation = maxf(60.0, DEFAULT_CONSTELLATION_PERIOD_SECONDS)
@@ -65,6 +72,9 @@ func observe_now() -> bool:
 func observe_constellation_now(force: bool = false) -> bool:
 	return _constellation != null and _constellation.observe(force)
 
+func observe_gateway_now() -> bool:
+	return _gateway != null and _gateway.observe()
+
 func self_model() -> Dictionary:
 	var observation: Dictionary = (
 		_sensor.current_observation()
@@ -76,6 +86,11 @@ func self_model() -> Dictionary:
 		if _constellation != null
 		else {"state": "unknown", "error": "sensor_not_ready"}
 	)
+	var gateway: Dictionary = (
+		_gateway.current_observation()
+		if _gateway != null
+		else {"state": "unknown", "error": "sensor_not_ready"}
+	)
 	return {
 		"schema": SELF_SCHEMA,
 		"phase": "observation_only",
@@ -83,6 +98,7 @@ func self_model() -> Dictionary:
 		"sensor": observation,
 		"fleet_bodies": _fleet_sensor.current_bodies() if _fleet_sensor != null else [],
 		"constellation": constellation,
+		"gateway": gateway,
 		"capabilities": [{
 			"id": "studio.health.read",
 			"source": "KiloCore-Studio",
@@ -97,6 +113,11 @@ func self_model() -> Dictionary:
 			"source": "KiloCore-Studio",
 			"observed_state": constellation.get("state", "unknown"),
 			"mutation": false
+		}, {
+			"id": "gateway.health.read",
+			"source": "KiloCore-Gateway",
+			"observed_state": gateway.get("state", "unknown"),
+			"mutation": false
 		}],
 		"authorized_actuators": [],
 		"local_history_events": _history.size()
@@ -110,6 +131,9 @@ func _on_studio_observation(observation: Dictionary) -> void:
 
 func _on_constellation_observation(observation: Dictionary) -> void:
 	_record_event("constellation_observation", observation)
+
+func _on_gateway_observation(observation: Dictionary) -> void:
+	_record_event("gateway_health_observation", observation)
 
 func _record_event(kind: String, observation: Dictionary) -> void:
 	_history.append({
