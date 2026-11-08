@@ -106,8 +106,8 @@ def tick():
             failing = [c['name'] for c in hb.get('checks', []) if not c.get('ok')]
             status = 'silent' if a is None or a > SILENT_AFTER_S else ('green' if hb.get('green') else 'red')
             disks = ', '.join(f"{k}: {v.get('pct_free')}% free" for k, v in (hb.get('disks') or {}).items())
-            bodies[rig].update(status=status, failing=failing, age_s=a,
-                               detail=f"RAM {hb.get('ram_avail_mb', '?')} MB free; {disks}")
+            parts = ([f"RAM {hb['ram_avail_mb']} MB free"] if hb.get('ram_avail_mb') is not None else []) + ([disks] if disks else [])
+            bodies[rig].update(status=status, failing=failing, age_s=a, detail='; '.join(parts))
         xs = remote.get('xanadu_self', {})
         bodies['xanadu'].update(status='green', age_s=0, detail=f"answering; RAM {xs.get('mem_avail_mb', '?')} MB free")
     else:
