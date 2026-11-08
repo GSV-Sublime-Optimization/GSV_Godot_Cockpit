@@ -147,7 +147,23 @@ kbd { font: 700 10px var(--f-body); border: 1px solid var(--hair-2); border-bott
 .modal .mb { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .modal .count { font: 700 28px var(--f-data); color: var(--warn); }
 #toast { position: fixed; z-index: 50; left: 50%; bottom: 100px; transform: translateX(-50%); padding: 8px 14px; font-size: 13px; }
-@media (max-width: 1100px) { .did, .key { display: none; } }
+.find { position: relative; }
+.find input { font: 600 12px var(--f-data); color: var(--ink); background: rgba(4, 12, 20, .85); border: 1px solid var(--hair-2); border-radius: 999px; padding: 6px 12px; width: 200px; }
+.find input:focus { outline: 2px solid var(--holo); width: 260px; }
+.find ul { position: absolute; right: 0; top: 34px; width: 340px; max-height: 360px; overflow: auto; margin: 0; padding: 4px; list-style: none; z-index: 35; }
+.find li { padding: 5px 8px; border-radius: 6px; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+.find li small { color: var(--ink-dim); font: 10px var(--f-data); text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
+.find li[aria-selected=true], .find li:hover { background: rgba(127, 231, 255, .14); }
+.hint { position: fixed; top: 100px; left: 380px; right: 460px; margin: 0 auto; max-width: 640px; padding: 7px 12px; display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.hint .n { font: 700 10px var(--f-data); color: var(--warn); letter-spacing: .14em; white-space: nowrap; }
+.hint .tx { flex: 1; min-width: 0; }
+.hint .tx b { color: var(--warn); }
+.rivals { position: fixed; right: 16px; top: 58px; width: 440px; max-height: calc(100% - 160px); overflow: auto; padding: 14px 16px; z-index: 20; }
+.rivals article { border-top: 1px solid var(--hair); padding: 10px 0; }
+.rivals h3 { margin: 0 0 3px; font-size: 14px; }
+.rivals p { margin: 3px 0; font-size: 12.5px; color: #cfe2ea; }
+.rivals img { width: 100%; border-radius: 8px; border: 1px solid var(--hair-2); margin-top: 6px; }
+@media (max-width: 1100px) { .did, .key { display: none; } .hint { left: 16px; right: 16px; } }
 @media (max-width: 720px) {
   .panel { left: 16px; right: 16px; width: auto; top: auto; bottom: 96px; max-height: 50%; }
   .mark p { display: none; }
@@ -168,12 +184,20 @@ kbd { font: 700 10px var(--f-body); border: 1px solid var(--hair-2); border-bott
     <span class="chip" id="mode">snapshot</span>
     <span class="chip" id="fresh">-</span>
     <span class="chip replay" id="replay" hidden></span>
+    <div class="find"><input id="q" type="search" placeholder="Find any node  ( / )" autocomplete="off" aria-label="Find any node"><ul id="qr" class="glass" hidden role="listbox"></ul></div>
+    <button id="b-rivals" title="The other bakeoff cockpits, for compare and contrast">Rivals</button>
     <button id="b-order" title="Write a work order (O)">Order <kbd>O</kbd></button>
     <button id="b-key" title="What each light means (?)" aria-pressed="true">Key <kbd>?</kbd></button>
     <button id="b-full" title="Fullscreen (F). Esc leaves.">Fullscreen <kbd>F</kbd></button>
   </div>
 </header>
 <div class="needs" id="needs" aria-label="What needs you"></div>
+<div class="hint glass" id="hint" hidden aria-live="polite"><span class="n" id="hint-n">NEXT MOVE</span><span class="tx" id="hint-t"></span><button class="small" id="hint-go">Show me</button><button class="small" id="hint-next" title="Next nudge">&rsaquo;</button></div>
+<aside class="rivals glass" id="rivals" hidden aria-label="Rival cockpits">
+  <header style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font:700 12px var(--f-body);letter-spacing:.2em;color:var(--holo)">THE OTHER COCKPITS</h2><button class="small" id="rivals-x">Close</button></header>
+  <p class="note">Mind View bakeoff (GSV_Godot_Cockpit #14). Compare, contrast, take the good ideas. Images load from GitHub only when this drawer opens.</p>
+  <div id="rivals-b"></div>
+</aside>
 
 <aside class="did glass" id="did" aria-label="What this did">
   <h2>What this did <small id="did-n"></small></h2>
@@ -354,8 +378,7 @@ function stepTween(t) {
 let W = 1, H = 1;
 function resize() {
   W = innerWidth; H = innerHeight; renderer.setSize(W, H, false); camera.aspect = W / H;
-  const shift = W > 1100 ? -Math.round(Math.min(360, W * 0.22) / 2) : 0;   // the left panels cover ~350 px: centre the table in what is left
-  if (shift) camera.setViewOffset(W, H, shift, -20, W, H); else camera.clearViewOffset(); camera.updateProjectionMatrix();
+  frameView();   // the left panels (and an open card) cover part of the screen: centre the table in what is left
   const sc = (H * DPR) / (2 * Math.tan((camera.fov * Math.PI) / 360));
   for (const m of pointMats) m.uniforms.uScale.value = sc;
   placeCamera(); sizeTrack(); dirty = true;
@@ -587,10 +610,10 @@ const labelsEl = $('#labels');
 const labels = new Map();
 function label(key, cls, html, color, pri = 50) {
   let L = labels.get(key);
-  if (!L) { const el = document.createElement('div'); el.className = 'lb ' + cls; el.dataset.key = key; labelsEl.append(el); L = { el, p: V(0, 0, 0), html: '', x: -1, y: -1, on: true, used: true, dx: 0, dy: 0 }; labels.set(key, L); }
+  if (!L) { const el = document.createElement('div'); el.className = 'lb ' + cls; el.dataset.key = key; labelsEl.append(el); L = { el, cls, p: V(0, 0, 0), html: '', x: -1, y: -1, on: true, used: true, dx: 0, dy: 0 }; labels.set(key, L); }
   if (L.html !== html) { L.el.innerHTML = html; L.html = html; L.w = 0; }
   if (color && L.color !== color) { L.el.style.color = color; L.color = color; }
-  if (L.el.className !== 'lb ' + cls) L.el.className = 'lb ' + cls;
+  if (L.cls !== cls) { L.el.className = 'lb ' + cls + (L.on ? '' : ' hide'); L.cls = cls; L.w = 0; }
   L.used = true; L.pri = pri; return L;
 }
 const _v = V(0, 0, 0);
@@ -764,8 +787,16 @@ function apply() {
   for (const e of m.thoughts) { const k = e.at; if (!seen.thoughts.has(k)) { seen.thoughts.add(k); if (fresh(ts(e.at))) shockwave(rigTop(thoughtRig(e)), LEVELC[e.level] || '#4fe0c4', 9, 1400); } }
   seen.primed = true;
   if (m.replay) { seen.acts.clear(); seen.done.clear(); seen.thoughts.clear(); for (const a of m.acts) seen.acts.add(a.at + a.action + a.target); for (const o of m.orders) if (o.status === 'done' || o.status === 'declined') seen.done.add(o.id); for (const e of m.thoughts) seen.thoughts.add(e.at); }
-  renderHud(); dirty = true;
+  buildKnow(); buildHints(); renderHud(); dirty = true;
   if (openKey) refreshPanel();
+}
+function placeOfSeat(seat) {
+  const s = String(seat || '');
+  if (s.startsWith('keath')) return CONSOLE.clone().setY(1.5);
+  if (s === 'xanadu' || s === 'all' || !s) return null;
+  if (s === 'mind') return rigTop('l9');
+  const d = drone.get(displayName(s)); if (d?.shown) return d.shown.clone();
+  return rigTop(SEAT_RIG(s));
 }
 function thoughtRig(e) { if (e.focus && RIG[e.focus]) return e.focus; const m = /^(\w+) failing/.exec((e.reasons || [])[0] || ''); if (m && RIG[m[1]]) return m[1]; return /l9/.test(e.mind || '') ? 'l9' : /i3/.test(e.mind || '') ? 'i3' : 'msi'; }
 function actTarget(a) {
@@ -875,6 +906,19 @@ function frame(t) {
   for (const s of shocks) { if (!s.m.visible) continue; const k = (performance.now() - s.t0) / s.dur; if (k >= 1) { s.m.visible = false; continue; } s.m.scale.setScalar(0.5 + k * s.r); s.m.material.opacity = (1 - k) * 0.9; }
   // the PR stack breathes; waiting cards pulse
   PR_CARDS.forEach((s, i) => { s.position.y = s.userData.base + (reduced ? 0 : Math.sin(sec + i * 0.4) * 0.08); });
+  // the selection reticle: a turning ring and a plumb line to the floor
+  if (openKey) { const at = pickPos(openKey); if (at) { const R = openKey.kind === 'rig' ? 8 : 2.6, n = 28; for (let i = 0; i < n; i++) { if (i % 4 === 3) continue; const a1 = sec * 0.8 + (i / n) * Math.PI * 2, a2 = sec * 0.8 + ((i + 1) / n) * Math.PI * 2; flow.seg(at.clone().add(V(Math.cos(a1) * R, 0, Math.sin(a1) * R)), at.clone().add(V(Math.cos(a2) * R, 0, Math.sin(a2) * R)), WHITE, 0.9, 0); }
+    flow.seg(at, at.clone().setY(0), WHITE, 0.35, 0.6); glow.add(at.clone().setY(0.2), WHITE, 4, 0.5); } }
+  // the channel lives on xanadu: every message travels sender -> xanadu -> the seat it is for
+  for (const c of m.channel.slice(-60)) {
+    const age = (m.T - ts(c.at)) / 60000; if (age > 30 || age < 0 || c.kind === 'order-status') continue;
+    const from = placeOfSeat(c.from), to = placeOfSeat(c.kind === 'read' ? 'xanadu' : c.to), hub = RIG.xanadu.p.clone().setY(rigObj.xanadu.h + 1);
+    if (!from) continue;
+    const col = String(c.from || '').startsWith('keath') ? KEATH : C(colorOf(displayName(c.from))), a = 0.55 * (1 - age / 30);
+    flow.curve(from, hub, 9, col, a, 1.5, 12); if (to) flow.curve(hub, to, 9, col, a * 0.5, 1.5, 12);
+  }
+  // the knowledge ring
+  knowFrame(sec);
   glow.end(); flow.end(); glyphs.end(); dust.end();
   labelFrame();
 }
@@ -909,6 +953,8 @@ function labelFrame() {
   const open = m.orders.filter((o) => !['done', 'declined'].includes(o.status)).length;
   const zc = label('z:console', 'console', `Keath's console · ${open} order${open === 1 ? '' : 's'} open`, null, 70); zc.p.copy(CONSOLE).setY(0.6); zc.dx = -70; zc.dy = 10; pickAttr(zc, { kind: 'console' });
   if ([...drone.values()].some((d) => d.s.rig === 'cloud' && d.s.station !== 'pegs')) { const zk = label('z:cloud', 'zone', 'cloud seats (GitHub)'); zk.p.copy(CLOUD).add(V(0, 3, 0)); }
+  for (const k of KNOW.slice(0, 40)) { const L = label('k:' + k.id, 'tag', `${esc(k.name)}${k.n > 1 ? ' · ' + k.n : ''}`, k.color, 25); L.p.copy(k.p).add(V(0, 1.2, 0)); pickAttr(L, { kind: 'know', id: k.id }); }
+  if (!KNOW.length) { const L = label('k:none', 'zone', 'knowledge ring: atlas · gitnexus · vault · decisions (not in this feed yet)', null, 20); L.p.set(0, 1, -TABLE_R - 3); L.dx = -200; }
   const e = m.thoughts.at(-1);
   if (e) { const L = label('th', 'thought', `<b style="font-style:normal">${esc(displayName(e.mind))}</b> <span class="dim">${esc(agoAt(e.at, m.T))} · ${esc(e.level)}</span><br>“${esc(e.line)}”`, LEVELC[e.level], 80); L.p.copy(rigTop(thoughtRig(e))).add(V(0, 14, 0)); L.dx = 16; pickAttr(L, { kind: 'thought', at: e.at }); }
   for (const [k, L] of labels) if (!L.used) { L.el.remove(); labels.delete(k); }
@@ -943,11 +989,27 @@ function pickPos(p) {
   if (p.kind === 'console') return CONSOLE.clone();
   if (p.kind === 'work' || p.kind === 'claims') return RIG.msi.p.clone().setY(5);
   if (p.kind === 'thought') return rigTop('l9');
+  if (p.kind === 'know') return KNOW.find((k) => k.id === p.id)?.p?.clone();
   return null;
 }
 function flyToPick(p) { const at = pickPos(p); if (at) flyTo(at, p.kind === 'rig' ? 50 : 34); }
+const SHAPE_WHY = {
+  rig: 'A tower is a rig, a real machine. Height = RAM free; floor arcs = its disks; bands = its health checks; ripples = its heartbeat.',
+  svc: 'A node in the ring is a spine service. Its light runs to the rig that hosts it; red with a pillar = down when it should be up.',
+  drone: 'A drone is an agent. It hovers over what it is working on now; the tether points at the work.',
+  crystal: 'A crystal is a git checkout holding unsaved work: bigger = more uncommitted files, hotter = more unpushed commits.',
+  pr: 'A card is a pull request: amber waits for a review, violet merged, teal open.',
+  order: 'A packet is one of your work orders: it waits on your console, rides the agent who takes it, and bursts into a ring when done.',
+  console: 'Your console: every order starts here.',
+  thought: "A rising column is a Mind's thought, spelled in its own letters over the rig it is about.",
+  know: "The outer ring is the colony's knowledge: capabilities, code graphs, the vault, decisions.",
+};
 function tipText(p) {
   if (!p || !M) return '';
+  const why = SHAPE_WHY[p.kind] ? `<div class="note" style="margin-top:4px;border-top:1px solid var(--hair);padding-top:4px">${SHAPE_WHY[p.kind]}</div>` : '';
+  return tipCore(p) + why;
+}
+function tipCore(p) {
   if (p.kind === 'rig') { const d = M.rigs[p.id]; return `<b>${esc(d.name)} · ${esc(d.role)}</b>${d.failing.map((c) => `✖ ${esc(c.name)}: ${esc(c.doc?.verdict || c.detail || '')}`).join('<br>') || 'all checks ok'}`; }
   if (p.kind === 'svc') { const s = M.services.find((x) => x.name === p.name); return s ? `<b>${esc(s.name)} · ${esc(s.tier)}</b>${s.up ? `up, answered in ${s.ms} ms` : s.expected ? 'down, expected (parked on purpose)' : 'DOWN: not expected'}` : ''; }
   if (p.kind === 'drone') { const d = drone.get(p.name); return d ? `<b>${esc(p.name)}</b>${esc(d.s.doing)}<br><span class="note">${esc(agoAt(d.s.at, M.T))} · ${esc(ST_TITLE[d.s.station] || d.s.station)}</span>` : ''; }
@@ -972,7 +1034,7 @@ canvas.addEventListener('pointermove', (e) => {
   const html = tipText(p); if (!html) { tip.hidden = true; return; }
   tip.innerHTML = html; tip.hidden = false; tip.style.left = Math.min(e.clientX + 14, W - 370) + 'px'; tip.style.top = Math.min(e.clientY + 14, H - 120) + 'px';
 });
-canvas.addEventListener('pointerup', (e) => { const d = downAt; downAt = null; if (d && !d.moved && e.button === 0) { const p = pickAt(e.clientX, e.clientY); if (p) openPick(p); else closePanel(); } });
+canvas.addEventListener('pointerup', (e) => { const d = downAt; downAt = null; if (d && !d.moved && e.button === 0) { const p = pickAt(e.clientX, e.clientY); if (p) select(p); else closePanel(); } });
 canvas.addEventListener('dblclick', (e) => { const p = pickAt(e.clientX, e.clientY); if (p) flyToPick(p); else flyTo(HOME.target, HOME.r, HOME.phi); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerleave', () => { tip.hidden = true; });
@@ -980,8 +1042,30 @@ canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.tween = null; 
 
 // ================================================================ the focus panel: facts, the doctor, and real verbs
 const panel = $('#panel'); let openKey = null;
-function openPick(p) { openKey = p; refreshPanel(true); }
-function closePanel() { openKey = null; panel.hidden = true; }
+function openPick(p) { openKey = p; $('#rivals').hidden = true; refreshPanel(true); frameView(); }
+function closePanel() { openKey = null; panel.hidden = true; frameView(); }
+function select(p) { openPick(p); flyToPick(p); }
+// every node on the table, in one list: Tab cycles it, the search box filters it
+function selectables() {
+  if (!M) return [];
+  const L = RIGS.map((r) => ({ p: { kind: 'rig', id: r.id }, name: r.name, sub: 'rig · ' + r.role }));
+  for (const s of M.services) L.push({ p: { kind: 'svc', name: s.name }, name: s.name, sub: 'service · ' + (s.up ? 'up' : s.expected ? 'parked' : 'DOWN') });
+  for (const [name, d] of drone) L.push({ p: { kind: 'drone', name }, name, sub: 'agent · ' + (ST_TITLE[d.s.station] || d.s.station) });
+  M.prs.forEach((r, i) => L.push({ p: { kind: 'pr', i }, name: `${r.repo}#${r.number}`, sub: 'PR · ' + (r.waiting ? 'waiting review' : r.state) }));
+  for (const o of M.orders) if (pkt.has(o.id)) L.push({ p: { kind: 'order', id: o.id }, name: o.text.slice(0, 50), sub: 'order · ' + o.status });
+  for (const c of M.atRisk) L.push({ p: { kind: 'crystal', path: c.path }, name: c.label, sub: `checkout · ${c.dirty} files, ${c.ahead} unpushed` });
+  L.push({ p: { kind: 'console' }, name: "Keath's console", sub: 'orders' }, { p: { kind: 'work' }, name: 'Work at risk', sub: 'all checkouts' });
+  for (const k of KNOW) L.push({ p: { kind: 'know', id: k.id }, name: k.name, sub: 'knowledge · ' + k.kind });
+  return L;
+}
+let tabI = -1;
+function cycle(dir) { const L = selectables(); if (!L.length) return; const cur = openKey ? L.findIndex((x) => JSON.stringify(x.p) === JSON.stringify(openKey)) : tabI; tabI = (cur + dir + L.length) % L.length; select(L[tabI].p); }
+function frameView() {
+  const left = W > 1100 ? 360 : 0, right = openKey || !$('#rivals').hidden ? (W > 720 ? 430 : 0) : 0;
+  const shift = Math.round((right - left) / 2);
+  if (shift) camera.setViewOffset(W, H, shift, -20, W, H); else camera.clearViewOffset();
+  camera.updateProjectionMatrix(); camMoved = true;
+}
 function refreshPanel(first) {
   const p = openKey; if (!p || !M) return;
   if (!first && panel.contains(document.activeElement) && /TEXTAREA|SELECT|INPUT/.test(document.activeElement.tagName)) return;   // never yank a form from under Keath
@@ -997,6 +1081,7 @@ function verbs(o) {
     ${acts.map((a, i) => `<button class="small" data-actorder="${i}" ${canWrite() ? '' : 'disabled'} title="Post it as an order: the seat runs it and posts the receipt">Send as action order</button>`).join('')}
     <button class="small" data-v="order" ${canWrite() ? '' : 'disabled'}>Make this an order</button>
     <button class="small" data-v="ask" ${canWrite() ? '' : 'disabled'}>Ask Claude</button>
+    <button class="small" data-v="suggest" ${canWrite() ? '' : 'disabled'} title="Tell the MSI Claude how this view or this node should improve">Suggest an improvement</button>
     ${o.link ? `<a class="btn small" href="${esc(o.link)}" target="_blank" rel="noopener">${esc(o.linkLabel || 'Open link')} ↗</a>` : ''}
   </div>
   <form class="compose" data-form="order" hidden><textarea maxlength="600" required>${esc(o.order || '')}</textarea>
@@ -1005,6 +1090,8 @@ function verbs(o) {
     <button class="primary small" type="submit">Post order</button></div><span class="note" data-n></span></form>
   <form class="compose" data-form="actorder" hidden><div class="note" data-what></div>
     <div class="row"><select data-f="to">${SEATS.slice(1).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select><button class="primary small" type="submit">Send action order</button></div><span class="note" data-n></span></form>
+  <form class="compose" data-form="suggest" hidden><textarea maxlength="560" required placeholder="What should change here? (the view, the data, the behaviour)"></textarea>
+    <div class="row"><button class="primary small" type="submit">Send suggestion</button><span class="note">goes to the MSI Claude, tagged with this node</span></div><span class="note" data-n></span></form>
   <form class="compose" data-form="ask" hidden><textarea maxlength="600" required>${esc(o.ask || '')}</textarea>
     <div class="row"><button class="primary small" type="submit">Send to MSI Claude</button><span class="note">appears at the top of its next prompt</span></div><span class="note" data-n></span></form>`;
 }
@@ -1068,6 +1155,11 @@ function panelHtml(p) {
     return head("Keath's console", 'post an order; watch its packet travel', 'var(--keath)') +
       `<ul class="list">${open.map((o) => `<li class="click" data-order="${esc(o.id)}"><b>${esc(o.status)}</b> · ${esc(o.text.slice(0, 90))}</li>`).join('') || '<li>No open orders.</li>'}</ul>` + verbs(panelVerbs);
   }
+  if (p.kind === 'know') {
+    const k = KNOW.find((x) => x.id === p.id); if (!k) return '';
+    panelVerbs = { order: `Look at ${k.kind} "${k.name}" and report what needs doing`, station: 'anvil', to: 'any', ask: `About ${k.kind} ${k.name}: ` };
+    return head(esc(k.name), esc(k.kind), k.color) + `<pre style="white-space:pre-wrap;font:11px var(--f-data);color:#cfe2ea">${esc(JSON.stringify(k.detail, null, 1).slice(0, 900))}</pre>` + verbs(panelVerbs);
+  }
   if (p.kind === 'thought') {
     const e = (feed.events || []).find((x) => x.at === p.at); if (!e) return '';
     return head(esc(displayName(e.mind)), `${esc(e.level)} · ${esc(e.model || '')} · ${e.ms ? (e.ms / 1000).toFixed(1) + ' s to think' : ''}`, LEVELC[e.level]) + `<p><i>“${esc(e.line)}”</i></p><h3>Its reasons (the facts)</h3><ul class="list">${(e.reasons || []).map((r) => `<li>${esc(r)}</li>`).join('')}</ul>`;
@@ -1081,7 +1173,9 @@ function wirePanel(p) {
   const v = panelVerbs; if (!v) return;
   const acts = (v.acts || []).filter(Boolean);
   panel.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => propose(acts[+b.dataset.act])));
-  const forms = { order: panel.querySelector('[data-form=order]'), ask: panel.querySelector('[data-form=ask]'), actorder: panel.querySelector('[data-form=actorder]') };
+  const forms = { order: panel.querySelector('[data-form=order]'), ask: panel.querySelector('[data-form=ask]'), actorder: panel.querySelector('[data-form=actorder]'), suggest: panel.querySelector('[data-form=suggest]') };
+  panel.querySelector('[data-v=suggest]')?.addEventListener('click', () => show('suggest'));
+  forms.suggest.addEventListener('submit', (e) => { e.preventDefault(); suggest(forms.suggest.querySelector('textarea').value, nodeName(p), forms.suggest.querySelector('[data-n]')); });
   const show = (k) => { for (const f in forms) forms[f].hidden = f !== k; const t = forms[k].querySelector('textarea'); (t || forms[k].querySelector('select')).focus(); };
   panel.querySelector('[data-v=order]')?.addEventListener('click', () => show('order'));
   panel.querySelector('[data-v=ask]')?.addEventListener('click', () => show('ask'));
@@ -1113,6 +1207,17 @@ async function askClaude(text, note) {
   if (MOCK) { mockLines.push({ at: new Date(now()).toISOString(), from: 'keath (chorus)', to: 'claude (msi seat)', text: 'MOCK: ' + text }); note.className = 'note ok'; note.textContent = 'MOCK: not sent.'; apply(); return; }
   try { await postJSON('say', { text, to: 'claude' }); note.className = 'note ok'; note.textContent = 'Sent to MSI Claude.'; setTimeout(poll, 2500); }
   catch (err) { note.className = 'note bad'; note.textContent = 'Not sent: ' + err.message; }
+}
+function nodeName(p) { const x = selectables().find((s) => JSON.stringify(s.p) === JSON.stringify(p)); return x ? `${x.sub.split(' · ')[0]} ${x.name}` : p.kind; }
+async function suggest(what, node, note) {
+  what = String(what || '').trim(); if (!what) return;
+  const text = `SUGGEST: ${what} — ${node} (from HOLO)`.slice(0, 600);
+  if (!canWrite()) { note.className = 'note bad'; note.textContent = 'Needs the live table (or ?mock=1).'; return; }
+  if (MOCK) { mockLines.push({ at: new Date(now()).toISOString(), from: 'keath (chorus)', to: 'claude (msi seat)', text: 'MOCK: ' + text }); note.className = 'note ok'; note.textContent = 'MOCK: not sent.'; apply(); return; }
+  try {
+    if (Array.isArray(feed.suggestions)) await postJSON('suggest', { text: what, node, view: 'holo' }); else await postJSON('say', { text, to: 'claude' });
+    note.className = 'note ok'; note.textContent = 'Sent. The MSI Claude sees it on its next prompt.'; setTimeout(poll, 2500);
+  } catch (err) { note.className = 'note bad'; note.textContent = 'Not sent: ' + err.message; }
 }
 let pendingAct = null, modalTimer = 0;
 async function propose(a) {
@@ -1256,13 +1361,15 @@ function loop(t) {
 
 // ================================================================ keys
 addEventListener('keydown', (e) => {
-  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) { if (e.key === 'Escape') document.activeElement.blur(); return; }
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) { if (e.key === 'Escape') { document.activeElement.blur(); $('#qr').hidden = true; } return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   lastInput = performance.now();
+  if (e.key === 'Tab') { e.preventDefault(); cycle(e.shiftKey ? -1 : 1); return; }
+  if (e.key === '/') { e.preventDefault(); $('#q').focus(); return; }
   const r = RIGS.find((x) => x.key === e.key);
-  if (r) { const p = { kind: 'rig', id: r.id }; openPick(p); flyToPick(p); return; }
+  if (r) { select({ kind: 'rig', id: r.id }); return; }
   const k = e.key.toLowerCase();
-  if (k === 'escape') { if (!$('#modal').hidden) closeModal(); else if (openKey) closePanel(); else if (document.fullscreenElement) document.exitFullscreen(); }
+  if (k === 'escape') { if (!$('#modal').hidden) closeModal(); else if (openKey) closePanel(); else if (!$('#rivals').hidden) { $('#rivals').hidden = true; frameView(); } else if (document.fullscreenElement) document.exitFullscreen(); }
   else if (k === 'w') { openPick({ kind: 'work' }); flyTo(RIG.msi.p.clone().setY(4), 34); }
   else if (k === 'o') { openPick({ kind: 'console' }); flyTo(CONSOLE.clone().add(V(0, 0, -14)), 56); setTimeout(() => panel.querySelector('[data-v=order]')?.click(), 50); }
   else if (k === 't') { togglePlay(); }
@@ -1275,6 +1382,82 @@ function toggleKey() { const k = $('#key'); k.hidden = !k.hidden; $('#b-key').se
 $('#b-key').addEventListener('click', toggleKey);
 $('#b-full').addEventListener('click', () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.().catch(() => {}); });
 $('#b-order').addEventListener('click', () => { openPick({ kind: 'console' }); setTimeout(() => panel.querySelector('[data-v=order]')?.click(), 30); });
+
+// ================================================================ search: type any node's name, Enter flies there
+const qIn = $('#q'), qr = $('#qr'); let qList = [], qSel = 0;
+function renderFind() {
+  const s = qIn.value.trim().toLowerCase(); const all = selectables();
+  qList = (s ? all.filter((x) => (x.name + ' ' + x.sub).toLowerCase().includes(s)) : all).slice(0, 40); qSel = 0;
+  qr.innerHTML = qList.map((x, i) => `<li role="option" data-i="${i}" aria-selected="${i === 0}"><span>${esc(x.name)}</span><small>${esc(x.sub)}</small></li>`).join('') || '<li><span class="note">nothing by that name</span></li>';
+  qr.hidden = false;
+}
+qIn.addEventListener('input', renderFind); qIn.addEventListener('focus', renderFind);
+qIn.addEventListener('blur', () => setTimeout(() => (qr.hidden = true), 150));
+qIn.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); qSel = clamp(qSel + (e.key === 'ArrowDown' ? 1 : -1), 0, qList.length - 1); qr.querySelectorAll('li').forEach((li, i) => li.setAttribute('aria-selected', String(i === qSel))); }
+  if (e.key === 'Enter' && qList[qSel]) { e.preventDefault(); select(qList[qSel].p); qIn.blur(); qIn.value = ''; }
+});
+qr.addEventListener('mousedown', (e) => { const li = e.target.closest('li[data-i]'); if (li) { select(qList[+li.dataset.i].p); qIn.value = ''; qr.hidden = true; } });
+
+// ================================================================ nudges: the top next moves, from the needs and the doctor, rotating
+let hints = [], hintI = 0;
+function buildHints() {
+  const m = M, L = [];
+  for (const r of RIGS) for (const c of m.rigs[r.id].failing) L.push({ w: 100, t: `<b>${esc(r.name)} ${esc(c.name)} is failing.</b> ${esc(c.doc?.verdict ? 'Doctor: ' + c.doc.verdict : c.detail || '')}`, p: { kind: 'rig', id: r.id } });
+  for (const s of m.services) if (!s.up && !s.expected) L.push({ w: 90, t: `<b>${esc(s.name)} is down.</b> ${s.act ? 'It can be restarted from its card.' : 'Not on the restart allowlist: make it an order.'}`, p: { kind: 'svc', name: s.name } });
+  const silent = RIGS.filter((r) => r.id !== 'xanadu' && m.rigs[r.id].silent); for (const r of silent) L.push({ w: 85, t: `<b>${esc(r.name)} has gone silent.</b> Its heartbeat is ${m.rigs[r.id].age == null ? 'missing' : Math.round(m.rigs[r.id].age) + ' min old'}.`, p: { kind: 'rig', id: r.id } });
+  for (const r of RIGS) for (const [k, v] of Object.entries(m.rigs[r.id].disks || {})) if (v.pct_free < 12) L.push({ w: 70, t: `<b>${esc(r.name)} ${esc(k)}: is ${Math.round(100 - v.pct_free)}% full</b> (${v.free_gb} GB left).`, p: { kind: 'rig', id: r.id } });
+  for (const p of (feed.prs_waiting || []).slice(0, 2)) { const i = m.prs.findIndex((x) => x.repo === p.repo && x.number === p.number); L.push({ w: 60, t: `<b>${esc(p.repo)}#${p.number} waits for a review.</b> ${esc(p.title)}`, p: i >= 0 ? { kind: 'pr', i } : null }); }
+  const hot = m.atRisk.filter((c) => c.ahead > 0).sort((a, b) => b.ahead - a.ahead)[0];
+  if (hot) L.push({ w: 55, t: `<b>${esc(hot.label)} holds ${hot.ahead} unpushed commit${hot.ahead === 1 ? '' : 's'}.</b> One click saves them to a new branch on GitHub.`, p: { kind: 'crystal', path: hot.path } });
+  const b = feed.backup; if (b && b.age_h > 36) L.push({ w: 80, t: `<b>The off-box backup is ${hrs(b.age_h)} old.</b> Run it from xanadu's card.`, p: { kind: 'rig', id: 'xanadu' } });
+  const posted = m.orders.filter((o) => o.status === 'posted' && m.T - ts(o.at) > 30 * 60e3); if (posted.length) L.push({ w: 50, t: `<b>${posted.length} order${posted.length === 1 ? '' : 's'} nobody has taken for 30 min.</b> Address one to a seat.`, p: { kind: 'console' } });
+  hints = L.sort((a, b) => b.w - a.w).slice(0, 3); hintI = hintI % Math.max(1, hints.length); showHint();
+}
+function showHint() {
+  const el = $('#hint'); if (!hints.length) { el.hidden = false; $('#hint-n').textContent = 'ALL CLEAR'; $('#hint-t').textContent = 'Nothing needs you. The colony is working on its own.'; $('#hint-go').hidden = true; $('#hint-next').hidden = true; return; }
+  const x = hints[hintI]; el.hidden = false; $('#hint-n').textContent = `NEXT MOVE ${hintI + 1}/${hints.length}`; $('#hint-t').innerHTML = x.t; $('#hint-go').hidden = !x.p; $('#hint-next').hidden = hints.length < 2;
+}
+$('#hint-go').addEventListener('click', () => { const x = hints[hintI]; if (x?.p) select(x.p); });
+$('#hint-next').addEventListener('click', () => { hintI = (hintI + 1) % Math.max(1, hints.length); showHint(); });
+setInterval(() => { if (hints.length > 1 && !document.hidden) { hintI = (hintI + 1) % hints.length; showHint(); } }, 8000);
+
+// ================================================================ rivals: the other bakeoff cockpits, for compare and contrast
+const RAW = 'https://raw.githubusercontent.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/';
+const RIVALS = [
+  { n: 15, who: 'i3 Claude', name: 'HOLOMIND', pitch: 'A holographic table you look into, in Godot: districts, a palette and a thought pipeline.', img: RAW + 'bakeoff/mindview-i3claude/receipts/holomind-fixture.png' },
+  { n: 17, who: 'Muse', name: 'Holographic war room', pitch: 'A 3D volume with a coordinate stack, a raymarched layer and slicing; agents embodied in the volume.' },
+  { n: 19, who: 'Muse', name: 'Capability Atlas layer', pitch: 'Stacked on #17: 75 graded capabilities, one node per entry, by rig and state.' },
+  { n: 18, who: 'GPT-6', name: 'Cognitive Loom', pitch: 'A causal thought sequencer: rigs as an attention field and a DAW-like thought tape.' },
+  { n: 20, who: 'GPT-6', name: 'Software factory seat', pitch: 'A workstation that reads Studio projects and runs real missions with receipts.' },
+  { n: 16, who: 'MSI Claude (this one)', name: 'CHORUS: Sky, Forge, HOLO', pitch: 'The sky, the forge and this table: one live feed, real orders and actions, every mark a fact.' },
+];
+function openRivals() {
+  closePanel(); const r = $('#rivals');
+  $('#rivals-b').innerHTML = RIVALS.map((x) => `<article><h3>#${x.n} ${esc(x.name)} <span class="note">· ${esc(x.who)}</span></h3><p>${esc(x.pitch)}</p>
+    <p><a href="https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/${x.n}" target="_blank" rel="noopener">Open PR #${x.n} ↗</a>${x.img ? '' : ' <span class="note">· no receipt image on its branch yet</span>'}</p>${x.img ? `<img alt="${esc(x.name)} receipt" src="${x.img}">` : ''}</article>`).join('');
+  r.hidden = false; frameView();
+}
+$('#b-rivals').addEventListener('click', () => { if ($('#rivals').hidden) openRivals(); else { $('#rivals').hidden = true; frameView(); } });
+$('#rivals-x').addEventListener('click', () => { $('#rivals').hidden = true; frameView(); });
+
+// ================================================================ the knowledge ring: what the colony knows, round the table's rim
+// Slots for feed fields that may or may not be present; a missing one is shown as missing, never invented.
+let KNOW = [];
+function buildKnow() {
+  const f = feed, L = [];
+  const atlas = f.atlas || f.knowledge?.atlas, gn = f.gitnexus || f.knowledge?.gitnexus, vault = f.vault || f.knowledge?.vault, dec = f.decisions || f.knowledge?.decisions;
+  if (atlas) { const by = atlas.by_kind || atlas.kinds || {}; for (const [k, v] of Object.entries(by)) L.push({ id: 'atlas:' + k, kind: 'capabilities', name: `${k}`, n: typeof v === 'number' ? v : v.count ?? 0, color: '#7fe7ff', detail: v }); }
+  if (gn) for (const r of (gn.repos || gn)) if (r && r.name) L.push({ id: 'gn:' + r.name, kind: 'code graph', name: r.name, n: r.nodes ?? r.symbols ?? 1, stale: r.stale_h ?? r.age_h, color: (r.stale_h ?? r.age_h ?? 0) > 72 ? '#5a6872' : '#a9e094', detail: r });
+  if (vault) for (const v of (vault.recent || vault.notes || []).slice(0, 14)) L.push({ id: 'vault:' + (v.path || v.title), kind: 'vault note', name: v.title || v.path, n: 1, color: '#c9a6ff', detail: v });
+  if (dec) for (const d of (dec.recent || dec).slice?.(0, 10) || []) L.push({ id: 'dec:' + (d.id || d.q || d.question), kind: 'decision', name: String(d.question || d.q || d.id).slice(0, 60), n: 1, color: '#ffe08a', detail: d });
+  const R = TABLE_R + 9;
+  L.forEach((k, i) => { const a = Math.PI * 0.18 + (i / Math.max(1, L.length)) * Math.PI * 1.64; k.p = V(Math.cos(a + Math.PI) * R, 4 + (i % 3) * 1.6, Math.sin(a + Math.PI) * R * 0.92 - 4); });
+  KNOW = L;
+}
+function knowFrame(sec) {
+  for (const k of KNOW) { const c = C(k.color); glow.add(k.p, c, 2.5 + Math.min(9, Math.sqrt(k.n || 1) * 1.2), k.stale > 72 ? 0.3 : 0.75 + 0.2 * Math.sin(sec + k.p.x)); flow.seg(k.p, k.p.clone().setY(0), c, 0.18, 0); }
+}
 
 // ================================================================ data: poll the feeder; keep the last good feed
 async function poll() {
@@ -1290,6 +1473,8 @@ addEventListener('resize', resize);
   resize(); apply();
   if (Q.get('t')) setView(now() - +Q.get('t') * 60000);          // ?t=minutes-ago opens a replay (used for receipts)
   if (Q.get('focus')) { const [kind, id] = Q.get('focus').split(':'); const p = kind === 'rig' ? { kind, id } : kind === 'svc' ? { kind, name: id } : { kind }; openPick(p); }
+  if (MOCK && Q.get('rehearse') === 'order') setTimeout(() => { const n = document.createElement('span'); postOrder({ text: 'MOCK · Rehearse an order: check the i3 Docker fix and post the receipt', to: 'claude (i3 seat)', station: 'quench' }, n); select({ kind: 'console' }); }, 600);
+  if (MOCK && Q.get('rehearse') === 'act') setTimeout(() => { select({ kind: 'rig', id: 'xanadu' }); propose(actionFor('task', 'offbox-backup')); }, 600);
   if (PERF) { runPerf(); return; }
   requestAnimationFrame(loop);
 })();
