@@ -26,13 +26,27 @@ func _run() -> void:
 	var selected: Dictionary = scanned["projects"][0]
 	var spec: Dictionary = CONTRACT.make_spec(selected, "Repair weapon targeting",
 		"Fix the observable target lock bug and add a negative control.",
-		"Godot import is error-free\nLock-on regression test passes", "R2")
+		"Godot import is error-free\nLock-on regression test passes", "R2",
+		"python -m pytest tests/test_lockon.py -q")
 	_check(spec.get("ok", false), "valid mission envelope")
 	if spec.get("ok", false):
 		_check(spec["body"]["repo"] == "C:/dev/active/Furyline"
 			and spec["body"]["base_branch"] == "main", "source-provided path and branch preserved")
 		_check(spec["body"]["acceptance"].size() == 2, "acceptance parsed as two criteria")
 		_check(spec["body"]["risk"] == "R2", "code scope has explicit human-gated risk")
+		_check(spec["body"].get("validator") == "python -m pytest tests/test_lockon.py -q",
+			"R2 mission carries predeclared validator")
+	_check(not CONTRACT.make_spec(selected, "Repair weapon targeting",
+		"Fix the observable target lock bug and add a negative control.",
+		"One test", "R2").get("ok", false), "R2 without validator refused")
+	_check(not CONTRACT.make_spec(selected, "Repair weapon targeting",
+		"Fix the observable target lock bug and add a negative control.",
+		"One test", "R2", "python -m pytest\nrm -rf .").get("ok", false),
+		"multiline validator refused")
+	_check(not CONTRACT.make_spec(selected, "Repair weapon targeting",
+		"Fix the observable target lock bug and add a negative control.",
+		"One test", "R0", "python -m pytest").get("ok", false),
+		"lower-risk mission cannot declare a validator")
 	_check(not CONTRACT.make_spec(selected, "Patch", "too short", "", "R2").get("ok", false),
 		"empty acceptance and short objective refused")
 	_check(not CONTRACT.make_spec(selected, "Repair weapon targeting",
@@ -43,6 +57,11 @@ func _run() -> void:
 	var accepted: Dictionary = CONTRACT.parse_post_result(201, ack, selected["path"], "R2")
 	_check(accepted.get("ok", false) and accepted.get("needs_approval", false),
 		"exact accepted R2 acknowledgement")
+	_check(CONTRACT.parse_post_result(201, ack.replace("C:/dev/active/Furyline", "c:\\\\DEV\\\\active\\\\Furyline"),
+		selected["path"], "R2").get("ok", false), "canonical Windows slash and case spellings match")
+	_check(CONTRACT.parse_post_result(400, JSON.stringify({"error": "validator rejected"}),
+		selected["path"], "R2").get("reason", "").contains("validator rejected"),
+		"Studio HTTP 400 owner error is shown")
 	_check(not CONTRACT.parse_post_result(200, ack, selected["path"], "R2").get("ok", false),
 		"HTTP 200 is not creation")
 	_check(not CONTRACT.parse_post_result(201, ack, "C:/dev/other", "R2").get("ok", false),
@@ -60,6 +79,7 @@ func _run() -> void:
 	desk._title.text = "Repair weapon targeting"
 	desk._objective.text = "Fix the observable target lock bug and add a negative control."
 	desk._acceptance.text = "Godot import is error-free\nLock-on regression passes"
+	desk._validator.text = "python -m pytest tests/test_lockon.py -q"
 	desk._update_submit()
 	_check(not desk._submit.disabled, "explicit selected fresh project can submit")
 	desk._observed_at = Time.get_ticks_msec() - desk.FRESH_MS - 1
@@ -98,6 +118,7 @@ func _run() -> void:
 	desk._release_submission_guard()
 	_check(desk._submission_guard == "draft" and desk._title.text.is_empty()
 		and desk._objective.text.is_empty() and desk._acceptance.text.is_empty()
+		and desk._validator.text.is_empty()
 		and desk._project_select.get_selected_id() == 0,
 		"new draft clears previous mission and requires explicit repo choice")
 	desk.queue_free()
