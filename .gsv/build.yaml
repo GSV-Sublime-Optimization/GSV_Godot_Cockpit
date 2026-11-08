@@ -40,6 +40,9 @@ commands:
     - name: Portable agent handoff CLI authority-negative controls
       run: ${python} -m unittest discover -s tools/workstation/tests -p test_*.py
       requires: [python]
+    - name: Native Godot agent handoff export file and no-false-grant gate
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_agent_export_test.gd
+      requires: [godot]
 security:
   network_required: false
   secrets_required: false
