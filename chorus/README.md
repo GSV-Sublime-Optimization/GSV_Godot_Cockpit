@@ -78,6 +78,19 @@ Every mark in the sky is data; nothing is there for decoration.
 - **Hooks (so the MSI Claude reacts):** copy `hooks/*.py` to `%LOCALAPPDATA%/KiloCore/bin/` and add a PostToolUse hook for `claude_activity.py` and a UserPromptSubmit hook for `chorus_inbox.py` in Claude Code settings.
 - **Keys:** **F** fullscreen, **Esc** leaves fullscreen and stops a rehearsal. The browser's own close always works.
 
+### On other rigs
+The snapshot page runs anywhere with a browser. The feeder and CLI read their per-rig settings from `chorus/portable.py`. Every default is the MSI's value, so nothing changes on the MSI.
+
+| Env var | Default | Set it when |
+|---|---|---|
+| `CHORUS_XANADU` | `xanadu`, an `~/.ssh/config` alias; `local` when the hostname is `xanadu` | your rig has no `xanadu` alias. For example, `xeno@100.74.243.72`. |
+| `CHORUS_ROOTS` | `C:/dev/active;K:/dev/worktrees`, separated by `os.pathsep` | your checkouts live elsewhere. This sets the work scan and the `preserve` allowlist. |
+| `COLONY_PY`, `COLONY_PYTHON` | `C:/dev/tools/colony/colony.py`; `python` on Windows, this Python elsewhere | the claims board is elsewhere |
+| `CHORUS_I3_SSH`, `CHORUS_I3_OLLAMA` | `i3`, `http://100.102.251.35:11434` | the doctor reaches the i3 another way |
+| `CHORUS_TD_FEED` | `C:/dev/active/Dev-Mentor/state/fleet/feed.json` | as before |
+
+What is still MSI-only, by design: the spine (`127.0.0.1:7337`) and the colony containers. The scheduled tasks behind `/act` exist only on Windows; elsewhere the action answers "Windows-only" and runs nothing. Off the MSI, those panels show as unavailable.
+
 ## Bakeoff hard rules
 - **Windowed:** an ordinary browser tab. It is never topmost and never takes the screen; fullscreen is opt-in.
 - **Actuators (since 1efe665; this breaks hard rule 2 as written):** `POST /act` runs, after a second confirm within 60 s, `schtasks /run` on four colony tasks (including the off-box backup, which writes to xanadu), `docker restart` on nine colony containers, the doctor, or a `git push` of unpushed commits to a new `claude/preserve-*` branch. The page has no button for it yet; it is reachable over HTTP on loopback. The doctor also SSHes to the i3 and runs a read-only PowerShell query there every 5 minutes while something fails.

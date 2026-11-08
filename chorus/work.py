@@ -14,8 +14,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-COLONY = Path("C:/dev/tools/colony/colony.py")
-ROOTS = [Path("C:/dev/active"), Path("K:/dev/worktrees")]
+import portable
+
+COLONY = portable.COLONY            # COLONY_PY overrides
+ROOTS = portable.roots()            # CHORUS_ROOTS overrides
 _cache: dict[str, tuple[float, object]] = {}
 
 
@@ -31,7 +33,7 @@ def _cached(key: str, ttl: float, fn):
 
 
 def _claims() -> list[dict]:
-    r = subprocess.run(["python", str(COLONY), "status", "--json"], capture_output=True, text=True,
+    r = subprocess.run([portable.COLONY_PYTHON, str(COLONY), "status", "--json"], capture_output=True, text=True,
                        timeout=30, encoding="utf-8", errors="replace")
     rows = json.loads(r.stdout or "[]")
     groups: dict[tuple, dict] = {}

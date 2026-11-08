@@ -23,6 +23,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import portable  # noqa: E402  (CHORUS_XANADU)
+
 HERE = Path(__file__).resolve().parent
 FEED = HERE / "feed.json"
 SEAT = os.environ.get("CHORUS_SEAT", "claude (msi seat)")
@@ -166,8 +169,7 @@ def order_status(oid: str, status: str, note: str, link: str) -> None:
 
 
 def _post(msg: dict) -> None:
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
-                        "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
+    r = subprocess.run(portable.xanadu_cmd("mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"),
                        input=json.dumps(msg) + chr(10), capture_output=True, text=True, timeout=30)
     print("sent" if r.returncode == 0 else f"not sent (ssh exit {r.returncode})")
 
@@ -177,8 +179,7 @@ def say(text: str, to: str) -> None:
     if not text:
         sys.exit("empty message")
     msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": SEAT, "to": to, "text": text}
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
-                        "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
+    r = subprocess.run(portable.xanadu_cmd("mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"),
                        input=json.dumps(msg) + "\n", capture_output=True, text=True, timeout=30)
     print("sent" if r.returncode == 0 else f"not sent (ssh exit {r.returncode})")
 

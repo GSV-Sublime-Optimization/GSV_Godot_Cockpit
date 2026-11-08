@@ -20,6 +20,8 @@ import threading
 import time
 from pathlib import Path
 
+import portable  # CHORUS_XANADU etc.; every default is the MSI's
+
 HERE = Path(__file__).resolve().parent
 PORT = 8767
 REMOTE = r"""python3 - <<'PY'
@@ -188,7 +190,7 @@ def recent_prs() -> list[dict]:
 
 
 def fetch() -> dict:
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu", REMOTE],
+    r = subprocess.run(portable.xanadu_cmd(REMOTE),
                        capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
     if r.returncode:
         raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
@@ -229,8 +231,7 @@ def flush_acks() -> None:
     reads = sorted({json.loads(l)["at"] for l in f.read_text(encoding="utf-8").splitlines() if l.strip()})
     rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": "claude (msi seat)", "to": "all",
            "kind": "read", "reads": reads, "text": f"read {len(reads)} message(s)"}
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
-                        "cat >> ~/steward/cockpit/channel.jsonl"], input=json.dumps(rec) + chr(10),
+    r = subprocess.run(portable.xanadu_cmd("cat >> ~/steward/cockpit/channel.jsonl"), input=json.dumps(rec) + chr(10),
                        capture_output=True, text=True, timeout=30)
     if r.returncode == 0:
         f.unlink()
@@ -254,8 +255,7 @@ def say(text: str, to: str, sender: str = "keath") -> dict:
         raise ValueError(f"unknown seat {sender!r}; use one of {sorted(SEATS)}")
     msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": SEATS[sender],
            "to": SPEAKERS.get(to, to if to in SEATS.values() else "claude (msi seat)"), "text": text, "via": "chorus"}
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
-                        "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
+    r = subprocess.run(portable.xanadu_cmd("mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"),
                        input=json.dumps(msg) + "\n", capture_output=True, text=True, timeout=30)
     if r.returncode:
         raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
@@ -277,8 +277,7 @@ def post_order(text: str, to: str, station: str) -> dict:
 
 
 def _append(msg: dict) -> None:
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
-                        "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
+    r = subprocess.run(portable.xanadu_cmd("mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"),
                        input=json.dumps(msg) + chr(10), capture_output=True, text=True, timeout=30)
     if r.returncode:
         raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
