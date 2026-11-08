@@ -50,7 +50,7 @@ OWNERS = {'dev': 'GSV-Sublime-Optimization', 'GSV_Godot_Cockpit': 'GSV-Sublime-O
           'Kilo_Core': 'GSV-Sublime-Optimization', 'FleetBridge': 'GSV-Sublime-Optimization',
           'Chronicles-of-the-Eternal-Bastion': 'GSV-Sublime-Optimization', 'Furyline': 'Furyline', 'Ash-and-Anvil': 'Ash-and-Anvil',
           'echoes-of-elevation': 'Echoes-Of-Elevation', 'project-144': 'Project-144'}
-HANDS = re.compile(r'\b(restart|bring (it )?back|fix|commit|push|deploy|merge|install|reboot|delete|move|run|redeploy|sort them)\b', re.I)
+HANDS = re.compile(r'\b(review|restart|bring (it )?back|fix|commit|push|deploy|merge|install|reboot|delete|move|run|redeploy|sort them)\b', re.I)
 RIG_OWNER = [(re.compile(r'\b(msi|spine|mempalace|kilo_?core|dev-mentor|openwebui|trueform|docker container|chorus)\b', re.I), 'claude (msi seat)'),
              (re.compile(r'\b(i3|gameattract|holomind|radio|xanadu)\b', re.I), 'claude (i3 seat)')]
 
@@ -153,7 +153,33 @@ def answer(question, asker):
     return None, True   # nothing mechanical to say and the GPU is busy: wait, don't drop it
 
 
+CLAUDE_SEATS = ('claude (i3 seat)', 'claude (msi seat)')
+
+
+def review_seat(text):
+    """A review must go to someone other than the PR's author (gsv merge needs a different actor). Both Claude
+    seats post as agent/claude-code, so Claude-authored PRs go to GPT-6, Muse or Codex, and others to a Claude seat."""
+    m = re.search(r'([A-Za-z][\w.-]*)#(\d+)', text)
+    if not m:
+        return None
+    author = ''
+    for p in feed().get('pipeline', []):
+        if f"{p['repo']}#{p['number']}".lower() == f'{m.group(1)}#{m.group(2)}'.lower():
+            author = str(p.get('agent', '')).lower()
+    if not author:
+        return None
+    if 'claude' in author:
+        return 'muse' if re.search(r'cockpit|holo|godot|design|atlas', text, re.I) else 'gpt-6'
+    if 'muse' in author or 'gpt' in author or 'codex' in author:
+        return 'claude (i3 seat)'
+    return None
+
+
 def route_for(text):
+    if re.search(r'\breview\b', text, re.I):
+        seat = review_seat(text)
+        if seat:
+            return seat
     for rx, seat in RIG_OWNER:
         if rx.search(text):
             return seat
