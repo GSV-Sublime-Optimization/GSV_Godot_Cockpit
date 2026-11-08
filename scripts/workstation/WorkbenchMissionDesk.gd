@@ -45,7 +45,7 @@ func _ready() -> void:
 		if numeric >= 1 and numeric <= 65535:
 			_port = numeric
 	_project_http = HTTPRequest.new()
-	_project_http.timeout = 9.0
+	_project_http.timeout = 24.0
 	_project_http.max_redirects = 0
 	add_child(_project_http)
 	_project_http.request_completed.connect(_on_projects_finished)

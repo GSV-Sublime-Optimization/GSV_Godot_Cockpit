@@ -39,7 +39,7 @@ func _ready() -> void:
 	for kind in ["health", "bodies", "missions", "projects", "log"]:
 		var request := HTTPRequest.new()
 		request.name = kind.capitalize() + "Request"
-		request.timeout = 12.0 if kind == "projects" else 4.0
+		request.timeout = 24.0 if kind == "projects" else 4.0
 		add_child(request)
 		request.request_completed.connect(_on_request_completed.bind(kind))
 		_requests[kind] = request

@@ -337,6 +337,7 @@ func _open_resource(meta: Dictionary) -> void:
 			var entry := meta.duplicate(true)
 			entry["session_kind"] = "mission_log"
 			pane.configure(entry, _client)
+			pane.diagnose_requested.connect(_compose_from_space)
 			_open_tab(key, title.substr(0, 25), meta, func() -> Control: return pane)
 		"agent":
 			var pane: PanelContainer = SESSION_PANE.new()

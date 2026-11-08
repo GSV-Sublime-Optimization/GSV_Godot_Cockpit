@@ -10,7 +10,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var id := "msn_012345abcdef"
 	var sample := {
-		"id": id, "risk": "R2", "status": "succeeded", "review": true,
+		"id": id, "risk": "R2", "status": "succeeded", "repo": "C:/dev/active/safe", "review": true,
 		"mergeable": false, "secret": "DO_NOT_SHOW",
 		"result": {
 			"receipt_id": "rcpt_123456789012", "secret_key": "DO_NOT_SHOW",
@@ -31,6 +31,7 @@ func _run() -> void:
 		_check(text.contains("PASS (exit 0)"), "validator exit accurately labelled")
 		_check(text.contains("rcpt_123456789012"), "receipt ID projected")
 		_check(text.contains("MERGE ELIGIBLE   NO"), "unmerged is not green")
+		_check(parsed["proof"]["repo"] == "C:/dev/active/safe", "source repo visible for a grounded diagnosis")
 		_check(not text.contains("DO_NOT_SHOW"), "secret and raw command fields excluded")
 	_check(not EVIDENCE.parse(JSON.stringify(sample), "msn_111111111111").get("ok", false),
 		"cross-mission swap refused")
@@ -39,6 +40,10 @@ func _run() -> void:
 	_check(failed.get("ok", false) and
 		EVIDENCE.format(failed["proof"]).contains("FAILED or TIMED OUT"),
 		"failed validator cannot be green")
+	sample["repo"] = "../traversal"
+	var bad_repo: Dictionary = EVIDENCE.parse(JSON.stringify(sample), id)
+	_check(bad_repo.get("ok", false) and bad_repo["proof"]["repo"].is_empty(), "unsafe source repo cannot enable an action")
+	sample["repo"] = "C:/dev/active/safe"
 	sample["result"] = {}
 	sample["status"] = "succeeded"
 	var bare: Dictionary = EVIDENCE.parse(JSON.stringify(sample), id)
@@ -58,6 +63,20 @@ func _run() -> void:
 	_check(pane._read_evidence != null and not pane._read_evidence.disabled,
 		"mission exposes explicitly requested evidence read")
 	_check(pane._terminal.text.contains("No live terminal"), "no fake PTY")
+	_check(pane._diagnose_button.disabled, "follow-up disabled before source evidence GET")
+	var followups: Array[Dictionary] = []
+	pane.diagnose_requested.connect(func(context: Dictionary): followups.append(context))
+	pane._on_evidence_completed(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(),
+		JSON.stringify(sample).to_utf8_buffer())
+	_check(not pane._diagnose_button.disabled, "fresh source repo unlocks R0 follow-up proposal")
+	pane._request_diagnosis()
+	_check(followups.size() == 1 and followups[0]["risk"] == "R0", "diagnosis proposes R0, never code execution")
+	_check(followups.size() == 1 and followups[0]["path"] == "C:/dev/active/safe", "next iteration targets the source repo")
+	_check(followups.size() == 1 and followups[0]["objective"].contains(id), "causal continuity includes exact mission identity")
+	sample["repo"] = "../not-safe"
+	pane._on_evidence_completed(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(),
+		JSON.stringify(sample).to_utf8_buffer())
+	_check(pane._diagnose_button.disabled, "bad repo cannot create new mission")
 	pane.queue_free()
 	await process_frame
 	if failures.is_empty():

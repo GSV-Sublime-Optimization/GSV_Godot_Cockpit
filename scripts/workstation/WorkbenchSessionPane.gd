@@ -1,5 +1,7 @@
 extends PanelContainer
 
+signal diagnose_requested(context: Dictionary)
+
 const EVIDENCE = preload("res://scripts/workstation/WorkbenchMissionEvidence.gd")
 const CATALOG = preload("res://scripts/workstation/WorkbenchCatalog.gd")
 
@@ -12,6 +14,8 @@ var _header: Label
 var _meta: Label
 var _read_log: Button
 var _read_evidence: Button
+var _diagnose_button: Button
+var _verified_proof: Dictionary = {}
 var _evidence_http: HTTPRequest
 var _terminal: TextEdit
 var _port := 7340
@@ -66,6 +70,12 @@ func _ready() -> void:
 	_read_evidence.disabled = entry.get("session_kind", "") != "mission_log"
 	_read_evidence.pressed.connect(refresh_evidence)
 	toolbar.add_child(_read_evidence)
+	_diagnose_button = Button.new()
+	_diagnose_button.text = "DIAGNOSE / NEXT ITERATION"
+	_diagnose_button.tooltip_text = "Requires a fresh owner GET with an actual validated repository path; proposes R0 only."
+	_diagnose_button.disabled = true
+	_diagnose_button.pressed.connect(_request_diagnosis)
+	toolbar.add_child(_diagnose_button)
 	var studio_button := Button.new()
 	studio_button.text = "OPEN STUDIO"
 	studio_button.pressed.connect(func(): OS.shell_open("http://127.0.0.1:%d/" % _port))
@@ -138,6 +148,8 @@ func refresh_evidence() -> void:
 	if not CATALOG.valid_mission_id(id):
 		return
 	_read_evidence.disabled = true
+	_verified_proof.clear()
+	_diagnose_button.disabled = true
 	_terminal.text = "Reading the owning Studio mission result and validator evidence..."
 	var code := _evidence_http.request("http://127.0.0.1:%d/api/missions/%s" % [_port, id],
 		PackedStringArray(["Accept: application/json"]), HTTPClient.METHOD_GET)
@@ -156,7 +168,30 @@ func _on_evidence_completed(result: int, status: int,
 	if not parsed.get("ok", false):
 		_terminal.text = "Evidence UNKNOWN / " + String(parsed.get("reason", "invalid_contract"))
 		return
-	_terminal.text = EVIDENCE.format(parsed["proof"])
+	_verified_proof = parsed["proof"].duplicate(true)
+	_diagnose_button.disabled = String(_verified_proof.get("repo", "")).is_empty()
+	_terminal.text = EVIDENCE.format(_verified_proof)
+
+func _request_diagnosis() -> void:
+	if _diagnose_button.disabled or _verified_proof.is_empty() or entry.get("session_kind", "") != "mission_log":
+		return
+	var path := String(_verified_proof.get("repo", ""))
+	if path.is_empty():
+		return
+	var id := String(_verified_proof.get("id", ""))
+	var status := String(_verified_proof.get("status", "unknown"))
+	var validation := String(_verified_proof.get("validator", "NOT REPORTED"))
+	diagnose_requested.emit({
+		"path": path,
+		"risk": "R0",
+		"title": ("Diagnose mission " + id).substr(0, 120),
+		"objective": ("Inspect the owning Studio mission " + id + " (reported status " + status
+			+ ", validator " + validation + "). Find a source-backed root cause and a reproducible verification route. "
+			+ "Do not modify repository files or claim a completed build without independent evidence."),
+		"acceptance": "Verify the source mission lifecycle and real receipt or its absence\n"
+			+ "Identify a reproducer or an explicit unknown with evidence\n"
+			+ "Propose a scoped next action and a runnable verification command"
+	})
 
 func _copy_id() -> void:
 	DisplayServer.clipboard_set(String(entry.get("id", "")))

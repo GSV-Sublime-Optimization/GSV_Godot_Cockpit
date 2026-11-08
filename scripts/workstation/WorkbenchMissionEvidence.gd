@@ -6,6 +6,7 @@ extends RefCounted
 const STATES := ["proposed", "awaiting_approval", "approved", "queued",
 	"running", "succeeded", "failed", "cancelled", "rejected"]
 const CATALOG = preload("res://scripts/workstation/WorkbenchCatalog.gd")
+const CONTRACT = preload("res://scripts/workstation/WorkbenchMissionContract.gd")
 
 static func parse(text: String, expected_id: String) -> Dictionary:
 	if text.length() > 131072 or not CATALOG.valid_mission_id(expected_id):
@@ -22,8 +23,12 @@ static func parse(text: String, expected_id: String) -> Dictionary:
 		return {"ok": false, "reason": "unknown_lifecycle"}
 	if typeof(risk) != TYPE_STRING or not ["R0", "R1", "R2", "R3"].has(risk):
 		return {"ok": false, "reason": "unknown_risk"}
+	var repository := ""
+	var repo: Variant = raw.get("repo", "")
+	if typeof(repo) == TYPE_STRING and CONTRACT._safe_path(repo):
+		repository = repo
 	var proof := {
-		"id": expected_id, "status": status, "risk": risk,
+		"id": expected_id, "status": status, "risk": risk, "repo": repository,
 		"review": raw.get("review", false) == true,
 		"mergeable": raw.get("mergeable", false) == true,
 		"receipt": "NOT REPORTED", "validator": "NOT REPORTED",
@@ -73,6 +78,7 @@ static func format(proof: Dictionary) -> String:
 	var lines := PackedStringArray([
 		"MISSION EVIDENCE / STUDIO SOURCE", "",
 		"ID               " + String(proof.get("id", "")),
+		"REPO             " + String(proof.get("repo", "NOT REPORTED")),
 		"STATUS           " + String(proof.get("status", "unknown")),
 		"RISK             " + String(proof.get("risk", "unknown")),
 		"REVIEW FLAG      " + ("YES" if proof.get("review", false) else "NO"),
