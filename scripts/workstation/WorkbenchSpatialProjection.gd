@@ -20,7 +20,8 @@ static func project(snapshot: Dictionary) -> Dictionary:
 	var by_key: Dictionary = {}
 	var state: Dictionary = {}
 	for key in ["body_feed_state", "project_feed_state", "mission_feed_state", "service_feed_state", "tool_atlas_state"]:
-		state[key] = _feed_state(String(snapshot.get(key, "unknown")))
+		state[key] = _atlas_feed_state(String(snapshot.get(key, "not_configured"))) if key == "tool_atlas_state" else (
+			_feed_state(String(snapshot.get(key, "unknown"))))
 	var body_lookup: Dictionary = {}
 	var bodies: Variant = snapshot.get("bodies", [])
 	if typeof(bodies) == TYPE_ARRAY:
@@ -117,17 +118,24 @@ static func project(snapshot: Dictionary) -> Dictionary:
 				continue
 			var id: String = String(source_tool.get("id", ""))
 			var status: String = String(source_tool.get("status", "unknown"))
+			var local_path: String = String(source_tool.get("path", ""))
 			if id.is_empty() or id.length() > 48 or not ["source_present", "directory_seen", "not_found"].has(status):
 				continue
 			_push(nodes, by_key, {
 				"key": "tool:" + id, "kind": "tool", "id": id,
 				"title": String(source_tool.get("name", id)).substr(0, 80),
 				"detail": "LOCAL PRESENCE ONLY / not callable or admitted",
+				"local_path": local_path if local_path.is_absolute_path() and not local_path.contains("..") and local_path.length() <= 500 else "",
 				"status": status,
 				"source": "Opt-in local tool atlas / read-only filesystem probe",
 				"position": _orbit(i, selected_tools.size(), 6.3, -1.45, 1.1),
 				"observed": true
 			})
+			# This is a transparent path-equality cross-reference, NOT an agent admission,
+			# dependency edge, connected integration or proof of identical Git remotes.
+			if status == "source_present" and by_key.has("project:" + local_path):
+				edges.append({"from": "project:" + local_path, "to": "tool:" + id,
+					"kind": "local_path_match"})
 	return {"nodes": nodes, "edges": edges, "feeds": state, "source": "KiloCore Studio + opt-in local tool atlas", "is_fixture": false}
 
 static func _push(nodes: Array[Dictionary], lookup: Dictionary, entry: Dictionary) -> void:
@@ -135,6 +143,9 @@ static func _push(nodes: Array[Dictionary], lookup: Dictionary, entry: Dictionar
 		return
 	lookup[entry["key"]] = true
 	nodes.append(entry)
+
+static func _atlas_feed_state(value: String) -> String:
+	return value if ["observed", "stale", "unknown", "unavailable", "invalid", "not_configured"].has(value) else "unknown"
 
 static func _feed_state(value: String) -> String:
 	return value if ["observed", "stale", "unknown", "unavailable"].has(value) else "unknown"
