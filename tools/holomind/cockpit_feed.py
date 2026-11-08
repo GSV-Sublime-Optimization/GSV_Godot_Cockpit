@@ -278,6 +278,11 @@ def actions(bodies, awaiting, cards, channel, colony=None):
                 out.append({'kind': 'decision', 'where': 'keath', 'title': 'quarantine: ' + l.split('|')[1].strip()[:80]})
     except OSError:
         pass
+    # Agents' suggestions to improve the cockpit itself (cockpit.py suggest): work like any other, until ordered.
+    for m in channel:
+        if m.get('kind') == 'suggestion' and age_s(m.get('at')) is not None and age_s(m.get('at')) < 7 * 86400:
+            out.append({'kind': 'suggestion', 'where': 'claude (i3 seat)', 'id': 'suggestion:' + str(m.get('at')),
+                        'title': f"{m.get('from')} suggests for the cockpit: {str(m.get('text'))[:110]}"})
     # Messages to a person or agent that nobody has answered yet.
     for i, m in enumerate(channel):
         to = str(m.get('to', '')).lower()
@@ -366,7 +371,7 @@ def tick(state):
                 reads[str(m.get('from'))] = max(reads.get(str(m.get('from')), ''), str(m.get('at', '')))
     orders = fold_orders(raw_channel)
     decisions = {str(m.get('card')): m for m in raw_channel if m.get('kind') == 'decision'}
-    channel = [m for m in raw_channel if m.get('kind') not in ('read', 'order-status', 'decision')]
+    channel = [m for m in raw_channel if m.get('kind') not in ('read', 'order-status', 'decision')]  # suggestions stay visible
     for i, m in enumerate(channel):
         who = str(m.get('from', ''))
         rb = sorted({s for s, t in reads.items() if t >= str(m.get('at', ''))}

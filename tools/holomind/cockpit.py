@@ -7,6 +7,9 @@ Mind answers. This is the agent-side tool: Claude seats, Codex, scripts, cron jo
   python cockpit.py read [--last 20] [--for "claude (msi seat)"]
   python cockpit.py ask "question"   --as "claude (i3 seat)"     # says it to the mind, waits up to 60 s for its answer
 
+Improve the cockpit itself (lands on the Workbench as work):
+  python cockpit.py suggest "make X clearer" --as "claude (msi seat)"
+
 Work orders (the same queue CHORUS uses; HOLOMIND assigns them from its work cards):
   python cockpit.py orders [--for "claude (i3 seat)"]          # open orders, yours first
   python cockpit.py take ID --as "claude (i3 seat)"              # you're on it (shows as TAKEN on the card)
@@ -120,10 +123,14 @@ def main():
     b = sub.add_parser('brief', help='the colony in one screen: rigs, agents at work, the work queue, the last messages')
     b.add_argument('--json', action='store_true')
     o = sub.add_parser('orders', help='open work orders (yours first)'); o.add_argument('--for', dest='who')
+    sg = sub.add_parser('suggest', help='suggest an improvement to the cockpit itself (any agent)'); sg.add_argument('text'); sg.add_argument('--as', dest='who', required=True)
     t = sub.add_parser('take', help='take an order'); t.add_argument('id'); t.add_argument('--as', dest='who', required=True)
     st = sub.add_parser('status', help='report on an order'); st.add_argument('id'); st.add_argument('status', choices=['working', 'done', 'declined'])
     st.add_argument('--as', dest='who', required=True); st.add_argument('--link', default=''); st.add_argument('--note', default='')
     args = a.parse_args()
+    if args.cmd == 'suggest':
+        print(json.dumps(append({'at': now(), 'from': args.who, 'kind': 'suggestion', 'to': 'claude (i3 seat)', 'text': args.text}), ensure_ascii=False))
+        return
     if args.cmd == 'orders':
         os_ = open_orders(args.who)
         if not os_:

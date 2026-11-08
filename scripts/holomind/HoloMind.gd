@@ -45,6 +45,15 @@ var _hb_age: Dictionary = {}             # last seen heartbeat age per rig, to s
 var _order_state: Dictionary = {}        # order id -> last seen status, to spot new orders and receipts
 var _flights_primed: bool = false
 var _districts: Node3D
+var _picks: Array[Dictionary] = []      # everything you can click: {node, title, body, url, ask}
+var _focus_point: Vector3 = Vector3(0, 1.8, 0)   # what the camera orbits; click something to move it there
+var _focus_want: Vector3 = Vector3(0, 1.8, 0)
+var _press_at: Vector2 = Vector2.ZERO
+var _inspector: PanelContainer
+var _inspector_text: RichTextLabel
+var _inspector_bar: HBoxContainer
+var _legend: RichTextLabel
+var _repo_pos: Dictionary = {}           # repo -> its Forge building position (for relationship lines)
 var _text_hidden: bool = false           # H: visuals only (every label and panel hidden) to dial in the look
 var _cine: bool = false                  # V: the camera follows the newest real event, then returns
 var _cine_target: Node3D = null
@@ -69,7 +78,7 @@ var _hud: Label
 var _subtitle: Label
 var _frames: int = 0
 # The cockpit: agents around the table, a shared channel to talk in, speech in space.
-const OUTBOX := "C:/Users/Public/colony/mindview/outbox.jsonl"
+var OUTBOX: String = "C:/Users/Public/colony/mindview/outbox.jsonl"   # follows the feed folder (set in _ready), so the chat works on any OS
 const AGENT_RING := 8.3
 const HOME_PLACES := {"i3": Vector3(-3.6, 0, 2.4), "msi": Vector3(-3.6, 0, -2.2)}
 var _agents_root: Node3D
@@ -91,11 +100,11 @@ var _now_text: String = ""
 var _bench_scroll: ScrollContainer
 var _bench_backing: ColorRect
 const SEATS: Array[String] = ["claude (i3 seat)", "claude (msi seat)", "gpt-6", "muse", "codex", "any"]
-const STATION_FOR: Dictionary = {"review": "pegs", "rig": "anvil", "decision": "ledger", "reply": "bell", "merge": "ledger", "fix": "anvil", "triage": "ledger"}
+const STATION_FOR: Dictionary = {"suggestion": "anvil", "review": "pegs", "rig": "anvil", "decision": "ledger", "reply": "bell", "merge": "ledger", "fix": "anvil", "triage": "ledger"}
 var _hud_clock: float = 0.0
 var _sent_local: Array[Dictionary] = []   # what you typed this session, to show sent > delivered > read
 var _actions_root: Node3D
-const KIND_COLOURS := {"rig": Color(1.0, 0.4, 0.4), "review": Color(0.5, 0.75, 1.0), "decision": Color(1.0, 0.78, 0.35), "reply": Color(0.95, 0.95, 1.0), "merge": Color(0.35, 0.95, 0.55), "fix": Color(1.0, 0.6, 0.25), "triage": Color(0.7, 0.7, 0.8)}
+const KIND_COLOURS := {"rig": Color(1.0, 0.4, 0.4), "review": Color(0.5, 0.75, 1.0), "decision": Color(1.0, 0.78, 0.35), "reply": Color(0.95, 0.95, 1.0), "merge": Color(0.35, 0.95, 0.55), "fix": Color(1.0, 0.6, 0.25), "triage": Color(0.7, 0.7, 0.8), "suggestion": Color(0.8, 0.6, 1.0)}
 var _seen_channel: int = 0
 
 
@@ -103,6 +112,8 @@ func _ready() -> void:
 	for arg: String in OS.get_cmdline_user_args():
 		if arg.begins_with("--feed=") or arg.begins_with("--fixture="):
 			feed_path = arg.get_slice("=", 1)
+			if not feed_path.begins_with("res://"):
+				OUTBOX = feed_path.get_base_dir().path_join("outbox.jsonl")
 		elif arg.begins_with("--shot="):
 			shot_path = arg.get_slice("=", 1)
 		elif arg == "--background":
@@ -128,6 +139,7 @@ func _ready() -> void:
 	_build_hud()
 	_build_bench()
 	_build_palette()
+	_build_inspector()
 	_layout_ui()
 	get_viewport().size_changed.connect(_layout_ui)
 	_read_feed()
@@ -137,6 +149,14 @@ func _ready() -> void:
 			_apply_text_visibility()
 		if arg == "--cine":
 			_cine = true
+		if arg.begins_with("--select="):   # for receipts: open the inspector on the first thing whose title matches
+			var want := arg.get_slice("=", 1).to_lower()
+			for i in _picks.size():
+				if String(_picks[i].get("title", "")).to_lower().contains(want):
+					_select(i)
+					break
+		if arg == "--legend":
+			_legend.visible = true
 		if arg.begins_with("--palette="):   # for receipts: render with the palette open on a query
 			_open_palette()
 			_palette_input.text = arg.get_slice("=", 1)
@@ -837,7 +857,11 @@ func _process(delta: float) -> void:
 		_poll = 3.0
 		_read_feed()
 	# The camera moves only when you drag it (no idle drift: motion on screen must mean something).
-	var cam_want := Vector3(cos(_yaw) * cos(_pitch), sin(_pitch), sin(_yaw) * cos(_pitch)) * _dist + Vector3(0, 1.6, 0)
+	if _focus_point.distance_to(_focus_want) > 0.003:
+		_focus_point = _focus_point.lerp(_focus_want, clampf(delta * 1.4, 0.0, 1.0))
+		_settle = maxf(_settle, 0.5)
+		_cam.position = Vector3.INF   # force the orbit placement below
+	var cam_want := Vector3(cos(_yaw) * cos(_pitch), sin(_pitch), sin(_yaw) * cos(_pitch)) * _dist + _focus_point - Vector3(0, 0.2, 0)
 	if _cine:
 		# Follow the newest real event in flight; with nothing happening, settle back to the wide view and hold.
 		var look := Vector3(0, 1.8, 0)
@@ -856,7 +880,7 @@ func _process(delta: float) -> void:
 	elif not _cam.position.is_equal_approx(cam_want):
 		_cam.position = cam_want
 		_settle = maxf(_settle, 0.5)
-		_cam.look_at(Vector3(0, 1.8, 0), Vector3.UP)
+		_cam.look_at(_focus_point, Vector3.UP)
 	# Real events in flight (a new heartbeat, an order, a receipt). Nothing else travels.
 	_update_flights(delta)
 	# The Mind moves only when its attention changes; its rings turn only while it is actually thinking.
@@ -964,7 +988,7 @@ backup %s h old%s · mirror %s h, %s failures · MSI spine %s/%s up%s" % [str(b.
 
 
 func _update_hud() -> void:
-	_hud.text = "HOLOMIND · the colony workstation (i3 Claude) · acts through orders you assign · %s · WORK WAITING: %s\n%s · motion = real events only (heartbeat → xanadu · order → seat · receipt → you) · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · H: visuals only · V: cinematic · F11: fullscreen · Esc: quit" % [
+	_hud.text = "HOLOMIND · the colony workstation (i3 Claude) · acts through orders you assign · %s · WORK WAITING: %s\n%s · motion = real events only (heartbeat → xanadu · order → seat · receipt → you) · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · click: inspect · Backspace: whole colony · L: legend · H: visuals only · V: cinematic · F11: fullscreen · Esc: quit" % [
 		feed_note, _waiting_text, ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"] + _colony_text
 
 
@@ -979,6 +1003,11 @@ func _layout_ui() -> void:
 	backing.size = _chat.size + Vector2(20, 16)
 	_typebox.position = Vector2(vp.x * 0.04, vp.y - 54)
 	_typebox.size = Vector2(vp.x * 0.92, 38)
+	if _inspector != null:
+		_inspector.position = Vector2(vp.x * 0.3, 150)
+		_inspector.size = Vector2(vp.x * 0.4, 0)
+		_legend.position = Vector2(vp.x * 0.29, 150)
+		_legend.size = Vector2(vp.x * 0.42, vp.y * 0.6)
 	if _bench_scroll != null:
 		_bench_scroll.position = Vector2(vp.x * 0.01, 150)
 		_bench_scroll.size = Vector2(vp.x * 0.27, vp.y - 290)
@@ -1402,7 +1431,10 @@ func _rebuild_districts() -> void:
 		_districts.queue_free()
 	_districts = Node3D.new()
 	ship.add_child(_districts)
+	_picks.clear()
+	_repo_pos.clear()
 	var bodies: Dictionary = feed.get("bodies", {})
+	_register_bodies(bodies)
 	# Heartbeat check pylons around each rig.
 	for id: String in bodies:
 		var b: Dictionary = bodies[id]
@@ -1415,7 +1447,10 @@ func _rebuild_districts() -> void:
 			var h := 0.2 + clampf(log(maxf(ms, 1.0)) / log(30000.0), 0.0, 1.0) * 0.7
 			var ang := TAU * float(i) / float(maxi(checks.size(), 1))
 			var p := at + Vector3(cos(ang) * 1.25, h * 0.5 - 0.35, sin(ang) * 1.25)
-			_box(Vector3(0.09, h, 0.09), _glow(C_CALM if ok else C_ALARM, 1.2 if ok else 3.0), p, _districts)
+			var pylon := _box(Vector3(0.09, h, 0.09), _glow(C_CALM if ok else C_ALARM, 1.2 if ok else 3.0), p, _districts)
+			_picks.append({"node": pylon, "title": "%s · heartbeat check · %s" % [id, String(c.get("name", "?"))],
+				"body": "[b]%s[/b] on %s\nlast result: %s · took %s ms\nThe rig runs this check every heartbeat (~5 min) and reports it to xanadu." % [String(c.get("name", "?")), id, "[color=#46d38a]passing[/color]" if ok else "[color=#ff6b6b]FAILING[/color]", str(c.get("ms", "?"))],
+				"ask": "What does the %s check on %s mean, and %s?" % [String(c.get("name", "")), id, "is it healthy" if ok else "how do we fix it"]})
 			_label(String(c.get("name", "?")), 20, (C_CALM if ok else C_ALARM).lightened(0.3), p + Vector3(0, h * 0.5 + 0.12, 0), _districts)
 	# Spine service towers around the MSI.
 	var colony: Dictionary = feed.get("colony", {}) if feed.get("colony") is Dictionary else {}
@@ -1430,7 +1465,10 @@ func _rebuild_districts() -> void:
 		var h2 := 0.9 if tier == "core" else 0.55
 		var ang2 := atan2(away.z, away.x) + (float(i) - float(services.size() - 1) * 0.5) * 0.19
 		var p2 := msi + Vector3(cos(ang2) * 2.15, h2 * 0.5 - 0.35, sin(ang2) * 2.15)
-		_box(Vector3(0.14, h2, 0.14), _glow(C_HOLO if up else C_ALARM, 1.0 if up else 3.2), p2, _districts)
+		var tower := _box(Vector3(0.14, h2, 0.14), _glow(C_HOLO if up else C_ALARM, 1.0 if up else 3.2), p2, _districts)
+		_picks.append({"node": tower, "title": "MSI spine service · " + String(s.get("name", "?")),
+			"body": "[b]%s[/b] · tier %s\nstatus: %s · probe %s ms\nMeasured by CHORUS on the MSI every 5 min." % [String(s.get("name", "?")), tier, "[color=#59c3ff]up[/color]" if up else "[color=#ff6b6b]DOWN[/color]", str(s.get("ms", "?"))],
+			"ask": "What is %s for in the colony, and %s?" % [String(s.get("name", "")), "is it healthy" if up else "what should we do now that it is down"]})
 		_label(String(s.get("name", "?")), 18, (C_HOLO if up else C_ALARM).lightened(0.35), p2 + Vector3(0, h2 * 0.5 + 0.12, 0), _districts)
 	# The library's open questions: Steward decision cards as slabs around xanadu.
 	var cards := 0
@@ -1460,6 +1498,7 @@ func _rebuild_districts() -> void:
 		var name := String(repos[i])
 		var rec2: Dictionary = by_repo[name]
 		var base := FORGE_AT + Vector3(float(i % cols) * 0.75 - 1.1, -0.4, float(int(i / cols)) * 0.75 - 0.6)
+		_repo_pos[name] = base
 		var y := 0.0
 		for st2: String in ["approved", "changes", "needs-review", "stale-review", "draft"]:
 			var count := int((rec2["stages"] as Dictionary).get(st2, 0))
@@ -1472,6 +1511,12 @@ func _rebuild_districts() -> void:
 		if int(rec2["fail"]) > 0:
 			_box(Vector3(0.46, 0.05, 0.46), _glow(C_ALARM, 0.5 + 4.0 * fail_share), base + Vector3(0, y + 0.03, 0), _districts)
 		_label("%s\n%d open · %d CI fail" % [name, int(rec2["n"]), int(rec2["fail"])], 18, Color(0.8, 0.88, 1.0), base + Vector3(0, y + 0.3, 0), _districts)
+		var anchor := Node3D.new()
+		_districts.add_child(anchor)
+		anchor.position = base + Vector3(0, y * 0.5, 0)
+		_picks.append({"node": anchor, "title": "repository · " + name, "body": _repo_body(name), "url": _repo_url(name),
+			"ask": "What is %s for, and what's the highest-yield move on its %d open PRs?" % [name, int(rec2["n"])]})
+	_draw_relationships()
 	if not repos.is_empty():
 		_label("THE FORGE · %d repositories · floors = open PRs by stage" % repos.size(), 26, Color(0.6, 0.8, 1.0), FORGE_AT + Vector3(0, -0.35, 1.3), _districts)
 
@@ -1491,6 +1536,181 @@ func _set_labels_visible(n: Node, v: bool) -> void:
 		_set_labels_visible(c, v)
 
 
+## SELECTION: everything you can click, what it is, and what you can do about it.
+func _register_bodies(bodies: Dictionary) -> void:
+	for id: String in _bodies:
+		var b: Dictionary = bodies.get(id, {}) if bodies.get(id) is Dictionary else {}
+		var node: MeshInstance3D = (_bodies[id] as Dictionary)["node"]
+		# Honest breathing: a rig glows by how fresh its last heartbeat is (bright when just in, fading over minutes).
+		var age := float(b.get("age_s")) if b.get("age_s") != null else 9999.0
+		var mat: Variant = (_bodies[id] as Dictionary)["mat"]
+		if mat is ShaderMaterial:
+			(mat as ShaderMaterial).set_shader_parameter("strength", 0.35 + 1.2 * exp(-age / 180.0))
+		var checks: Array = b.get("checks", []) if b.get("checks") is Array else []
+		var lines := PackedStringArray()
+		for c: Variant in checks:
+			var d: Dictionary = c
+			lines.append("%s %s (%s ms)" % ["[color=#46d38a]✓[/color]" if bool(d.get("ok")) else "[color=#ff6b6b]✗[/color]", String(d.get("name", "?")), str(d.get("ms", "?"))])
+		var disks: Dictionary = b.get("disks", {}) if b.get("disks") is Dictionary else {}
+		var dl := PackedStringArray()
+		for k: String in disks:
+			dl.append("%s: %s%% free" % [k, str(disks[k])])
+		var work := PackedStringArray()
+		for x: Variant in feed.get("actions", []):
+			var a: Dictionary = x
+			if String(a.get("where", "")).to_lower() == id or String(a.get("title", "")).to_lower().begins_with(id + " "):
+				work.append("• " + String(a.get("title", "")).left(90))
+		_picks.append({"node": node, "title": "rig · %s · %s" % [id, String(b.get("role", BODY_TITLES.get(id, "")))],
+			"body": "[b]%s[/b] is [b]%s[/b] · last heartbeat %s s ago\nRAM free: %s MB · %s\n\n[b]Checks[/b]\n%s\n\n[b]Work about this rig[/b]\n%s" % [
+				id.to_upper(), String(b.get("status", "?")), str(b.get("age_s", "?")), str(b.get("ram_mb", "?")), ", ".join(dl),
+				"\n".join(lines) if not lines.is_empty() else "(no checks reported)", "\n".join(work) if not work.is_empty() else "(nothing waiting)"],
+			"ask": "What is %s doing for the colony right now, and what does it need?" % id})
+	for name: String in _agent_nodes:
+		var rec: Dictionary = _agent_nodes[name]
+		var g: Dictionary = {}
+		for x: Variant in feed.get("agents", []):
+			if String((x as Dictionary).get("agent", "")) == name:
+				g = x
+		var prs := PackedStringArray()
+		for r: Variant in g.get("recent", []):
+			var d2: Dictionary = r
+			prs.append("• %s #%s %s%s" % [String(d2.get("repo", "")), str(d2.get("number", "")), String(d2.get("title", "")).left(70), " (draft)" if bool(d2.get("draft", false)) else ""])
+		_picks.append({"node": rec["node"], "title": "agent · " + name + " · home " + String(rec.get("home", "?")),
+			"body": "[b]%s[/b] works from %s\n\n[b]PRs in the last 24 h[/b]\n%s" % [name, String(rec.get("home", "?")), "\n".join(prs) if not prs.is_empty() else "(none)"],
+			"ask": "What is %s working on, and what should it do next?" % name})
+
+
+func _repo_body(repo: String) -> String:
+	var lines := PackedStringArray()
+	var counts := {}
+	for x: Variant in feed.get("pipeline", []):
+		var p: Dictionary = x
+		if String(p.get("repo", "")) != repo:
+			continue
+		var st := String(p.get("stage", ""))
+		counts[st] = int(counts.get(st, 0)) + 1
+		if st != "draft" and lines.size() < 12:
+			lines.append("• #%s [%s, CI %s] %s · %s" % [str(p.get("number", "")), st, String(p.get("ci", "")), String(p.get("title", "")).left(60), String(p.get("agent", ""))])
+	var head := PackedStringArray()
+	for st2: String in ["approved", "changes", "needs-review", "stale-review", "draft"]:
+		if counts.has(st2):
+			head.append("%d %s" % [int(counts[st2]), st2])
+	return "[b]%s[/b] · %s\n\n%s" % [repo, ", ".join(head), "\n".join(lines) if not lines.is_empty() else "(only drafts)"]
+
+
+func _repo_url(repo: String) -> String:
+	for x: Variant in feed.get("pipeline", []):
+		var p: Dictionary = x
+		if String(p.get("repo", "")) == repo:
+			return String(p.get("url", "")).get_slice("/pull/", 0) + "/pulls"
+	return ""
+
+
+## Relationships: a line from each agent to every repository where it has PRs in flight (real cross-references).
+func _draw_relationships() -> void:
+	var lines := ImmediateMesh.new()
+	var any := false
+	lines.surface_begin(Mesh.PRIMITIVE_LINES)
+	for x: Variant in feed.get("agents", []):
+		var g: Dictionary = x
+		var name := String(g.get("agent", ""))
+		if not _agent_nodes.has(name):
+			continue
+		var from: Vector3 = _districts.to_local(((_agent_nodes[name] as Dictionary)["node"] as Node3D).global_position)
+		var seen := {}
+		for r: Variant in g.get("recent", []):
+			var repo := String((r as Dictionary).get("repo", ""))
+			if _repo_pos.has(repo) and not seen.has(repo):
+				seen[repo] = true
+				lines.surface_add_vertex(from)
+				lines.surface_add_vertex(_repo_pos[repo] as Vector3)
+				any = true
+	if any:
+		lines.surface_end()
+		_mesh(lines, _holo(Color(0.75, 0.6, 1.0), 0.8), Vector3.ZERO, _districts)
+
+
+func _pick_at(screen: Vector2) -> void:
+	var best := -1
+	var best_d := 40.0
+	for i in _picks.size():
+		var n: Variant = _picks[i].get("node")
+		if not (n is Node3D) or not is_instance_valid(n) or not (n as Node3D).is_visible_in_tree():
+			continue
+		var wp: Vector3 = (n as Node3D).global_position
+		if _cam.is_position_behind(wp):
+			continue
+		var d := _cam.unproject_position(wp).distance_to(screen)
+		if d < best_d:
+			best_d = d
+			best = i
+	if best >= 0:
+		_select(best)
+
+
+func _select(i: int) -> void:
+	if i < 0:
+		_inspector.visible = false
+		_focus_want = Vector3(0, 1.8, 0)
+		_settle = maxf(_settle, 2.0)
+		return
+	var p: Dictionary = _picks[i]
+	_focus_want = (p["node"] as Node3D).global_position
+	_settle = maxf(_settle, 3.0)
+	_inspector_text.text = "[color=#ffd27a]%s[/color]\n%s" % [String(p.get("title", "")), String(p.get("body", ""))]
+	for c in _inspector_bar.get_children():
+		c.queue_free()
+	var ask := String(p.get("ask", ""))
+	if ask != "":
+		_inspector_bar.add_child(_bench_button("Ask the Mind", ask, func() -> void: _send(ask)))
+	var url := String(p.get("url", ""))
+	if url != "":
+		_inspector_bar.add_child(_bench_button("Open", url, func() -> void: OS.shell_open(url)))
+	_inspector_bar.add_child(_bench_button("Assign to i3 seat", "Post a work order about this", func() -> void: _order({"title": String(p.get("title", "")), "url": url, "kind": "rig", "id": "pick:" + String(p.get("title", ""))}, "claude (i3 seat)")))
+	_inspector_bar.add_child(_bench_button("Back to the whole colony", "Backspace", func() -> void: _select(-1)))
+	_inspector.visible = true
+
+
+func _build_inspector() -> void:
+	var layer := _chat.get_parent()
+	_inspector = PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.03, 0.05, 0.1, 0.9)
+	sb.border_color = Color(1.0, 0.82, 0.48, 0.7)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(6)
+	sb.set_content_margin_all(10)
+	_inspector.add_theme_stylebox_override("panel", sb)
+	_inspector.visible = false
+	layer.add_child(_inspector)
+	var v := VBoxContainer.new()
+	_inspector.add_child(v)
+	_inspector_text = RichTextLabel.new()
+	_inspector_text.bbcode_enabled = true
+	_inspector_text.selection_enabled = true
+	_inspector_text.fit_content = true
+	_inspector_text.custom_minimum_size = Vector2(520, 0)
+	_inspector_text.add_theme_font_size_override("normal_font_size", 14)
+	v.add_child(_inspector_text)
+	_inspector_bar = HBoxContainer.new()
+	v.add_child(_inspector_bar)
+	_legend = RichTextLabel.new()
+	_legend.bbcode_enabled = true
+	_legend.visible = false
+	_legend.add_theme_font_size_override("normal_font_size", 14)
+	_legend.text = """[color=#ffd27a]HOW TO READ THE COLONY[/color]  (L closes)
+[b]Rigs[/b]: MSI workshop, i3 engine room, L9 hangar, xanadu library at the centre. Brightness = how fresh the last heartbeat is.
+[b]Pylons around a rig[/b]: its heartbeat checks. [color=#46d38a]green[/color] passing, [color=#ff6b6b]red[/color] failing; height = how long the check took.
+[b]Towers around the MSI[/b]: its spine services (CHORUS). [color=#59c3ff]cyan[/color] up, [color=#ff6b6b]red[/color] down; core services stand taller.
+[b]Amber slabs around xanadu[/b]: the Steward's open questions for Keath.
+[b]The Forge[/b]: one building per repository. Floors = open PRs by stage: dim grey draft, [color=#73b8ff]blue[/color] needs review, [color=#b39bff]violet[/color] stale review, [color=#ff9a40]orange[/color] changes requested, [color=#59f28c]green[/color] approved. Red cap = share failing CI.
+[b]Violet lines[/b]: an agent and the repositories where it has PRs in flight.
+[b]Anything that flies[/b] is a real event: a new heartbeat (rig to xanadu), an order (you to a seat), a receipt (seat to you).
+[b]The Mind[/b] sits over what it is attending to; its rings turn only while it is thinking.
+Click anything to inspect it. Backspace returns to the whole colony."""
+	layer.add_child(_legend)
+
+
 func _shoot() -> void:
 	var img := get_viewport().get_texture().get_image()
 	img.save_png(shot_path)
@@ -1501,6 +1721,10 @@ func _shoot() -> void:
 func _input(event: InputEvent) -> void:
 	# Esc always quits, even while typing (brief: never trap the screen).
 	if event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_ESCAPE:
+		if _inspector != null and _inspector.visible:
+			_select(-1)
+			get_viewport().set_input_as_handled()
+			return
 		if _palette != null and _palette.visible:
 			_palette.visible = false   # Esc closes the palette first; a second Esc quits
 			get_viewport().set_input_as_handled()
@@ -1522,6 +1746,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
 		elif k >= KEY_0 and k <= KEY_3:
 			_set_layer((k - KEY_1) if k != KEY_0 else -1)
+		elif k == KEY_BACKSPACE:
+			_select(-1)
+		elif k == KEY_L:
+			_legend.visible = not _legend.visible
 		elif k == KEY_H:
 			_text_hidden = not _text_hidden
 			_apply_text_visibility()
@@ -1535,6 +1763,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			_drag = mb.pressed
+			if mb.pressed:
+				_press_at = mb.position
+			elif mb.position.distance_to(_press_at) < 6.0:
+				_pick_at(mb.position)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
 			_dist = maxf(6.0, _dist - 0.6)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
