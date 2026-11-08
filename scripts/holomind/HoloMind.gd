@@ -628,7 +628,7 @@ func _build_hud() -> void:
 	_chat.add_theme_color_override("default_color", Color(0.85, 0.9, 1.0))
 	layer.add_child(_chat)
 	_typebox = LineEdit.new()
-	_typebox.placeholder_text = "Type to the colony… (@mind is the default; @claude, @msi, @muse…) · Enter to send · it can only talk, never act"
+	_typebox.placeholder_text = "Type to the colony… (@mind is the default; @claude, @msi, @muse…) · Enter to send · assign work from the Workbench on the left"
 	_typebox.add_theme_font_size_override("font_size", 17)
 	_typebox.text_submitted.connect(func(t: String) -> void:
 		_send(t)
@@ -898,7 +898,7 @@ backup %s h old%s · mirror %s h, %s failures · MSI spine %s/%s up%s" % [str(b.
 
 
 func _update_hud() -> void:
-	_hud.text = "HOLOMIND · the colony cockpit (i3 Claude) · talks, never acts · %s · WORK WAITING: %s\n%s · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · F11: fullscreen · Esc: quit" % [
+	_hud.text = "HOLOMIND · the colony workstation (i3 Claude) · acts through orders you assign · %s · WORK WAITING: %s\n%s · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · F11: fullscreen · Esc: quit" % [
 		feed_note, _waiting_text, ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"] + _colony_text
 
 
@@ -914,8 +914,8 @@ func _layout_ui() -> void:
 	_typebox.position = Vector2(vp.x * 0.04, vp.y - 54)
 	_typebox.size = Vector2(vp.x * 0.92, 38)
 	if _bench_scroll != null:
-		_bench_scroll.position = Vector2(vp.x * 0.01, 80)
-		_bench_scroll.size = Vector2(vp.x * 0.27, vp.y - 210)
+		_bench_scroll.position = Vector2(vp.x * 0.01, 112)
+		_bench_scroll.size = Vector2(vp.x * 0.27, vp.y - 250)
 		_bench_backing.position = _bench_scroll.position - Vector2(8, 8)
 		_bench_backing.size = _bench_scroll.size + Vector2(16, 16)
 

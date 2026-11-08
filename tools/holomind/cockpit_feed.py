@@ -119,7 +119,7 @@ def github_activity():
     since = now() - dt.timedelta(hours=24)
     for repo in REPOS:
         r = subprocess.run(['gh', 'pr', 'list', '-R', repo, '--state', 'open', '--limit', '60', '--json',
-                            'number,title,headRefName,updatedAt,isDraft,reviewDecision,url'], stdin=subprocess.DEVNULL,
+                            'number,title,headRefName,headRefOid,updatedAt,isDraft,reviewDecision,url,comments'], stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=0x08000000)
         try:
             prs = json.loads(r.stdout or '[]')
@@ -127,7 +127,8 @@ def github_activity():
             continue
         for p in prs:
             name, home = agent_of(p['headRefName'])
-            if not p['isDraft'] and p.get('reviewDecision') in (None, '', 'REVIEW_REQUIRED'):
+            reviewed = any(f'head={p.get("headRefOid", "")}' in c.get('body', '') and 'gsv-review:' in c.get('body', '') for c in p.get('comments') or [])
+            if not p['isDraft'] and not reviewed and p.get('reviewDecision') in (None, '', 'REVIEW_REQUIRED'):
                 awaiting.append({'repo': repo, 'number': p['number'], 'title': p['title'][:80], 'agent': name or 'unattributed',
                                  'url': p['url'], 'at': p['updatedAt']})
             if dt.datetime.fromisoformat(p['updatedAt'].replace('Z', '+00:00')) < since:

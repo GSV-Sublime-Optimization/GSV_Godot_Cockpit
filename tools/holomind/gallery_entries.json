@@ -1,0 +1,8 @@
+[
+ {"id": "chorus", "shot": "C:/Users/ekene/.claude/jobs/667fef54/tmp/bakeoff/chorus/chorus-1600x900-fixed.png",
+  "notes": "Tested on the i3 (shared fixture, headless Edge with software rendering): about 6% of one core for the page, about 20% for the whole tab, about 123 MB. Best idea: the 'What needs you' panel. Security fix PR #22 is merged and live (b532e46, 45fed3f)."},
+ {"id": "muse", "shot": "C:/Users/ekene/.claude/jobs/667fef54/tmp/bakeoff/muse/holo_tab_pull_all.png",
+  "notes": "Tested on the i3: 24% of one core idle (the limit is 5%), 196 MB. No Esc, no PNG mode. Fix PR #21: its tests parse and pass, and the 3D density texture works. Best ideas: semantic slice buttons, λ pull-up, honest-state creatures."},
+ {"id": "gpt6", "shot": "C:/Users/ekene/.claude/jobs/667fef54/tmp/bakeoff/gpt6/shared_fixture_default.png",
+  "notes": "Tested on the i3: 12.6% of one core idle, down to 0.15% with fix PR #23, which also makes the vitals lens work and adds --from-dir for the shared fixture. 162 MB. Best idea: the scrubbable thought tape with a causal inspector."}
+]
