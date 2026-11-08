@@ -307,7 +307,21 @@ let lastDraw = 0;
 function frame(t) {
   // Budget (bakeoff rule: <= 5% of one core idle): draw at most 30 fps; browsers pause hidden tabs.
   if (t - lastDraw < 33) { requestAnimationFrame(frame); return; }
-  lastDraw = t;
+  lastDraw = t; drawSky(t); requestAnimationFrame(frame);
+}
+// ?perf: draw 300 frames back to back (t advancing 33 ms each, as at the 30 fps cap) and report the
+// average and p95 cost of one frame in the title and console. Headless browsers starve rAF, so this
+// times the draw work itself, which is what the budget is about.
+function perfRun() {
+  const ms = [], t0 = performance.now();
+  for (let i = 0; i < 300; i++) {          // getImageData forces the canvas to actually rasterise each frame
+    const a = performance.now(); drawSky(t0 + i * 33); cx.getImageData(0, 0, 1, 1); ms.push(performance.now() - a);
+  }
+  const s = ms.slice().sort((x, y) => x - y), avg = ms.reduce((x, y) => x + y, 0) / ms.length;
+  const msg = `perf avg ${avg.toFixed(3)} ms p95 ${s[284].toFixed(3)} ms max ${s[299].toFixed(3)} ms · 300 frames · ${W}x${H}@${DPR}`;
+  console.log(msg); document.title = msg;
+}
+function drawSky(t) {
   const lvl = LEVEL[current?.level || "routine"];
   const tint = css(lvl.color);
   // sky + mood: a soft glow from below, tinted by the current marking
@@ -346,7 +360,6 @@ function frame(t) {
   }
   comets = comets.filter(c => t - c.t0 < c.dur + 300);
   for (const c of comets) drawComet(c, t);
-  requestAnimationFrame(frame);
 }
 function drawRig(r, t) {
   const st = rigState(r.id), [x, y] = rigXY(r.id), col = css(r.color);
@@ -767,6 +780,7 @@ copyBtn.onclick = copyBrief;
 addEventListener("keydown", e => { if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.metaKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) copyBrief(); });
 
 drawRiver(); renderNeeds(); renderTalk(); renderTick(); show(current, false); requestAnimationFrame(frame);
+if (/[?&]perf(=|&|$)/.test(location.search)) perfRun();
 // deep link: index.html#rig=i3 opens that rig's card (after first layout)
 const deep = /rig=(\w+)/.exec(location.hash); if (deep) requestAnimationFrame(() => { const r = RIGS.find(x => x.id === deep[1]); if (r) openRig(r); });
 </script>
