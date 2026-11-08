@@ -181,6 +181,7 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
 .rig-card .said { font-style: italic; color: var(--ink); }
 .rig-card .acts { display: flex; gap: 8px; }
 canvas#sky.pointing { cursor: pointer; }
+.msg .state { font: 10px var(--f-data); color: var(--tranquillo); letter-spacing: .04em; }
 </style>
 
 <canvas id="sky" aria-label="The fleet drawn as four stars: MSI, i3, L9 and xanadu, with their minds' thoughts as comets"></canvas>
@@ -668,12 +669,14 @@ function renderTick() {
 // ---------- conversation: the shared cockpit channel ----------
 const VOICE = {"claude (msi seat)": "--msi", "claude (i3 seat)": "--i3", "i3-mind": "--i3", "keath (chorus)": "--ink", "keath": "--ink"};
 function renderTalk() {
-  const list = document.getElementById("talk-list"), msgs = (extras.channel || []).slice(-14);
+  const all = extras.channel || [], readBy = {};
+  for (const r of all.filter(m => m.kind === "read")) for (const at of r.reads || []) (readBy[at] ||= new Set()).add(r.from.replace(/ \(.*\)/, "").replace("claude", "Claude") + " " + (r.from.match(/\((\w+)/)?.[1] || "").toUpperCase());
+  const list = document.getElementById("talk-list"), msgs = all.filter(m => m.kind !== "read").slice(-14);
   list.replaceChildren();
   for (const m of msgs) {
     const li = document.createElement("li"); li.className = "msg" + (/mind$/.test(m.from || "") ? " mind" : "");
     li.style.setProperty("--c", `var(${VOICE[m.from] || "--l9"})`);
-    li.innerHTML = `<div class="from">${esc(m.from || "?")} <small>→ ${esc(m.to || "all")} · ${esc(ago(Date.parse(m.at)))}</small></div><div class="body">${esc(m.text || "")}</div>`;
+    li.innerHTML = `<div class="from">${esc(m.from || "?")} <small>→ ${esc(m.to || "all")} · ${esc(ago(Date.parse(m.at)))}</small></div><div class="body">${esc(m.text || "")}</div>${/^keath/.test(m.from || "") ? `<div class="state">${readBy[m.at] ? "✓✓ read by " + esc([...readBy[m.at]].join(", ")) : "✓ delivered to xanadu · not read yet"}</div>` : ""}`;
     list.append(li);
   }
   list.scrollTop = list.scrollHeight;

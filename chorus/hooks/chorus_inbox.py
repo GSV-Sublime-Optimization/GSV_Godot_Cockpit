@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 
 BASE = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "KiloCore" / "chorus"
-CACHE, SEEN = BASE / "channel.cache.jsonl", BASE / "channel.seen"
+CACHE, SEEN, ACKS = BASE / "channel.cache.jsonl", BASE / "channel.seen", BASE / "acks.jsonl"
 ME = "claude (msi seat)"
 
 
@@ -28,6 +28,10 @@ def main() -> None:
             print("[CHORUS] New in the cockpit channel for the MSI seat (react to these):")
             for m in new[-8:]:
                 print(f"  - {m.get('at', '')} {m.get('from', '?')} -> {m.get('to', '?')}: {str(m.get('text', ''))[:300]}")
+            # read receipts: the CHORUS feeder posts these to the channel on its next cycle
+            with ACKS.open("a", encoding="utf-8") as f:
+                for m in new:
+                    f.write(json.dumps({"at": m.get("at"), "from": m.get("from")}) + chr(10))
         if msgs:
             SEEN.write_text(max(m.get("at", "") for m in msgs))
     except Exception:  # noqa: BLE001

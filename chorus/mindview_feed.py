@@ -132,12 +132,28 @@ def fetch() -> dict:
         data["prs_waiting"] = waiting_prs()
     except (subprocess.SubprocessError, ValueError, OSError):
         data["prs_waiting"] = _prs["items"]
+    flush_acks()
     data["claude_activity"] = claude_activity()
     data["spine"] = spine()
     # cache the shared channel locally so the Claude prompt hook can read it without a network call
     LOCAL.mkdir(parents=True, exist_ok=True)
     (LOCAL / "channel.cache.jsonl").write_text("\n".join(json.dumps(m) for m in data.get("channel", [])), encoding="utf-8")
     return data
+
+
+def flush_acks() -> None:
+    """Post one read receipt for the messages the MSI Claude was shown (written by hooks/chorus_inbox.py)."""
+    f = LOCAL / "acks.jsonl"
+    if not f.exists() or not f.stat().st_size:
+        return
+    reads = sorted({json.loads(l)["at"] for l in f.read_text(encoding="utf-8").splitlines() if l.strip()})
+    rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": "claude (msi seat)", "to": "all",
+           "kind": "read", "reads": reads, "text": f"read {len(reads)} message(s)"}
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
+                        "cat >> ~/steward/cockpit/channel.jsonl"], input=json.dumps(rec) + chr(10),
+                       capture_output=True, text=True, timeout=30)
+    if r.returncode == 0:
+        f.unlink()
 
 
 SPEAKERS = {"claude": "claude (msi seat)", "mind": "mind", "all": "all"}
