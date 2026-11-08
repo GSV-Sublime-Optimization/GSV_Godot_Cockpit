@@ -73,9 +73,19 @@ def classify(repo, prs, now, stale_days=14):
         agent, _ = cockpit_feed.agent_of(p.get('headRefName', ''))
         ci = ci_of(p)
         reasons = []
-        if superseded_by:
+        # Keath (2026-11-08): never lose work on big, divergent projects. "Superseded" is only a close-candidate when a
+        # superseding PR is READY (not a draft), so the work stays visible in a live review path. Inside a draft
+        # umbrella it stays open (bucket keep), so closing the umbrella later can't silently hide a chain of work.
+        live = [n for n in superseded_by if not next((q for q in prs if q['number'] == n), {}).get('isDraft', True)]
+        if superseded_by and live:
             bucket = 'close'
-            reasons.append('superseded: its head is inside ' + ', '.join(f'#{n}' for n in superseded_by))
+            reasons.append('superseded: its head is inside ready PR ' + ', '.join(f'#{n}' for n in live) + ' (branch must be kept)')
+        elif superseded_by:
+            bucket = 'keep'
+            reasons.append('contained in DRAFT umbrella ' + ', '.join(f'#{n}' for n in superseded_by) + ': keep open until the umbrella is ready or merged')
+        elif idle_d > stale_days and repo.split('/')[-1].lower() == 'furyline':
+            bucket = 'keep'
+            reasons.append(f'idle {idle_d:.0f} days, but Furyline drafts are never closed for age alone: needs Keath or the author')
         elif idle_d > stale_days:
             bucket = 'close'
             reasons.append(f'stale: no activity for {idle_d:.0f} days')
