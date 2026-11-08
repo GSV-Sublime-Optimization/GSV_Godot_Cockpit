@@ -197,7 +197,7 @@ func _draw_minds(rect: Rect2) -> void:
 	var y := rect.position.y + 77.0
 	for option in options:
 		var hit := Rect2(rect.position.x + 12, y, rect.size.x - 24, 54)
-		var chosen := option["id"] == _mind_filter
+		var chosen: bool = option["id"] == _mind_filter
 		if chosen:
 			draw_rect(hit, Color("#20364a"))
 			draw_rect(hit, CYAN.darkened(0.2), false, 1)
@@ -262,7 +262,7 @@ func _draw_core(rect: Rect2) -> void:
 	draw_arc(center, 94, -phase * 0.7, -phase * 0.7 + PI * 0.45, 30, Color(VIOLET, 0.53), 1.5)
 	for id in RIG_IDS:
 		var p: Vector2 = pos[id]
-		var focused := attention == id
+		var focused: bool = attention == id
 		var status := String(_feed.get("bodies", {}).get(id, {}).get("status", "unknown"))
 		var node_color := _health_color(status)
 		var weight := 2.2 if focused else 1.0
@@ -274,7 +274,7 @@ func _draw_core(rect: Rect2) -> void:
 		draw_circle(p, 20 if focused else 17, Color(node_color, 0.15))
 		draw_arc(p, 20, 0, TAU, 32, node_color, 2 if focused else 1)
 		draw_circle(p, 4, node_color)
-		var label := RIG_NAMES[RIG_IDS.find(id)]
+		var label: String = RIG_NAMES[RIG_IDS.find(id)]
 		_txt(p + Vector2(-32, 39), label, 13, INK if focused else MUTE, 80)
 		_rig_hitboxes.append({"id": id, "rect": Rect2(p - Vector2(33, 33), Vector2(66, 76))})
 	draw_circle(center, 30, Color("#1b3843"))
@@ -437,7 +437,7 @@ func _wrap(at: Vector2, value: String, chars: int, font_size: int, color: Color,
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		var p := event.position
+		var p: Vector2 = event.position
 		for option in _mind_hitboxes:
 			if option["rect"].has_point(p):
 				_mind_filter = String(option["id"])
