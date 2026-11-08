@@ -11,8 +11,13 @@ signal refresh_requested
 
 const PROJECTION = preload("res://scripts/workstation/WorkbenchSpatialProjection.gd")
 const ARCH = preload("res://scripts/workstation/WorkbenchHoloArchitecture.gd")
+const ATLAS = preload("res://scripts/workstation/WorkbenchAtlasBridge.gd")
+const CAPSULE = preload("res://scripts/workstation/WorkbenchAgentCapsule.gd")
 
 var _snapshot: Dictionary = {}
+var _capabilities: Array[Dictionary] = []
+var _atlas_source := "not_connected"
+var _export_button: Button
 var _graph: Dictionary = {}
 var _display: SubViewportContainer
 var _viewport: SubViewport
@@ -48,7 +53,7 @@ var _orbiting := false
 func _ready() -> void:
 	_build_ui()
 	_build_world()
-	_render()
+	_load_atlas()
 	_update_camera()
 
 func set_snapshot(snapshot: Dictionary) -> void:
@@ -75,7 +80,7 @@ func _build_ui() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	_lens = OptionButton.new()
-	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "GAMES"]:
+	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "GAMES", "CAPABILITY ATLAS"]:
 		_lens.add_item(name)
 	_lens.tooltip_text = "Change the resource domain, not the underlying state."
 	_lens.item_selected.connect(func(_index): _apply_visibility())
@@ -86,6 +91,11 @@ func _build_ui() -> void:
 	_time.tooltip_text = "Filter only missions with a real source timestamp. Never manufactures historical snapshots."
 	_time.item_selected.connect(func(_index): _apply_visibility())
 	header.add_child(_time)
+	var atlas_reload := Button.new()
+	atlas_reload.text = "LOAD ATLAS"
+	atlas_reload.tooltip_text = "Schema-pinned local snapshot; not authenticated tool admission"
+	atlas_reload.pressed.connect(_load_atlas)
+	header.add_child(atlas_reload)
 	var reset := Button.new()
 	reset.text = "RECALL ORBIT"
 	reset.pressed.connect(func():
@@ -186,9 +196,15 @@ func _build_ui() -> void:
 	next_signal.text = "NEXT SOURCE SIGNAL   TAB"
 	next_signal.pressed.connect(_focus_next)
 	inspector.add_child(next_signal)
+	_export_button = Button.new()
+	_export_button.text = "EXPORT AGENT HANDOFF"
+	_export_button.disabled = true
+	_export_button.tooltip_text = "Copy and locally save versioned, bounded source context for any authorized agent"
+	_export_button.pressed.connect(_export_handoff)
+	inspector.add_child(_export_button)
 	var instructions := Label.new()
 	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	instructions.text = "DRAG orbit   /   WHEEL dive   /   CLICK select   /   F focus\nTAB cycle   /   1-6 decks   /   R re-observe\nFourth dimension = source timestamp only.\nLuminous geometry is illustrative, NOT proof of live execution."
+	instructions.text = "DRAG orbit   /   WHEEL dive   /   CLICK select   /   F focus\nTAB cycle   /   1-7 decks   /   R re-observe\nFourth dimension = source timestamp only.\nLuminous geometry is illustrative, NOT proof of live execution."
 	instructions.add_theme_font_size_override("font_size", 11)
 	instructions.add_theme_color_override("font_color", Color("#93a9bb"))
 	inspector.add_child(instructions)
@@ -212,6 +228,7 @@ func _build_world() -> void:
 	world.environment = env
 	_viewport.add_child(world)
 	_architecture = ARCH.stage(_viewport)
+	_make_orbit(13.0, -4.2, Color("#57416b"))
 	var lamp := OmniLight3D.new()
 	lamp.position = Vector3(0, 7, 6)
 	lamp.light_energy = 2.0
@@ -234,13 +251,25 @@ func _make_orbit(radius: float, y: float, color: Color) -> void:
 	item.mesh = mesh
 	_viewport.add_child(item)
 
+func _load_atlas() -> void:
+	var result: Dictionary = ATLAS.read_optional()
+	_capabilities.clear()
+	if result.get("ok", false):
+		for item in result["entries"]:
+			_capabilities.append(item.duplicate(true))
+		_atlas_source = String(result.get("source", "snapshot"))
+	else:
+		_atlas_source = "NOT CONNECTED / " + String(result.get("reason", "unknown"))
+	if _scene != null:
+		_render()
+
 func _render() -> void:
 	for child in _scene.get_children():
 		_scene.remove_child(child)
 		child.queue_free()
 	_meshes.clear()
 	_links.clear()
-	_graph = PROJECTION.project(_snapshot)
+	_graph = PROJECTION.project(_snapshot, _capabilities, _atlas_source)
 	var lookup: Dictionary = {}
 	for entry in _graph.get("nodes", []):
 		var id: String = entry["key"]
@@ -258,7 +287,7 @@ func _render() -> void:
 func _apply_visibility() -> void:
 	if _lens == null or _time == null:
 		return
-	var selected_domain: String = ["all", "rig", "project", "mission", "service", "game"][_lens.selected]
+	var selected_domain: String = ["all", "rig", "project", "mission", "service", "game", "capability"][_lens.selected]
 	for id in _meshes:
 		var item: Dictionary = _meshes[id]
 		var entry: Dictionary = item["entry"]
@@ -295,6 +324,8 @@ func _apply_visibility() -> void:
 		feeds.get("mission_feed_state", "unknown"),
 		feeds.get("service_feed_state", "unknown")
 	]
+	_status.text += "     |     ATLAS %d STATIC (%d hidden) / %s" % [
+		int(_graph.get("atlas_count", 0)), int(_graph.get("atlas_omitted", 0)), _atlas_source]
 	_update_label_lod()
 
 func _update_label_lod() -> void:
@@ -308,7 +339,8 @@ func _update_label_lod() -> void:
 		var domain_only: bool = (_lens.selected == 2 and kind == "project" or
 			_lens.selected == 3 and kind == "mission" or
 			_lens.selected == 4 and kind == "service" or
-			_lens.selected == 5 and row["entry"].get("game", false))
+			_lens.selected == 5 and row["entry"].get("game", false) or
+			_lens.selected == 6 and kind == "capability")
 		row["label"].visible = row["root"].visible and (focused or kind == "rig" or
 			(domain_only and context_zoom))
 		row["status_label"].visible = row["root"].visible and focused
@@ -412,14 +444,21 @@ func _refresh_inspector() -> void:
 		_open_button.disabled = true
 		_compose_button.disabled = true
 		_focus_button.disabled = true
+		_export_button.disabled = true
 		return
 	var entry: Dictionary = _meshes[_selected]["entry"]
 	_info.text = "%s\n\n%s\n\nSTATUS\n%s\n\nSOURCE\n%s\n\nIDENTITY\n%s" % [
 		String(entry["title"]), String(entry["detail"]), String(entry["status"]).to_upper(),
 		String(entry["source"]), String(entry["id"])]
+	if entry.get("kind", "") == "capability":
+		_info.text += "\n\nDECLARED MACHINE / GRADE / COST\n%s / %s / %s\n\nEVIDENCE\n%s\n\nNOT ADMITTED: REQUALIFY VIA OWNER" % [
+			String(entry.get("machine", "unknown")), String(entry.get("grade", "D")),
+			String(entry.get("cost_class", "unknown")), String(entry.get("evidence", ""))]
 	if entry.has("updated_at") and not String(entry["updated_at"]).is_empty():
 		_info.text += "\n\nSOURCE UPDATED\n" + String(entry["updated_at"])
 	var kind := String(entry["kind"])
+	_export_button.disabled = false
+	_open_button.disabled = not ["rig", "project", "mission"].has(kind)
 	_open_button.disabled = not ["rig", "project", "mission", "service"].has(kind)
 	_compose_button.disabled = not (kind == "project" and entry.get("observed", false)) and not (
 		kind == "mission" and not String(entry.get("repo", "")).is_empty())
@@ -482,6 +521,25 @@ func _process(delta: float) -> void:
 		record["spin"].rotate_y(delta * (0.65 if status in ["running", "queued"] else 0.06))
 		if record["halo"].visible:
 			record["pulse"].scale = Vector3.ONE * (1.0 + 0.09 * sin(_clock * 2.0))
+
+func _export_handoff() -> void:
+	if not _meshes.has(_selected) or _export_button.disabled:
+		return
+	var item: Dictionary = _meshes[_selected]["entry"]
+	var result: Dictionary = CAPSULE.build(item, _graph, _snapshot)
+	if not result.get("ok", false):
+		_status.text = "HANDOFF REFUSED / " + String(result.get("reason", "unknown"))
+		return
+	var payload := String(result["json"])
+	DisplayServer.clipboard_set(payload)
+	var path := "user://hyperspace-agent-handoff.json"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		_status.text = "HANDOFF COPIED / local file unavailable"
+		return
+	file.store_string(payload)
+	file.close()
+	_status.text = "HANDOFF COPIED + SAVED LOCALLY / " + ProjectSettings.globalize_path(path)
 
 func _open_selected() -> void:
 	if not _meshes.has(_selected) or _open_button.disabled:

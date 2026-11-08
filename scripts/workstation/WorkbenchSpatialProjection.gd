@@ -9,12 +9,13 @@ const CATALOG = preload("res://scripts/workstation/WorkbenchCatalog.gd")
 const MAX_PROJECTS := 32
 const MAX_MISSIONS := 24
 const MAX_SERVICES := 24
+const MAX_CAPABILITIES := 24
 const BODY_POSITIONS := [
 	Vector3(-8.0, -3.0, -4.0), Vector3(8.0, -3.0, -4.0),
 	Vector3(-8.0, -3.0, 4.0), Vector3(8.0, -3.0, 4.0),
 ]
 
-static func project(snapshot: Dictionary) -> Dictionary:
+static func project(snapshot: Dictionary, capability_snapshot: Array = [], atlas_source: String = "not_connected") -> Dictionary:
 	var nodes: Array[Dictionary] = []
 	var edges: Array[Dictionary] = []
 	var by_key: Dictionary = {}
@@ -112,7 +113,37 @@ static func project(snapshot: Dictionary) -> Dictionary:
 				"source": "Studio colony health", "position": _orbit(i, selected.size(), 10.2, -0.1, 0.6),
 				"observed": true
 			})
-	return {"nodes": nodes, "edges": edges, "feeds": state, "source": "KiloCore Studio", "is_fixture": false}
+	var atlas_seen: Dictionary = {}
+	var allowed: Array[Dictionary] = []
+	for raw in capability_snapshot:
+		if typeof(raw) != TYPE_DICTIONARY:
+			continue
+		var cap_id := String(raw.get("id", ""))
+		if cap_id.is_empty() or cap_id.length() > 64 or atlas_seen.has(cap_id):
+			continue
+		atlas_seen[cap_id] = true
+		allowed.append(raw)
+	allowed.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return String(a.get("name", "")).to_lower() < String(b.get("name", "")).to_lower())
+	for i in range(mini(MAX_CAPABILITIES, allowed.size())):
+		var cap: Dictionary = allowed[i]
+		var cid := String(cap.get("id", ""))
+		_push(nodes, by_key, {
+			"key": "capability:" + cid, "kind": "capability", "id": cid,
+			"title": String(cap.get("name", cid)).substr(0, 80),
+			"detail": String(cap.get("can_do", "unknown capability")).substr(0, 170),
+			"status": "snapshot:" + String(cap.get("snapshot_state", "unknown")),
+			"source": atlas_source + " (STATIC SNAPSHOT, NO ADMISSION)",
+			"machine": String(cap.get("machine", "unknown")),
+			"grade": String(cap.get("grade", "D")),
+			"cost_class": String(cap.get("cost_class", "unknown")),
+			"evidence": String(cap.get("evidence", "not_provided")).substr(0, 450),
+			"position": _orbit(i, mini(MAX_CAPABILITIES, allowed.size()), 13.0, -4.2, 0.26),
+			"observed": false, "admitted": false
+		})
+	return {"nodes": nodes, "edges": edges, "feeds": state, "source": "KiloCore Studio",
+		"atlas_source": atlas_source, "atlas_count": allowed.size(),
+		"atlas_omitted": maxi(0, allowed.size() - MAX_CAPABILITIES), "is_fixture": false}
 
 static func _push(nodes: Array[Dictionary], lookup: Dictionary, entry: Dictionary) -> void:
 	if lookup.has(entry["key"]):
@@ -144,6 +175,8 @@ static func _age_drift(value: String) -> float:
 	return clampf(age_h / 24.0, 0.0, 3.0)
 
 static func color_for(status: String) -> Color:
+	if status.begins_with("snapshot:"):
+		return Color("#af7cff")  # Static Atlas is violet, not live-green.
 	match status:
 		"reported_fresh", "observed", "succeeded", "healthy", "ok", "up":
 			return Color("#39ecd0")

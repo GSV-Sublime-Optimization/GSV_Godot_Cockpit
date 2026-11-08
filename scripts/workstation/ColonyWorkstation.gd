@@ -60,6 +60,14 @@ func _ready() -> void:
 		timer.timeout.connect(_client.refresh)
 		add_child(timer)
 		call_deferred("_observe_after_paint")
+		call_deferred("_open_spatial_after_paint")
+
+func _open_spatial_after_paint() -> void:
+	## Real desktop opens in 3D after first frame. Headless tests using
+	## auto_refresh=false retain their fast fleet-first test baseline.
+	await get_tree().process_frame
+	if is_inside_tree():
+		_open_resource({"kind": "hyperspace", "id": "hyperspace", "name": "Hyperspace"})
 
 func _observe_after_paint() -> void:
 	for frame in 2:
