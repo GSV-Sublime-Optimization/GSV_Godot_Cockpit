@@ -232,10 +232,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+# Terminal Depths' fleet mode (Dev-Mentor#291) reads the same feed from its mounted state dir.
+TD_FEED = Path(os.environ.get("CHORUS_TD_FEED", "C:/dev/active/Dev-Mentor/state/fleet/feed.json"))
+
+
 def write_feed(data: dict) -> None:
-    tmp = HERE / "feed.json.tmp"
-    tmp.write_text(json.dumps(data), encoding="utf-8")
-    os.replace(tmp, HERE / "feed.json")
+    blob = json.dumps(data)
+    targets = [HERE / "feed.json"]
+    if TD_FEED.parent.parent.exists():           # only when Dev-Mentor's state/ exists on this rig
+        TD_FEED.parent.mkdir(exist_ok=True)
+        targets.append(TD_FEED)
+    for t in targets:
+        tmp = t.with_suffix(".json.tmp")
+        tmp.write_text(blob, encoding="utf-8")
+        os.replace(tmp, t)
 
 
 def loop(stop: threading.Event) -> None:

@@ -1075,7 +1075,7 @@ document.getElementById("talk-form").addEventListener("submit", async e => {
 function askClaude(subject) {
   document.getElementById("needs").open = true;
   document.getElementById("talk-to").value = "claude";
-  const input = document.getElementById("talk-text"); input.value = `About "${subject}": `; input.focus();
+  const input = document.getElementById("talk-text"); input.value = `What should I do about "${subject}"? `; input.focus();
 }
 
 // ---------- rig card: click a star ----------
