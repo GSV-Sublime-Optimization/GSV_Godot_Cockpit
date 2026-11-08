@@ -398,7 +398,9 @@ function derive() {
   const failing = []; for (const r of rigs) for (const c of r.failing || []) failing.push({ rig: r.rig, ...c, doc: (f.doctor || []).find((d) => d.key === `${r.rig}:${c.name}`) });
   const silent = rigs.filter((r) => r.silent || r.missing);
   const spine = f.spine && Array.isArray(f.spine.services) ? f.spine : null;
-  const spineDown = spine ? spine.services.filter((s) => !s.up) : [];
+  // trueform-forge (desktop-app sidecar), rimapi and desktop-ollama are down by design (colony memory: spine expected-down set)
+  const EXPECTED_DOWN = new Set(['trueform-forge', 'rimapi', 'desktop-ollama']);
+  const spineDown = spine ? spine.services.filter((s) => !s.up && !EXPECTED_DOWN.has(s.name)) : [];
   const heat = clamp((failing.length * 0.35 + silent.length * 0.3 + spineDown.length * 0.12), 0, 1);
   const recent = (f.events || []).filter((e) => nowMs - ts(e.at) < 3 * 3600e3);
   const lastEv = (f.events || []).slice().sort((a, b) => ts(b.at) - ts(a.at))[0];
