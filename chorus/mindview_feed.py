@@ -200,6 +200,7 @@ def fetch() -> dict:
     except (subprocess.SubprocessError, ValueError, OSError):
         data["prs_waiting"] = _prs["items"]
     flush_acks()
+    data["minds_shipped"] = ship_minds()
     try:
         from work import work           # colony claims + checkouts holding unsaved work
         data["work"] = work()
@@ -229,6 +230,63 @@ def fetch() -> dict:
     LOCAL.mkdir(parents=True, exist_ok=True)
     (LOCAL / "channel.cache.jsonl").write_text("\n".join(json.dumps(m) for m in data.get("channel", [])), encoding="utf-8")
     return data
+
+
+# Minds that live in containers (the MSI Culture Ship) cannot SSH to xanadu: they append their thoughts
+# to a local outbox (Dev-Mentor/state/minds/outbox/<UTC date>.jsonl, bind-mounted into the container),
+# and the feeder ships new complete lines to xanadu:~/steward/events/<same date>.jsonl each cycle.
+MINDS_OUTBOX = Path(os.environ.get("CHORUS_MINDS_OUTBOX", "C:/dev/active/Dev-Mentor/state/minds/outbox"))
+OUTBOX_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+SHIP_MAX = 64 * 1024
+
+
+def ship_minds(outbox: Path | None = None, offsets_file: Path | None = None, send=None) -> dict:
+    """Ship new outbox lines to xanadu's events (append-only, each line once). -> {shipped, error}."""
+    outbox, offsets_file = outbox or MINDS_OUTBOX, offsets_file or LOCAL / "minds_shipped.json"
+    if not outbox.is_dir():
+        return {"shipped": 0}
+    try:
+        offsets = json.loads(offsets_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        offsets = {}
+    shipped, err = 0, ""
+    for f in sorted(outbox.glob("*.jsonl")):
+        if not OUTBOX_DAY.match(f.stem):
+            continue
+        start = int(offsets.get(f.name, 0))
+        with f.open("rb") as fh:
+            fh.seek(start)
+            chunk = fh.read(SHIP_MAX)
+        end = chunk.rfind(b"\n") + 1                    # only complete lines; a half-written one waits
+        if end <= 0:
+            continue
+        good = []
+        for raw in chunk[:end].splitlines():
+            try:
+                ev = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(ev, dict) and ev.get("mind") and ev.get("at"):
+                good.append(json.dumps(ev))
+        if good:
+            try:
+                (send or _ship_events)(f.stem, "\n".join(good) + "\n")
+            except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+                err = str(e)[:160]
+                break
+            shipped += len(good)
+        offsets[f.name] = start + end
+    LOCAL.mkdir(parents=True, exist_ok=True)
+    offsets_file.write_text(json.dumps(offsets), encoding="utf-8")
+    return {"shipped": shipped, **({"error": err} if err else {})}
+
+
+def _ship_events(day: str, blob: str) -> None:
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
+                        f"mkdir -p ~/steward/events && cat >> ~/steward/events/{day}.jsonl"],
+                       input=blob, capture_output=True, text=True, timeout=30)
+    if r.returncode:
+        raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
 
 
 REROUTE_PER_CYCLE = 3
