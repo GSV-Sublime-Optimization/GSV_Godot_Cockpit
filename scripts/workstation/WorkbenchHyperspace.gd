@@ -89,7 +89,6 @@ func _build_ui() -> void:
 	_display.custom_minimum_size = Vector2(400, 320)
 	_display.focus_mode = Control.FOCUS_ALL
 	_display.gui_input.connect(_on_view_input)
-	_display.resized.connect(_resize_viewport)
 	left.add_child(_display)
 	_viewport = SubViewport.new()
 	_viewport.name = "Hyperspace3D"
@@ -269,11 +268,11 @@ func _make_edge(a: Vector3, b: Vector3) -> void:
 func _apply_visibility() -> void:
 	if _lens == null or _time == null:
 		return
-	var selected_domain := ["all", "rig", "project", "mission", "service"][_lens.selected]
+	var selected_domain: String = ["all", "rig", "project", "mission", "service"][_lens.selected]
 	for id in _meshes:
 		var item: Dictionary = _meshes[id]
 		var entry: Dictionary = item["entry"]
-		var domain_ok := selected_domain == "all" or entry["kind"] == selected_domain
+		var domain_ok: bool = selected_domain == "all" or entry["kind"] == selected_domain
 		var time_ok := true
 		if entry["kind"] == "mission" and _time.selected > 0:
 			var stamp := String(entry.get("updated_at", ""))
@@ -295,11 +294,6 @@ func _apply_visibility() -> void:
 		feeds.get("mission_feed_state", "unknown"),
 		feeds.get("service_feed_state", "unknown")
 	]
-
-func _resize_viewport() -> void:
-	if _viewport == null:
-		return
-	_viewport.size = Vector2i(maxi(2, roundi(_display.size.x)), maxi(2, roundi(_display.size.y)))
 
 func _update_camera() -> void:
 	if _camera == null:
