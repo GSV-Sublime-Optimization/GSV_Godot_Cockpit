@@ -49,7 +49,14 @@ def load() -> dict:
         subprocess.run([sys.executable, str(HERE / "mindview_feed.py"), "--once"], capture_output=True, timeout=90)
     if not FEED.exists():
         sys.exit("No feed.json and xanadu could not be reached. Is the tailnet up?")
-    d = json.loads(FEED.read_text(encoding="utf-8"))
+    for attempt in range(5):       # Windows denies reads while the feeder's os.replace swaps the file
+        try:
+            d = json.loads(FEED.read_text(encoding="utf-8"))
+            break
+        except (PermissionError, json.JSONDecodeError):
+            if attempt == 4:
+                raise
+            time.sleep(0.2)
     d["_age_s"] = time.time() - FEED.stat().st_mtime
     return d
 
