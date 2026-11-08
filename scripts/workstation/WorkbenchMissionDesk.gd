@@ -377,8 +377,14 @@ func _on_index_finished(result: int, status: int, _headers: PackedStringArray,
 		_update_submit()
 		return
 	for record in rows:
-		if typeof(record) != TYPE_DICTIONARY:
-			_response.text = "INDEX INCOMPLETE / invalid mission record. Retry remains locked."
+		if (typeof(record) != TYPE_DICTIONARY
+				or not CONTRACT._mission_id(String(record.get("id", "")))
+				or typeof(record.get("posted_by")) != TYPE_STRING
+				or typeof(record.get("title")) != TYPE_STRING
+				or typeof(record.get("objective")) != TYPE_STRING
+				or typeof(record.get("risk")) != TYPE_STRING
+				or not CONTRACT._same_repo_path(record.get("repo"), String(record.get("repo", "")))):
+			_response.text = "INDEX INCOMPLETE / missing or invalid mission identity. Retry remains locked."
 			_update_submit()
 			return
 		if (record.get("posted_by") == "godot-workstation"
