@@ -656,7 +656,7 @@ function ordersAll() {
 function ordersAt(orders, T) {
   return orders.filter((o) => ts(o.at) <= T).map((o) => {
     const h = (o.history || []).filter((x) => ts(x.at) <= T); const last = h.at(-1) || { status: 'posted', at: o.at };
-    const done = last.status === 'done' || last.status === 'declined';
+    const done = last.status === 'done' || last.status === 'declined' || last.status === 'rerouted';
     return { ...o, history: h, status: last.status, by: last.status === 'posted' ? null : (last.by || o.by), note: done ? o.note : '', link: done ? o.link : '', changed: ts(last.at) };
   });
 }
@@ -777,7 +777,7 @@ function apply() {
   const live0 = new Set();
   for (const o of m.orders) {
     const recent = m.T - o.changed < 3 * 3600e3;
-    if (!recent && (o.status === 'done' || o.status === 'declined')) continue;
+    if (!recent && (o.status === 'done' || o.status === 'declined' || o.status === 'rerouted')) continue;
     if (m.T - ts(o.at) > 24 * 3600e3 && o.status === 'posted') continue;
     live0.add(o.id); if (!pkt.has(o.id)) pkt.set(o.id, { p: CONSOLE.clone().add(V(0, 2, 0)) });
   }
@@ -785,10 +785,10 @@ function apply() {
   // events that happen as time passes: action receipts, orders done, thoughts
   const fresh = (t) => seen.primed && (m.replay || m.T - t < 5 * 60e3);
   for (const a of m.acts) { const k = a.at + a.action + a.target; if (!seen.acts.has(k)) { seen.acts.add(k); if (fresh(ts(a.at))) shockwave(actTarget(a), a.ok === false ? '#ff4f63' : '#ffffff', 16); } }
-  for (const o of m.orders) if (o.status === 'done' || o.status === 'declined') { const k = o.id; if (!seen.done.has(k)) { seen.done.add(k); if (fresh(o.changed)) shockwave(orderPlace(o), o.status === 'done' ? '#ffe08a' : '#ff4f63', 10, 2200); } }
+  for (const o of m.orders) if (o.status === 'done' || o.status === 'declined' || o.status === 'rerouted') { const k = o.id; if (!seen.done.has(k)) { seen.done.add(k); if (fresh(o.changed)) shockwave(orderPlace(o), o.status === 'done' ? '#ffe08a' : '#ff4f63', 10, 2200); } }
   for (const e of m.thoughts) { const k = e.at; if (!seen.thoughts.has(k)) { seen.thoughts.add(k); if (fresh(ts(e.at))) shockwave(rigTop(thoughtRig(e)), LEVELC[e.level] || '#4fe0c4', 9, 1400); } }
   seen.primed = true;
-  if (m.replay) { seen.acts.clear(); seen.done.clear(); seen.thoughts.clear(); for (const a of m.acts) seen.acts.add(a.at + a.action + a.target); for (const o of m.orders) if (o.status === 'done' || o.status === 'declined') seen.done.add(o.id); for (const e of m.thoughts) seen.thoughts.add(e.at); }
+  if (m.replay) { seen.acts.clear(); seen.done.clear(); seen.thoughts.clear(); for (const a of m.acts) seen.acts.add(a.at + a.action + a.target); for (const o of m.orders) if (o.status === 'done' || o.status === 'declined' || o.status === 'rerouted') seen.done.add(o.id); for (const e of m.thoughts) seen.thoughts.add(e.at); }
   buildKnow(); buildHints(); renderHud(); dirty = true;
   if (openKey) refreshPanel();
 }
@@ -881,11 +881,11 @@ function frame(t) {
     let target;
     const d = drone.get(displayName(o.by));
     if (o.status === 'posted') { posted.push(o); target = CONSOLE.clone().add(V((posted.length - 1) * 2.2 - 3, 2.2 + (posted.length % 2) * 0.8, 0)); }
-    else if (o.status === 'done' || o.status === 'declined') { target = orderPlace(o); }
+    else if (o.status === 'done' || o.status === 'declined' || o.status === 'rerouted') { target = orderPlace(o); }
     else target = d?.shown ? d.shown.clone().add(V(0, -1.6, 0)) : RIG[SEAT_RIG(o.by)].p.clone().setY(rigObj[SEAT_RIG(o.by)].h + 2);
     P.p.lerp(target, reduced ? 1 : 0.05);
     const col = o.status === 'declined' ? RED : o.station === 'act' ? C('#ff9a5a') : KEATH;
-    if (o.status === 'done' || o.status === 'declined') {
+    if (o.status === 'done' || o.status === 'declined' || o.status === 'rerouted') {
       const age = (m.T - o.changed) / 3600e3; glow.add(target.clone().setY(0.4), col, 5, 0.6 * (1 - age / 3));
       const R = 2.6; for (let i = 0; i < 24; i++) { const a1 = (i / 24) * Math.PI * 2, a2 = ((i + 1) / 24) * Math.PI * 2; flow.seg(target.clone().add(V(Math.cos(a1) * R, 0.2, Math.sin(a1) * R)), target.clone().add(V(Math.cos(a2) * R, 0.2, Math.sin(a2) * R)), col, 0.75 * (1 - age / 3), 0); }
       continue;
@@ -952,7 +952,7 @@ function labelFrame() {
   const z2 = label('z:spine', 'zone', m.spine ? `spine ${m.spine.up}/${m.spine.total} up${m.spine.stale ? ' · last known' : ''}${m.replay ? ' ≈' : ''}` : 'spine: no reading', null, 45); z2.p.copy(RIG.msi.p).setY(SVC_Y + 4); z2.dx = -50;
   const nRisk = m.atRisk.length, nAhead = m.atRisk.filter((c) => c.ahead > 0).length;
   const z3 = label('z:work', 'zone', `${nRisk} checkouts at risk · ${nAhead} with unpushed commits${m.replay ? ' ≈' : ''}`, null, 44); z3.p.copy(RIG.msi.p).add(V(0, 0.3, 10.5)); z3.dx = -90; pickAttr(z3, { kind: 'work' }); z3.el.style.pointerEvents = 'auto';
-  const open = m.orders.filter((o) => !['done', 'declined'].includes(o.status)).length;
+  const open = m.orders.filter((o) => !['done', 'declined', 'rerouted'].includes(o.status)).length;
   const zc = label('z:console', 'console', `Keath's console · ${open} order${open === 1 ? '' : 's'} open`, null, 70); zc.p.copy(CONSOLE).setY(0.6); zc.dx = -70; zc.dy = 10; pickAttr(zc, { kind: 'console' });
   if ([...drone.values()].some((d) => d.s.rig === 'cloud' && d.s.station !== 'pegs')) { const zk = label('z:cloud', 'zone', 'cloud seats (GitHub)'); zk.p.copy(CLOUD).add(V(0, 3, 0)); }
   for (const k of KNOW) {
@@ -1149,7 +1149,7 @@ function panelHtml(p) {
       `<h3>Journey</h3><ul class="list">${o.history.map((h) => `<li>${hhmm(h.at)} · <b>${esc(h.status)}</b> · ${esc(displayName(h.by))}</li>`).join('')}</ul>`;
   }
   if (p.kind === 'console') {
-    const open = m.orders.filter((o) => !['done', 'declined'].includes(o.status));
+    const open = m.orders.filter((o) => !['done', 'declined', 'rerouted'].includes(o.status));
     panelVerbs = { order: '', to: 'any', ask: '' };
     return head("Keath's console", 'post an order; watch its packet travel', 'var(--keath)') +
       `<ul class="list">${open.map((o) => `<li class="click" data-order="${esc(o.id)}"><b>${esc(o.status)}</b> · ${esc(o.text.slice(0, 90))}</li>`).join('') || '<li>No open orders.</li>'}</ul>` + verbs(panelVerbs);
@@ -1309,7 +1309,7 @@ function renderHud() {
   const silent = RIGS.filter((r) => r.id !== 'xanadu' && m.rigs[r.id].silent);
   const down = m.services.filter((s) => !s.up && !s.expected);
   const ahead = m.atRisk.filter((c) => c.ahead > 0);
-  const openO = m.orders.filter((o) => !['done', 'declined'].includes(o.status));
+  const openO = m.orders.filter((o) => !['done', 'declined', 'rerouted'].includes(o.status));
   const items = [
     { n: fail.length, l: fail.length === 1 ? `failing: ${fail[0].rig} ${fail[0].c.name}` : 'failing checks', cls: fail.length ? 'bad' : 'ok', go: fail[0] ? { kind: 'rig', id: fail[0].rig } : null },
     { n: down.length, l: down.length === 1 ? `down: ${down[0].name}` : 'services down', cls: down.length ? 'bad' : 'ok', go: down[0] ? { kind: 'svc', name: down[0].name } : null },
@@ -1324,7 +1324,7 @@ function renderHud() {
   let eff = Array.isArray(feed.impact) && !MOCK ? feed.impact.map((x) => ({ ...x })) : [];
   if (!eff.length) {
     for (const a of channelAll().filter((x) => x.kind === 'action')) eff.push({ at: a.at, kind: 'action', who: displayName(a.from), ok: a.ok, what: `${a.action} ${a.target}`, detail: a.result });
-    for (const o of ordersAll()) if (o.status === 'done' || o.status === 'declined') eff.push({ at: (o.history || []).at(-1)?.at || o.at, kind: 'order ' + o.status, who: displayName(o.by), ok: o.status === 'done', what: o.text.slice(0, 90), detail: o.note, link: o.link });
+    for (const o of ordersAll()) if (o.status === 'done' || o.status === 'declined' || o.status === 'rerouted') eff.push({ at: (o.history || []).at(-1)?.at || o.at, kind: 'order ' + o.status, who: displayName(o.by), ok: o.status === 'done', what: o.text.slice(0, 90), detail: o.note, link: o.link });
     for (const p of feed.prs_recent || []) if (p.state === 'MERGED') eff.push({ at: p.updated, kind: 'merged', who: p.agent, ok: true, what: `${p.repo}#${p.number} ${p.title}`, link: p.url });
   }
   eff = localLog.concat(eff).filter((x) => !m.replay || ts(x.at) <= m.T).sort((a, b) => ts(b.at) - ts(a.at)).slice(0, 10);

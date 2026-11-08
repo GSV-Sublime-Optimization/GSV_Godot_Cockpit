@@ -2,8 +2,9 @@
 
 WORK ORDERS live in the shared channel (xanadu:~/steward/cockpit/channel.jsonl) as two kinds of line:
     {"kind": "order", "id": "o-...", "at", "from", "to": <seat or "any">, "station", "text"}
-    {"kind": "order-status", "id": "o-...", "at", "from": <seat>, "status": "taken|working|done|declined",
+    {"kind": "order-status", "id": "o-...", "at", "from": <seat>, "status": "taken|working|done|declined|rerouted",
      "note", "link"}
+A "rerouted" order is closed: its work moved to a new order whose `ref` names it (reroute.py).
 `orders(channel)` folds them into the current state of each order. CHORUS only writes the order line
 (Keath posting it); agents write status lines with their own tools, and do the work with their own
 permissions. That is how pressing a button changes the fleet while the cockpit itself acts on nothing.
@@ -34,6 +35,9 @@ def _ts(s) -> float:
         return 0.0
 
 
+CLOSED = ("done", "declined", "rerouted")
+
+
 def orders(channel: list[dict]) -> list[dict]:
     state: dict[str, dict] = {}
     for m in channel:
@@ -44,13 +48,14 @@ def orders(channel: list[dict]) -> list[dict]:
                               "station": str(m.get("station") or "anvil")[:24],   # other cockpits add stations (ledger, act, factory)
                               "text": m.get("text", ""), "status": "posted", "by": None, "note": "", "link": "",
                               "due": str(m.get("due") or "")[:40], "why": str(m.get("why") or "")[:240],
+                              "ref": str(m.get("ref") or "")[:120],
                               "history": [{"at": m.get("at"), "status": "posted", "by": m.get("from")}]}
         elif m.get("kind") == "order-status" and m.get("id") in state:
             o = state[m["id"]]
             o.update(status=m.get("status", o["status"]), by=m.get("from"), note=m.get("note", o["note"]),
                      link=m.get("link", o["link"]))
             o["history"].append({"at": m.get("at"), "status": m.get("status"), "by": m.get("from")})
-    rank = {"working": 0, "taken": 1, "posted": 2, "declined": 3, "done": 4}
+    rank = {"working": 0, "taken": 1, "posted": 2, "declined": 3, "rerouted": 3, "done": 4}
     return sorted(state.values(), key=lambda o: (rank.get(o["status"], 5), o["at"] or ""))
 
 

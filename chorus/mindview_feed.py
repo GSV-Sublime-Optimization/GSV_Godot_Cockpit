@@ -212,6 +212,7 @@ def fetch() -> dict:
         data["prs_recent"] = _recent["items"]
     from shop import orders, smiths
     data["orders"] = orders(data.get("channel", []))
+    data["reroute"] = reroute_tick(data)
     import actions
     data["actions"] = actions.catalog()
     data["impact"] = impact(data)
@@ -228,6 +229,26 @@ def fetch() -> dict:
     LOCAL.mkdir(parents=True, exist_ok=True)
     (LOCAL / "channel.cache.jsonl").write_text("\n".join(json.dumps(m) for m in data.get("channel", [])), encoding="utf-8")
     return data
+
+
+REROUTE_PER_CYCLE = 3
+
+
+def reroute_tick(data: dict) -> dict:
+    """Each cycle: plan the one-time re-route of stale orders to seats that cannot act (reroute.py).
+    Writes only with CHORUS_AUTO_REROUTE=1 (at most REROUTE_PER_CYCLE a cycle); otherwise the plan is
+    shown in the feed and `chorus.py reroute --apply` writes it."""
+    try:
+        import reroute
+        ledger = reroute.load_ledger()
+        items = reroute.plan(data.get("channel", []), data, ledger=ledger)
+        out = {"auto": os.environ.get("CHORUS_AUTO_REROUTE") == "1", "plan": reroute.describe(items), "applied": []}
+        if out["auto"] and items:
+            out["applied"] = reroute.apply([i for i in items if i.get("to")][:REROUTE_PER_CYCLE], _append, _gh_comment,
+                                           "claude (msi seat)", ledger=ledger)
+        return out
+    except Exception as e:  # noqa: BLE001 - a broken re-route must not stop the feed
+        return {"error": str(e)[:200]}
 
 
 def flush_acks() -> None:
@@ -448,6 +469,9 @@ def send(body: dict, sender: str = "keath") -> dict:
     node = body.get("node") if isinstance(body.get("node"), dict) else {}
     if router.second_actor_conflict(kind, node, to):
         raise ValueError(f"{t['label']} is the PR author's own kind: a review must come from a different actor")
+    if t["type"] == "seat" and not router.can_take(to, kind):
+        raise ValueError(f"{t['label']} cannot execute {router.KIND_WORDS.get(kind, kind)} (it can only: "
+                         f"{', '.join(router.CAN.get(to, ()))}); send it to a seat with hands")
     if t.get("mirror") and kind == "action-order":
         raise ValueError(f"{t['label']} cannot run cockpit actions (it is not on a colony rig); send an order instead")
     about = router.node_label(node) if node else ""

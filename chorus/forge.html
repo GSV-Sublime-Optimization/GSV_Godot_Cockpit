@@ -1023,13 +1023,14 @@ window.ChorusComposer.config = {
 function stepTime(o, s) { const h = (o.history || []).filter((x) => x.status === s).at(-1); return h ? h : null; }
 function ticketHTML(o) {
   const steps = ['posted', 'taken', 'working', 'done'], lab = { posted: 'Sent', taken: 'Taken', working: 'Working', done: 'Done' };
-  const idx = o.status === 'declined' ? 3 : steps.indexOf(o.status);
+  const idx = o.status === 'declined' || o.status === 'rerouted' ? 3 : steps.indexOf(o.status);
   const li = steps.map((s, i) => {
     const h = stepTime(o, s); let cls = i < idx || (i === idx && (s === 'done' || s === 'posted')) ? 'on' : i === idx ? 'cur' : '';
     let label = lab[s], by = '';
     if (s === 'done' && o.status === 'declined') { cls = 'no'; label = 'Declined'; }
+    if (s === 'done' && o.status === 'rerouted') { cls = 'on'; label = 'Re-routed'; }
     if (s === 'posted' && o.status === 'posted') cls = 'cur';
-    const hh = s === 'done' && o.status === 'declined' ? stepTime(o, 'declined') : h;
+    const hh = s === 'done' && (o.status === 'declined' || o.status === 'rerouted') ? stepTime(o, o.status) : h;
     if (hh && s !== 'posted' && hh.by) by = displayName(hh.by);
     return `<li class="${cls}">${label}${hh ? `<small>${hhmm(hh.at)}${by ? ' · ' + esc(by) : ''}</small>` : '<small>&nbsp;</small>'}</li>`;
   }).join('');
@@ -1041,12 +1042,12 @@ function ticketHTML(o) {
     <div class="tx">${esc(o.text)}</div>
     <ol class="track">${li}</ol>
     ${next ? `<div class="th"><span>${next}${pend}</span></div>` : ''}
-    ${(o.status === 'done' || o.status === 'declined') && (o.note || o.link) ? `<div class="tn">${esc(o.note || '')}${o.link ? ` <a href="${esc(o.link)}" target="_blank" rel="noopener">${esc(o.link.replace(/^https:\/\/github.com\/[^/]+\//, ''))}</a>` : ''}</div>` : ''}
+    ${(o.status === 'done' || o.status === 'declined' || o.status === 'rerouted') && (o.note || o.link) ? `<div class="tn">${esc(o.note || '')}${o.link ? ` <a href="${esc(o.link)}" target="_blank" rel="noopener">${esc(o.link.replace(/^https:\/\/github.com\/[^/]+\//, ''))}</a>` : ''}</div>` : ''}
   </article>`;
 }
 function renderBoard() {
-  const act = M.orders.filter((o) => !['done', 'declined'].includes(o.status)).sort((a, b) => ({ working: 0, taken: 1, posted: 2 }[a.status] - { working: 0, taken: 1, posted: 2 }[b.status]) || ts(b.at) - ts(a.at));
-  const fin = M.orders.filter((o) => ['done', 'declined'].includes(o.status)).sort((a, b) => ts(b.history.at(-1).at) - ts(a.history.at(-1).at)).slice(0, 8);
+  const act = M.orders.filter((o) => !['done', 'declined', 'rerouted'].includes(o.status)).sort((a, b) => ({ working: 0, taken: 1, posted: 2 }[a.status] - { working: 0, taken: 1, posted: 2 }[b.status]) || ts(b.at) - ts(a.at));
+  const fin = M.orders.filter((o) => ['done', 'declined', 'rerouted'].includes(o.status)).sort((a, b) => ts(b.history.at(-1).at) - ts(a.history.at(-1).at)).slice(0, 8);
   for (const o of M.orders) if (prevStatus[o.id] && prevStatus[o.id] !== o.status) toast(`${o.id}: ${o.status === 'taken' ? 'taken by ' + displayName(o.by) : o.status === 'working' ? displayName(o.by) + ' is working on it' : o.status === 'done' ? 'DONE by ' + displayName(o.by) : o.status}`);
   $('#active').innerHTML = act.map(ticketHTML).join('') || `<div class="empty">No open orders. Write one above, or press "Make this an order" on anything in the shop.</div>`;
   $('#finished').innerHTML = fin.map(ticketHTML).join('') || `<div class="empty">Nothing finished yet.</div>`;

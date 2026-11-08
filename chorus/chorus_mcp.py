@@ -11,6 +11,7 @@ Stdio MCP server (JSON-RPC 2.0, one message per line), standard library only. It
     chorus_say          post to the shared cockpit channel as this seat
     chorus_route        where should this message go (who/where/when/why), no side effects
     chorus_send         route and send as this seat
+    chorus_reroute      stale orders to seats that cannot act get ONE re-route (dry run unless apply)
 
 The seat comes from CHORUS_SEAT (default "claude (msi seat)"); an agent never speaks as Keath.
 Register with Claude Code:
@@ -55,6 +56,10 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string"}, "node": {"type": "string"}, "to": {"type": "string"}, "where": {"type": "string"},
          "kind": {"type": "string"}, "when": {"type": "string"}, "why": {"type": "string"}}, "required": ["text"]}},
+    {"name": "chorus_reroute", "description": "Untaken orders (posted > 15 min) whose target cannot be reached or cannot execute them (e.g. i3-mind, a chat model; gpt-6/codex/muse, which do not read the channel) get ONE re-route to the router's best capable target, with ref = the original id. Dry run unless apply=true. Never re-routes twice; never sends a review of a Claude PR to a Claude seat.",
+     "inputSchema": {"type": "object", "properties": {
+         "apply": {"type": "boolean", "description": "write the re-routes (default: dry run)"},
+         "to": {"type": "string", "description": "only orders addressed to this target, e.g. i3-mind"}}}},
     {"name": "chorus_say", "description": "Post a message to the shared cockpit channel as this seat.",
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string"}, "to": {"type": "string", "description": "a seat, e.g. 'claude (i3 seat)', 'keath (chorus)', or 'all'"}},
@@ -97,6 +102,8 @@ def call(name: str, a: dict) -> str:
         return _capture(chorus.route_cmd, chorus.load(), a["text"], a.get("node"), True)
     if name == "chorus_send":
         return _capture(_send, a)
+    if name == "chorus_reroute":
+        return _capture(chorus.reroute_cmd, chorus.load(), bool(a.get("apply")), a.get("to") or None)
     if name == "chorus_say":
         return _capture(chorus.say, a["text"], a.get("to", "all"))
     raise KeyError(name)

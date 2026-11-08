@@ -68,6 +68,25 @@ TARGETS: dict[str, dict] = {
     "all": {"label": "everyone", "type": "all", "rig": "", "vendor": "all", "reach": "live",
             "where": ["channel"], "owns": set(), "aliases": ["everyone", "all agents", "all seats", "all minds", "@all"]},
 }
+# What each target can actually EXECUTE (reroute.py reads this): a Claude seat has hands on a rig; the
+# i3 Mind is a chat model that can only look and answer; cloud seats review and write code on GitHub but
+# never read the channel; local models only answer; Studio/ChatDev take prepared work.
+HANDS = ("order", "action-order", "review-request", "handoff", "ask", "suggest", "status")
+CAN: dict[str, tuple[str, ...]] = {
+    "claude (msi seat)": HANDS, "claude (i3 seat)": HANDS,
+    "i3-mind": ("ask", "status"),           # a chat model with NO tools: answers from data, executes nothing
+    "gpt-6": ("review-request", "order", "ask"), "codex": ("review-request", "order", "ask"),
+    "muse": ("review-request", "order", "ask"),
+    "local:msi": ("ask",), "local:i3": ("ask",), "local:l9": ("ask",),
+    "studio": ("order",), "chatdev": ("order",), "all": ("status", "ask"),
+}
+
+
+def can_take(to: str, kind: str) -> bool:
+    """True when target `to` can execute an order of `kind` (not merely receive it)."""
+    return kind in CAN.get(target_id(to) or "", ())
+
+
 SEAT_NAMES = {"claude (msi seat)": "MSI Claude", "claude (i3 seat)": "i3 Claude", "i3-mind": "i3 Mind"}
 CLOUD_SEATS = ("gpt-6", "codex", "muse")              # seats that need a GitHub mirror to be reached
 LEGACY_IDS = {"gpt6": "gpt-6"}                         # target ids older clients (MCP, pages) still send
@@ -334,6 +353,8 @@ def _candidates(kind: str, node: dict, text: str, feed: dict | None, hint: list[
     out = []
     for tid, t in TARGETS.items():
         score, why = 0.0, []
+        if not can_take(tid, kind):
+            continue                  # only targets that can EXECUTE this kind (the i3 Mind: ask/status only)
         if kind in ("order", "action-order", "handoff"):
             if t["type"] != "seat" or tid == "i3-mind" and kind == "action-order":
                 continue
@@ -424,6 +445,8 @@ def route(text: str, node: dict | None = None, feed: dict | None = None, kind: s
             t = TARGETS[to]
             where = ("github" if node.get("url") else "review-queue") if t["type"] == "cloud" else t["where"][0]
             pick = {"to": to, "label": t["label"], "where": where, "reach": t["reach"], "score": 0, "because": "you named it"}
+            if not can_take(to, kind):
+                pick["because"] = f"you named it, but {t['label']} cannot execute {KIND_WORDS.get(kind, kind)}"
             if second_actor_conflict(kind, node, to):
                 pick["because"] = "you named it, but it is the author's own kind (second-actor rule)"
         else:

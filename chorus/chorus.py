@@ -9,6 +9,7 @@
     python chorus/chorus.py say "text" [--to all|claude (i3 seat)|i3-mind]   # speak as this seat
     python chorus/chorus.py route "text" [--node check:i3/docker]   # who/where/when/why the router suggests
     python chorus/chorus.py send "text" [--node ..] [--to ..] [--where ..] [--kind ..] [--when ..]   # route + send
+    python chorus/chorus.py reroute [--dry-run|--apply] [--to i3-mind]   # stale orders to seats that can't act: one re-route
     python chorus/chorus.py --json       # the brief as JSON (for other tools)
 
 It reads feed.json (written every 15 s by mindview_feed.py). If that is older than 2 minutes it
@@ -159,7 +160,8 @@ def work_view(d: dict) -> None:
 def orders_view(d: dict, mine: bool) -> None:
     from shop import orders
     os_ = [o for o in orders(d.get("channel", [])) if not mine or o["to"] in (SEAT, "any")]
-    open_ = [o for o in os_ if o["status"] not in ("done", "declined")]
+    from shop import CLOSED
+    open_ = [o for o in os_ if o["status"] not in CLOSED]
     print(f"Work orders: {len(open_)} open" + (" for this seat" if mine else ""))
     for o in os_[-15:]:
         print(f"  {o['id']}  [{o['status']:<8}] {o['station']:<7} to {o['to']:<18} by {o['by'] or '-':<18} {o['text'][:90]}")
@@ -306,11 +308,30 @@ def send_cmd(d: dict, text: str, node_ref: str | None, to: str | None, where: st
     return res
 
 
+def reroute_cmd(d: dict, do_apply: bool, only_to: str | None = None) -> list[dict]:
+    """Stale orders whose target cannot be reached or cannot execute them get ONE re-route (reroute.py)."""
+    import reroute
+    import mindview_feed
+    ledger = reroute.load_ledger()
+    items = reroute.plan(d.get("channel", []), d, ledger=ledger, only_to=only_to)
+    print(f"reroute {'APPLY' if do_apply else 'dry run'}: {len(items)} stale order(s) to re-route"
+          + (f" (only those to {only_to})" if only_to else ""))
+    for line in reroute.describe(items):
+        print("  " + line)
+    if not do_apply:
+        return items
+    res = reroute.apply(items, mindview_feed._append, mindview_feed._gh_comment, SEAT, ledger=ledger)
+    for r in res:
+        print(f"  {r['id']} -> {r['new_id']} to {r['to']}: {'ok' if r['ok'] else 'FAILED ' + r.get('error', '')}"
+              + (f"; {r['mirror']}" if r.get("mirror") else ""))
+    return res
+
+
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "suggest", "work", "doctor", "act-orders", "orders", "take", "working", "done", "decline", "route", "send"])
+    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "suggest", "work", "doctor", "act-orders", "orders", "take", "working", "done", "decline", "route", "send", "reroute"])
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--to", default=None)
     ap.add_argument("--node", default=None, help="route/send: JSON or rig:i3, check:i3/docker, pr:dev#429, svc:litellm")
@@ -322,6 +343,8 @@ def main() -> None:
     ap.add_argument("--note", default="")
     ap.add_argument("--link", default="")
     ap.add_argument("--all", action="store_true", help="orders: show every seat's orders")
+    ap.add_argument("--dry-run", action="store_true", help="reroute: show what it would do (the default)")
+    ap.add_argument("--apply", action="store_true", help="reroute: write the re-routes to the channel")
     a = ap.parse_args()
     if a.cmd == "say":
         say(a.arg or "", a.to or "all")
@@ -334,6 +357,8 @@ def main() -> None:
             send_cmd(load(), a.arg or "", a.node, a.to, a.where, a.kind, a.when, a.why)
         except (ValueError, RuntimeError) as e:
             sys.exit(f"not sent: {e}")
+    elif a.cmd == "reroute":
+        reroute_cmd(load(), a.apply and not a.dry_run, a.to)
     elif a.cmd == "act-orders":
         act_orders(load())
     elif a.cmd == "orders":
