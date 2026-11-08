@@ -15,6 +15,7 @@ Nothing here can run commands or change systems: the only writes are chat lines 
 """
 import base64
 import datetime as dt
+import hashlib
 import json
 import re
 import pathlib
@@ -226,7 +227,7 @@ def fold_orders(lines):
     {kind:'order-status', id, status: taken|working|done|declined, note, link}. One queue for every cockpit."""
     state = {}
     for m in lines:
-        if m.get('kind') == 'order' and m.get('id'):
+        if m.get('kind') == 'order' and m.get('id') and m['id'] not in state:
             state[m['id']] = {'id': m['id'], 'at': m.get('at'), 'from': m.get('from'), 'to': m.get('to', 'any'),
                               'station': m.get('station', 'anvil'), 'text': m.get('text', ''), 'ref': m.get('ref', ''),
                               'url': m.get('url', ''), 'status': 'posted', 'by': None, 'note': '', 'link': '',
@@ -279,7 +280,7 @@ def actions(bodies, awaiting, cards, channel, colony=None):
     # Messages to a person or agent that nobody has answered yet.
     for i, m in enumerate(channel):
         to = str(m.get('to', '')).lower()
-        if to in ('', 'all', 'mind'):
+        if m.get('kind') or to in ('', 'all', 'mind'):   # orders and decisions are tracked as orders, not chat
             continue
         replied = any(str(n.get('from', '')).lower().startswith(to.split(' ')[0]) for n in channel[i + 1:])
         if not replied and age_s(m.get('at')) is not None and age_s(m.get('at')) < 86400:
@@ -311,12 +312,18 @@ def ask_mind(question, feed):
 def tick(state):
     # Messages typed in HOLOMIND since the last tick go to the shared channel.
     lines = OUTBOX.read_text(encoding='utf-8').splitlines() if OUTBOX.exists() else []
-    sent = int(state.get('outbox_sent', 0))
-    pending = lines[sent:]
+    sent_keys = set(state.get('outbox_keys') or [])
+    if not sent_keys and state.get('outbox_sent'):
+        sent_keys = {hashlib.sha1(l.encode()).hexdigest()[:16] for l in lines[:int(state['outbox_sent'])]}
+    if not sent_keys and not state.get('outbox_sent') and STATE.exists():
+        # No memory of what was sent: assume everything already in the outbox went out (never replay).
+        sent_keys = {hashlib.sha1(l.encode()).hexdigest()[:16] for l in lines}
+    pending = [l for l in lines if hashlib.sha1(l.encode()).hexdigest()[:16] not in sent_keys]
     remote = ssh(REMOTE, json.dumps({'append': '\n'.join(pending), 'brief': state.get('brief')}))
     if remote is None:
         return None
     state['outbox_sent'] = len(lines)
+    state['outbox_keys'] = sorted(sent_keys | {hashlib.sha1(l.encode()).hexdigest()[:16] for l in pending})[-2000:]
     if time.time() - state.get('gh_at', 0) > 180:
         state['agents'] = github_activity()
         state['awaiting'] = getattr(github_activity, 'awaiting', [])
@@ -448,7 +455,7 @@ def tick(state):
 if __name__ == '__main__':
     HERE.mkdir(parents=True, exist_ok=True)
     try:
-        state = json.loads(STATE.read_text())
+        state = json.loads(STATE.read_text(encoding='utf-8-sig'))
     except Exception:
         state = {}
     while True:
