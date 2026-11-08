@@ -28,6 +28,9 @@ commands:
     - name: Hyperspace native 3D scene smoke
       run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_hyperspace_ui_test.gd
       requires: [godot]
+    - name: HOLO DIVE 3D controls, source-age, edge and mission-authority gate
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_holodive_contract_test.gd
+      requires: [godot]
     - name: Workstation UI scene smoke
       run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_ui_test.gd
       requires: [godot]

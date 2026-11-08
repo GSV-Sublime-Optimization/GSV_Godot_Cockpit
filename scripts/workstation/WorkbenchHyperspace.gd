@@ -7,8 +7,10 @@ extends PanelContainer
 
 signal resource_activated(meta: Dictionary)
 signal compose_requested(context: Dictionary)
+signal refresh_requested
 
 const PROJECTION = preload("res://scripts/workstation/WorkbenchSpatialProjection.gd")
+const ARCH = preload("res://scripts/workstation/WorkbenchHoloArchitecture.gd")
 
 var _snapshot: Dictionary = {}
 var _graph: Dictionary = {}
@@ -23,10 +25,21 @@ var _time: OptionButton
 var _open_button: Button
 var _compose_button: Button
 var _meshes: Dictionary = {}
+var _links: Array[Dictionary] = []
+var _architecture: Dictionary = {}
+var _focus_button: Button
+var _refresh_button: Button
+var _time_slider: HSlider
+var _time_check: CheckButton
+var _time_label: Label
+var _cinematic := false
+var _focus_target := Vector3(0, 0.5, 0)
+var _camera_focus := Vector3(0, 0.5, 0)
+var _clock := 0.0
 var _selected := ""
 var _yaw := 0.0
-var _pitch := 0.38
-var _distance := 26.5
+var _pitch := 0.72
+var _distance := 18.0
 var _down := Vector2.ZERO
 var _dragged := false
 var _mouse_held := false
@@ -56,13 +69,13 @@ func _build_ui() -> void:
 	var header := HBoxContainer.new()
 	left.add_child(header)
 	var title := Label.new()
-	title.text = "HYPERSPACE    /    SPATIAL WORK GRAPH"
+	title.text = "Ξ  HYPERSPACE   /   COLONY HOLOGRAPHIC THEATRE"
 	title.add_theme_font_size_override("font_size", 17)
 	title.add_theme_color_override("font_color", Color("#7cddf6"))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	_lens = OptionButton.new()
-	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES"]:
+	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "GAMES"]:
 		_lens.add_item(name)
 	_lens.tooltip_text = "Change the resource domain, not the underlying state."
 	_lens.item_selected.connect(func(_index): _apply_visibility())
@@ -74,13 +87,25 @@ func _build_ui() -> void:
 	_time.item_selected.connect(func(_index): _apply_visibility())
 	header.add_child(_time)
 	var reset := Button.new()
-	reset.text = "RESET CAMERA"
+	reset.text = "RECALL ORBIT"
 	reset.pressed.connect(func():
 		_yaw = 0.0
-		_pitch = 0.38
-		_distance = 26.5
+		_pitch = 0.72
+		_distance = 18.0
+		_focus_target = Vector3(0, 0.5, 0)
 		_update_camera())
 	header.add_child(reset)
+	var orbit := Button.new()
+	orbit.text = "CINEMATIC ORBIT"
+	orbit.tooltip_text = "Toggle slow presentation-only camera rotation; not a source of agent activity."
+	orbit.pressed.connect(func(): _cinematic = not _cinematic)
+	header.add_child(orbit)
+	var observe := Button.new()
+	_refresh_button = observe
+	observe.text = "↻  RE-OBSERVE"
+	observe.tooltip_text = "Request a fresh bounded read of the owning Studio API. Never starts a job."
+	observe.pressed.connect(func(): refresh_requested.emit())
+	header.add_child(observe)
 	_display = SubViewportContainer.new()
 	_display.name = "HyperspaceViewport"
 	_display.stretch = true
@@ -93,7 +118,7 @@ func _build_ui() -> void:
 	_viewport = SubViewport.new()
 	_viewport.name = "Hyperspace3D"
 	_viewport.size = Vector2i(1000, 650)
-	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
 	_viewport.disable_3d = false
 	_viewport.gui_disable_input = true
 	_display.add_child(_viewport)
@@ -101,8 +126,28 @@ func _build_ui() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.add_theme_font_size_override("font_size", 11)
 	_status.add_theme_color_override("font_color", Color("#93a9bb"))
-	_status.text = "OBSERVATION NOT RECEIVED. Grey is unknown, not offline."
+	_status.text = "AWAITING STUDIO. Grey structures are UNKNOWN, not offline."
 	left.add_child(_status)
+	var temporal := HBoxContainer.new()
+	temporal.add_theme_constant_override("separation", 10)
+	left.add_child(temporal)
+	_time_check = CheckButton.new()
+	_time_check.text = "4D  /  SOURCE-TIME SHEAR"
+	_time_check.tooltip_text = "Slice recorded mission update timestamps only, never reconstructed past states."
+	_time_check.toggled.connect(func(_active): _apply_visibility())
+	temporal.add_child(_time_check)
+	_time_slider = HSlider.new()
+	_time_slider.min_value = 1.0
+	_time_slider.max_value = 168.0
+	_time_slider.step = 1.0
+	_time_slider.value = 168.0
+	_time_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_time_slider.value_changed.connect(func(_value): _apply_visibility())
+	temporal.add_child(_time_slider)
+	_time_label = Label.new()
+	_time_label.text = "ALL / 168h"
+	_time_label.custom_minimum_size.x = 132
+	temporal.add_child(_time_label)
 
 	var side := PanelContainer.new()
 	side.custom_minimum_size.x = 250
@@ -111,7 +156,7 @@ func _build_ui() -> void:
 	inspector.add_theme_constant_override("separation", 10)
 	side.add_child(inspector)
 	var subheading := Label.new()
-	subheading.text = "SELECTED OBJECT / ACTIONS"
+	subheading.text = "SOURCE SIGNAL  /  OPERATIONS"
 	subheading.add_theme_font_size_override("font_size", 12)
 	subheading.add_theme_color_override("font_color", Color("#ffcf72"))
 	inspector.add_child(subheading)
@@ -123,18 +168,27 @@ func _build_ui() -> void:
 	_info.text = "Select an object in the 3D graph to inspect its owning source and available actions."
 	inspector.add_child(_info)
 	_open_button = Button.new()
-	_open_button.text = "OPEN VERIFIED RESOURCE"
+	_open_button.text = "OPEN SOURCE / EVIDENCE"
 	_open_button.disabled = true
 	_open_button.pressed.connect(_open_selected)
 	inspector.add_child(_open_button)
 	_compose_button = Button.new()
-	_compose_button.text = "COMPOSE STUDIO MISSION"
+	_compose_button.text = "PREPARE STUDIO DIAGNOSIS"
 	_compose_button.disabled = true
 	_compose_button.pressed.connect(_compose_selected)
 	inspector.add_child(_compose_button)
+	_focus_button = Button.new()
+	_focus_button.text = "DIVE INTO SELECTED SIGNAL"
+	_focus_button.disabled = true
+	_focus_button.pressed.connect(_focus_selected)
+	inspector.add_child(_focus_button)
+	var next_signal := Button.new()
+	next_signal.text = "NEXT SOURCE SIGNAL   TAB"
+	next_signal.pressed.connect(_focus_next)
+	inspector.add_child(next_signal)
 	var instructions := Label.new()
 	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	instructions.text = "Drag to orbit  •  Wheel to zoom  •  Click to inspect\nHeight = domain. Radius = observed age when known. Colour = reported state. Lines = confirmed repo relations.\nNo synthetic sessions or automatic shell access."
+	instructions.text = "DRAG orbit   /   WHEEL dive   /   CLICK select   /   F focus\nTAB cycle   /   1-6 decks   /   R re-observe\nFourth dimension = source timestamp only.\nLuminous geometry is illustrative, NOT proof of live execution."
 	instructions.add_theme_font_size_override("font_size", 11)
 	instructions.add_theme_color_override("font_color", Color("#93a9bb"))
 	inspector.add_child(instructions)
@@ -157,10 +211,7 @@ func _build_world() -> void:
 	env.ambient_light_energy = 0.55
 	world.environment = env
 	_viewport.add_child(world)
-	_make_orbit(7.5, 4.0, Color("#235978"))
-	_make_orbit(4.7, 0.6, Color("#2b5575"))
-	_make_orbit(9.5, -3.0, Color("#31415f"))
-	_make_orbit(10.2, -0.1, Color("#31425a"))
+	_architecture = ARCH.stage(_viewport)
 	var lamp := OmniLight3D.new()
 	lamp.position = Vector3(0, 7, 6)
 	lamp.light_energy = 2.0
@@ -188,101 +239,51 @@ func _render() -> void:
 		_scene.remove_child(child)
 		child.queue_free()
 	_meshes.clear()
+	_links.clear()
 	_graph = PROJECTION.project(_snapshot)
-	var nodes: Array = _graph.get("nodes", [])
 	var lookup: Dictionary = {}
-	for entry in nodes:
+	for entry in _graph.get("nodes", []):
 		var id: String = entry["key"]
 		lookup[id] = entry
-		var anchor := Node3D.new()
-		anchor.name = "Object" + str(_meshes.size())
-		anchor.position = entry["position"]
-		_scene.add_child(anchor)
-		var sphere := SphereMesh.new()
-		var radius := 0.43 if entry["kind"] == "rig" else 0.29 if entry["kind"] == "mission" else 0.22
-		sphere.radius = radius
-		sphere.height = radius * 2.0
-		sphere.radial_segments = 16
-		sphere.rings = 8
-		var material := StandardMaterial3D.new()
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		material.albedo_color = PROJECTION.color_for(entry["status"])
-		material.emission_enabled = true
-		material.emission = material.albedo_color
-		material.emission_energy_multiplier = 1.8
-		var ball := MeshInstance3D.new()
-		ball.mesh = sphere
-		ball.material_override = material
-		anchor.add_child(ball)
-		var name3d := Label3D.new()
-		name3d.text = String(entry["title"]).substr(0, 24)
-		name3d.font_size = 28
-		name3d.pixel_size = 0.008
-		name3d.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		name3d.no_depth_test = true
-		name3d.modulate = Color("#d9edfa")
-		name3d.position = Vector3(0, radius + 0.36, 0)
-		anchor.add_child(name3d)
-		var halo := TorusMesh.new()
-		halo.inner_radius = radius * 1.5
-		halo.outer_radius = radius * 1.65
-		halo.rings = 16
-		halo.ring_segments = 32
-		var mesh_halo := MeshInstance3D.new()
-		mesh_halo.mesh = halo
-		var halo_mat := StandardMaterial3D.new()
-		halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		halo_mat.albedo_color = Color("#fff0ae")
-		mesh_halo.material_override = halo_mat
-		mesh_halo.visible = id == _selected
-		anchor.add_child(mesh_halo)
-		_meshes[id] = {"root": anchor, "halo": mesh_halo, "entry": entry}
+		_meshes[id] = ARCH.object(_scene, entry, PROJECTION.color_for(entry["status"]))
 	for link in _graph.get("edges", []):
 		var a: String = link["from"]
 		var b: String = link["to"]
 		if lookup.has(a) and lookup.has(b):
-			_make_edge(lookup[a]["position"], lookup[b]["position"])
+			var relation: Node3D = ARCH.evidence_link(_scene, lookup[a]["position"], lookup[b]["position"])
+			_links.append({"root": relation, "from": a, "to": b})
 	_apply_visibility()
 	_refresh_inspector()
-
-func _make_edge(a: Vector3, b: Vector3) -> void:
-	var difference := b - a
-	if difference.length() < 0.01:
-		return
-	var tube := CylinderMesh.new()
-	tube.top_radius = 0.019
-	tube.bottom_radius = 0.019
-	tube.height = difference.length()
-	tube.radial_segments = 5
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color("#4c708e")
-	var line := MeshInstance3D.new()
-	line.name = "VerifiedRepoEdge"
-	line.mesh = tube
-	line.material_override = mat
-	line.position = (a + b) * 0.5
-	line.basis = Basis(Quaternion(Vector3.UP, difference.normalized()))
-	_scene.add_child(line)
 
 func _apply_visibility() -> void:
 	if _lens == null or _time == null:
 		return
-	var selected_domain: String = ["all", "rig", "project", "mission", "service"][_lens.selected]
+	var selected_domain: String = ["all", "rig", "project", "mission", "service", "game"][_lens.selected]
 	for id in _meshes:
 		var item: Dictionary = _meshes[id]
 		var entry: Dictionary = item["entry"]
-		var domain_ok: bool = selected_domain == "all" or entry["kind"] == selected_domain
+		var domain_ok: bool = (selected_domain == "all" or entry["kind"] == selected_domain
+			or (selected_domain == "game" and entry.get("game", false)))
 		var time_ok := true
-		if entry["kind"] == "mission" and _time.selected > 0:
+		if entry["kind"] == "mission" and (_time.selected > 0 or (_time_check != null and _time_check.button_pressed)):
 			var stamp := String(entry.get("updated_at", ""))
 			if stamp.length() < 20 or not stamp.ends_with("Z"):
 				time_ok = false
 			else:
 				var age := Time.get_unix_time_from_system() - Time.get_unix_time_from_datetime_string(stamp)
-				var maximum := 86400.0 if _time.selected == 1 else 3600.0
+				var maximum := 86400.0 if _time.selected == 1 else 3600.0 if _time.selected == 2 else 604800.0
+				if _time_check != null and _time_check.button_pressed:
+					maximum = minf(maximum, _time_slider.value * 3600.0)
 				time_ok = age >= 0.0 and age <= maximum
 		item["root"].visible = domain_ok and time_ok
+	for link in _links:
+		link["root"].visible = (_meshes.has(link["from"]) and _meshes.has(link["to"])
+			and _meshes[link["from"]]["root"].visible and _meshes[link["to"]]["root"].visible)
+	if _time_label != null:
+		_time_label.text = ("≤%dh / RECORDS" % int(_time_slider.value)
+			if _time_check.button_pressed else "ALL / 168h")
+	if not _selected.is_empty() and _meshes.has(_selected) and not _meshes[_selected]["root"].visible:
+		_select("")
 	var feeds: Dictionary = _graph.get("feeds", {})
 	var shown := 0
 	for item in _meshes.values():
@@ -294,11 +295,28 @@ func _apply_visibility() -> void:
 		feeds.get("mission_feed_state", "unknown"),
 		feeds.get("service_feed_state", "unknown")
 	]
+	_update_label_lod()
+
+func _update_label_lod() -> void:
+	## Projection geometry is dense. Do not flood the theatre with billboards.
+	## Labels reappear in the relevant lens or near focus; full facts live in inspector.
+	for key in _meshes:
+		var row: Dictionary = _meshes[key]
+		var kind := String(row["entry"]["kind"])
+		var focused: bool = key == _selected
+		var context_zoom := _distance < 13.0
+		var domain_only: bool = (_lens.selected == 2 and kind == "project" or
+			_lens.selected == 3 and kind == "mission" or
+			_lens.selected == 4 and kind == "service" or
+			_lens.selected == 5 and row["entry"].get("game", false))
+		row["label"].visible = row["root"].visible and (focused or kind == "rig" or
+			(domain_only and context_zoom))
+		row["status_label"].visible = row["root"].visible and focused
 
 func _update_camera() -> void:
 	if _camera == null:
 		return
-	var center := Vector3(0, 0.5, 0)
+	var center := _camera_focus
 	_camera.position = center + Vector3(
 		sin(_yaw) * cos(_pitch), sin(_pitch), cos(_yaw) * cos(_pitch)) * _distance
 	_camera.look_at(center, Vector3.UP)
@@ -306,13 +324,15 @@ func _update_camera() -> void:
 func _on_view_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			_distance = maxf(9.0, _distance * 0.90)
+			_distance = maxf(5.5, _distance * 0.90)
 			_update_camera()
+			_update_label_lod()
 			_display.accept_event()
 			return
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			_distance = minf(65.0, _distance * 1.11)
+			_distance = minf(52.0, _distance * 1.11)
 			_update_camera()
+			_update_label_lod()
 			_display.accept_event()
 			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -327,6 +347,20 @@ func _on_view_input(event: InputEvent) -> void:
 				_mouse_held = false
 				_dragged = false
 			_display.accept_event()
+	elif event is InputEventKey and event.pressed and not event.echo:
+		var code: int = event.keycode
+		if code == KEY_F:
+			_focus_selected()
+		elif code == KEY_TAB:
+			_focus_next()
+		elif code == KEY_R:
+			refresh_requested.emit()
+		elif code >= KEY_1 and code <= KEY_6:
+			_lens.select(code - KEY_1)
+			_apply_visibility()
+		else:
+			return
+		_display.accept_event()
 	elif event is InputEventMouseMotion and _mouse_held:
 		if event.position.distance_to(_down) > 5.0:
 			_dragged = true
@@ -358,7 +392,7 @@ func _pick(pointer: Vector2) -> void:
 	_select(chosen)
 
 func select_key(key: String) -> bool:
-	if not _meshes.has(key):
+	if not _meshes.has(key) or not _meshes[key]["root"].visible:
 		return false
 	_select(key)
 	return true
@@ -368,6 +402,7 @@ func _select(key: String) -> void:
 	for id in _meshes:
 		_meshes[id]["halo"].visible = id == key
 	_refresh_inspector()
+	_update_label_lod()
 
 func _refresh_inspector() -> void:
 	if _info == null:
@@ -376,6 +411,7 @@ func _refresh_inspector() -> void:
 		_info.text = "SELECT A SOURCE OBJECT\n\nRigs occupy the lower deck, projects the upper plane, missions the middle and services the outer ring.\n\nA grey rig means UNKNOWN, not OFFLINE.\n\nMission/project clicks open actual Studio-backed tabs. No agent process is attached by a visual marker."
 		_open_button.disabled = true
 		_compose_button.disabled = true
+		_focus_button.disabled = true
 		return
 	var entry: Dictionary = _meshes[_selected]["entry"]
 	_info.text = "%s\n\n%s\n\nSTATUS\n%s\n\nSOURCE\n%s\n\nIDENTITY\n%s" % [
@@ -384,14 +420,76 @@ func _refresh_inspector() -> void:
 	if entry.has("updated_at") and not String(entry["updated_at"]).is_empty():
 		_info.text += "\n\nSOURCE UPDATED\n" + String(entry["updated_at"])
 	var kind := String(entry["kind"])
-	_open_button.disabled = not ["rig", "project", "mission"].has(kind)
+	_open_button.disabled = not ["rig", "project", "mission", "service"].has(kind)
 	_compose_button.disabled = not (kind == "project" and entry.get("observed", false)) and not (
 		kind == "mission" and not String(entry.get("repo", "")).is_empty())
+	_focus_button.disabled = false
+	if kind == "rig":
+		_info.text += "\n\nPERMISSIONS\nREMOTE WORK NOT ADMITTED; identity not attested."
+		if entry.get("resources", {}) is Dictionary:
+			var values: Dictionary = entry.get("resources", {})
+			for field in ["memory_available_bytes", "system_volume_free_bytes"]:
+				var measure: Variant = values.get(field)
+				if typeof(measure) == TYPE_INT or typeof(measure) == TYPE_FLOAT:
+					_info.text += "\n%s  %.1f GiB (reported)" % [
+						"MEM AVAILABLE" if field == "memory_available_bytes" else "SYSTEM DISK FREE",
+						float(measure) / 1073741824.0]
+			if values.get("age_seconds") != null:
+				_info.text += "\nOBSERVATION AGE  %s seconds" % str(values["age_seconds"])
+	elif kind == "mission":
+		_info.text += "\n\nOWNING REPOSITORY\n" + String(entry.get("repo", "UNREPORTED"))
+		_info.text += "\n\nStudio controls approval, runner, receipt and promotion."
+	elif kind == "project":
+		_info.text += "\n\nREPOSITORY\n" + String(entry.get("repo", ""))
+		_info.text += "\n\nLaunchable game: UNVERIFIED / requires game-specific playtest evidence."
+	else:
+		_info.text += "\n\nThis service has a reported status; no shell or PTY is attached."
+
+func _focus_selected() -> void:
+	if not _meshes.has(_selected) or not _meshes[_selected]["root"].visible:
+		return
+	_focus_target = _meshes[_selected]["root"].position
+	_distance = 7.4 if _meshes[_selected]["entry"]["kind"] == "rig" else 6.6
+	_cinematic = false
+	_update_label_lod()
+
+func _focus_next() -> void:
+	var keys: Array[String] = []
+	for entry in _graph.get("nodes", []):
+		var key: String = entry["key"]
+		if _meshes.has(key) and _meshes[key]["root"].visible:
+			keys.append(key)
+	if keys.is_empty():
+		return
+	var index := keys.find(_selected)
+	var next_key := keys[posmod(index + 1, keys.size())]
+	_select(next_key)
+	_focus_selected()
+
+func _process(delta: float) -> void:
+	if not is_visible_in_tree():
+		return
+	_clock += minf(delta, 0.1)
+	if _cinematic and not _mouse_held:
+		_yaw += delta * 0.07
+	_camera_focus = _camera_focus.lerp(_focus_target, clampf(delta * 5.0, 0.0, 1.0))
+	_update_camera()
+	for item in _architecture.get("animated", []):
+		if is_instance_valid(item):
+			item.rotate_y(delta * 0.10)
+	for record in _meshes.values():
+		var status := String(record["entry"]["status"])
+		record["spin"].rotate_y(delta * (0.65 if status in ["running", "queued"] else 0.06))
+		if record["halo"].visible:
+			record["pulse"].scale = Vector3.ONE * (1.0 + 0.09 * sin(_clock * 2.0))
 
 func _open_selected() -> void:
 	if not _meshes.has(_selected) or _open_button.disabled:
 		return
 	var item: Dictionary = _meshes[_selected]["entry"]
+	if item["kind"] == "service":
+		resource_activated.emit({"kind": "services", "id": "services", "name": "Observed Services"})
+		return
 	resource_activated.emit({
 		"kind": item["kind"], "id": item["id"], "name": item["title"],
 		"role": item["detail"], "source": item["source"],

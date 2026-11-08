@@ -40,6 +40,7 @@ static func project(snapshot: Dictionary) -> Dictionary:
 			"key": "rig:" + id, "kind": "rig", "id": id, "title": rig["name"],
 			"detail": rig["role"], "status": live_state,
 			"source": "Studio /api/entity/bodies", "position": BODY_POSITIONS[i],
+			"resources": observed.get("observation", {}) if typeof(observed.get("observation", {})) == TYPE_DICTIONARY else {},
 			"observed": state["body_feed_state"] == "observed"
 		})
 	var projects: Variant = snapshot.get("projects", [])
@@ -54,8 +55,13 @@ static func project(snapshot: Dictionary) -> Dictionary:
 			var path: String = p["path"]
 			if not path.is_absolute_path() or path.contains("..") or path.length() > 500:
 				continue
+			var is_game := false
+			for candidate_game in CATALOG.GAMES:
+				if String(candidate_game["id"]).to_lower() == String(p.get("name", "")).to_lower() or (
+					String(candidate_game["id"]).to_lower() == path.get_file().to_lower()):
+					is_game = true
 			_push(nodes, by_key, {
-				"key": "project:" + path, "kind": "project",
+				"key": "project:" + path, "kind": "project", "game": is_game,
 				"id": path, "repo": path,
 				"title": String(p.get("name", "Project")).substr(0, 72),
 				"detail": String(p["branch"]).substr(0, 160),
