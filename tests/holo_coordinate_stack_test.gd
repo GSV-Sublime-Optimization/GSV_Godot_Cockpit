@@ -247,6 +247,13 @@ func _check_density() -> void:
 		_fail("empty model had nonzero density at the Studio blob")
 	if HoloDensity.density_at(empty_grid, 0, 0, 0) != 0:
 		_fail("empty model had nonzero density at the origin")
+	# The raymarcher's texture must actually be built (16^3 R8). A wrong
+	# ImageTexture3D.create argument order leaves it empty ("Image format
+	# mismatch") and the thought-volume never renders.
+	var tex := HoloDensity.make_texture(empty_grid)
+	if tex.get_width() != HoloDensity.SIZE or tex.get_height() != HoloDensity.SIZE 			or tex.get_depth() != HoloDensity.SIZE or tex.get_format() != Image.FORMAT_R8:
+		_fail("make_texture built %dx%dx%d format %d, expected 16x16x16 R8" % [
+			tex.get_width(), tex.get_height(), tex.get_depth(), tex.get_format()])
 	if HoloDensity.density_at(empty_grid, -1, 0, 0) != -1:
 		_fail("density_at did not return -1 out of bounds")
 	if HoloDensity.density_at(empty_grid, 16, 0, 0) != -1:
