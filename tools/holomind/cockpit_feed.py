@@ -249,8 +249,19 @@ def tick(state):
             'attention': (events[-1] if events else {}).get('focus', 'xanadu'), 'screen': screen,
             'agents': state.get('agents', []), 'channel': channel[-40:]}
     feed['actions'] = actions(bodies, state.get('awaiting', []), remote.get('cards', []), channel)
-    # The Mind answers new messages addressed to it (or to nobody in particular).
+    def publish():
+        tmp = FEED.with_suffix('.tmp')
+        tmp.write_text(json.dumps(feed, ensure_ascii=False), encoding='utf-8')
+        tmp.replace(FEED)
+    # Publish first, so a Mind busy thinking never freezes the view.
+    pending = [m for m in channel if f"{m.get('at')}|{m.get('from')}|{m.get('text')}" not in set(state.get('answered', []))
+               and not m.get('from', '').endswith('mind') and str(m.get('to', 'mind')).lower() in ('mind', '', 'all')
+               and not (age_s(m.get('at')) is not None and age_s(m.get('at')) > 600)]
+    feed['mind_thinking'] = len(pending)
+    publish()
+    # The Mind answers new messages addressed to it (or to nobody in particular), one per tick.
     answered = set(state.get('answered', []))
+    budget = 1
     for m in channel:
         key = f"{m.get('at')}|{m.get('from')}|{m.get('text')}"
         if key in answered or m.get('from', '').endswith('mind') or str(m.get('to', 'mind')).lower() not in ('mind', '', 'all'):
@@ -258,10 +269,14 @@ def tick(state):
         if age_s(m.get('at')) is not None and age_s(m.get('at')) > 600:
             answered.add(key)
             continue
+        if budget <= 0:
+            break
+        budget -= 1
         reply = ask_mind(m.get('text', ''), feed)
         line = {'at': iso(), 'from': 'i3-mind', 'model': MODEL, 'to': m.get('from'), 'text': reply}
+        m.setdefault('read_by', []).append('i3-mind') if 'i3-mind' not in m.get('read_by', []) else None
         ssh(REMOTE, json.dumps({'append': json.dumps(line, ensure_ascii=False)}))
-        channel.append(line)
+        channel.append({**line, 'read_by': []})
         answered.add(key)
     state['answered'] = sorted(answered)[-200:]
     feed['channel'] = channel[-40:]
@@ -271,9 +286,8 @@ def tick(state):
                       'agents': [{'agent': g['agent'], 'latest': f"{g['recent'][0]['repo']}#{g['recent'][0]['number']} {g['recent'][0]['title']}"}
                                  for g in feed['agents']],
                       'actions': feed['actions'][:30], 'channel': channel[-8:]}
-    tmp = FEED.with_suffix('.tmp')
-    tmp.write_text(json.dumps(feed, ensure_ascii=False), encoding='utf-8')
-    tmp.replace(FEED)
+    feed['mind_thinking'] = max(0, len(pending) - (1 - budget))
+    publish()
     return feed
 
 

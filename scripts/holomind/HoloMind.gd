@@ -869,6 +869,9 @@ func _count_waiting() -> void:
 	for k: String in counts:
 		waiting.append("%d %s" % [int(counts[k]), k])
 	_waiting_text = ", ".join(waiting) if not waiting.is_empty() else "none"
+	var thinking := int(feed.get("mind_thinking", 0))
+	if thinking > 0:
+		_waiting_text += " · the Mind is thinking (%d message%s queued)" % [thinking, "" if thinking == 1 else "s"]
 
 
 func _update_hud() -> void:
