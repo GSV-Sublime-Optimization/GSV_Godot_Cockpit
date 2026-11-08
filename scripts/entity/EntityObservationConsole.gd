@@ -12,6 +12,8 @@ const BODY_NAMES := {
 	"imac-xanadu": "Xanadu"
 }
 
+signal quit_requested
+
 var _entity: Node
 var _headline: Label
 var _body_labels: Dictionary = {}
@@ -42,6 +44,21 @@ func _ready() -> void:
 	add_child(_entity)
 	_entity.self_model_changed.connect(_render_model)
 	_render_model(_entity.self_model())
+
+## Bakeoff rule: Esc always exits. `_input` runs before GUI focus handling, so
+## this still fires while a text field has focus. Only the running scene root
+## quits, so an embedded instance never closes the scene that hosts it.
+func _input(event: InputEvent) -> void:
+	var key: InputEventKey = event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode != KEY_ESCAPE and key.physical_keycode != KEY_ESCAPE:
+		return
+	if get_tree().current_scene != self:
+		return
+	get_viewport().set_input_as_handled()
+	quit_requested.emit()
+	get_tree().quit()
 
 func _render_model(model: Dictionary) -> void:
 	_headline.text = (
