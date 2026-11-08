@@ -105,6 +105,16 @@ Look down into the colony; every light is a fact from `feed.json`, and every nod
 - Measured 2026-11-08: L9 drone answered a /send in a few seconds; MSI LiteLLM timed out at 45 s and the composer said so.
 - Receipt: `receipts/composer-holo-i3.png` (HOLO, i3 selected, `?compose=rig:i3`, live feeder on :8768, headless Edge 1600x900).
 
+## Re-route: untaken orders get one second chance (`reroute.py`)
+An order still *posted* after 15 minutes, addressed to a target that cannot hear it (gpt-6, Codex and Muse do not read the channel; a seat unseen for 3 h) or cannot execute it (the i3 Mind is a chat model with no tools: `router.CAN` gives it ask and status only), is re-routed **once**, mechanically, with no model:
+- a new order to the router's best capable, reachable target, with `ref` = the original id;
+- an `order-status` line `{status: "rerouted", note: "to <seat>: <reason>"}` on the original (it counts as closed in `shop.orders()`, the Forge and HOLO);
+- a cloud seat gets the order mirrored to the PR/issue (a prepared `gh` command unless `CHORUS_ALLOW_GH_COMMENT=1`).
+
+Left alone: a reachable seat that can do it (only slow), orders to `any`, orders that are already re-routes, and anything already re-routed by anyone (a child `ref`, a "rerouted" status or note, or the local ledger `%LOCALAPPDATA%/KiloCore/chorus/rerouted.json`). A review of a Claude-authored PR, or of a PR whose author is unknown, never goes to a Claude seat.
+- `python chorus/chorus.py reroute [--dry-run|--apply] [--to i3-mind]`; MCP `chorus_reroute` (dry run unless `apply`).
+- The feeder puts the plan in `feed.json` (`reroute`) every cycle and writes it only with `CHORUS_AUTO_REROUTE=1` (at most 3 a cycle).
+
 ## Bakeoff hard rules
 - **Windowed:** an ordinary browser tab. It is never topmost and never takes the screen; fullscreen is opt-in.
 - **Actuators (since 1efe665; this breaks hard rule 2 as written):** `POST /act` runs, after a second confirm within 60 s, `schtasks /run` on four colony tasks (including the off-box backup, which writes to xanadu), `docker restart` on nine colony containers, the doctor, or a `git push` of unpushed commits to a new `claude/preserve-*` branch. The page has no button for it yet; it is reachable over HTTP on loopback. The doctor also SSHes to the i3 and runs a read-only PowerShell query there every 5 minutes while something fails.
