@@ -11,7 +11,7 @@ toolchains:
 commands:
   check:
     - name: Godot resource import
-      run: ${godot} --headless --path . --import
+      run: ${godot} --headless --audio-driver Dummy --path . --import
       requires: [godot]
     - name: Godot GDScript parse
       run: ${python} ${gsv_tools}/godot_parse_gate.py --project .
