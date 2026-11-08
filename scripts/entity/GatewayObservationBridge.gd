@@ -4,15 +4,21 @@ extends Node
 ## R0 / read-only: never shells out, posts tasks, reads credential stores,
 ## impersonates an agent, or interprets an HTTP response as write authority.
 ## One asynchronous, explicit GET to http://127.0.0.1:8001/health; no POST,
-## no arbitrary URL input, no redirect following.
+## no arbitrary URL input, no redirect following. Timeout and freshness are
+## configuration with safe defaults and bounds.
 
 signal observation_changed(observation: Dictionary)
 
 const PROJECTION = preload("res://scripts/entity/GatewayHealthProjection.gd")
 const LOCAL_GATEWAY_BASE := "http://127.0.0.1:8001"
-const HTTP_TIMEOUT_SECONDS := 4.0
-const DEFAULT_FRESHNESS_MSEC := 15000
 const MAX_BODY_BYTES := 8192
+
+@export_range(1.0, 30.0, 0.5) var http_timeout_seconds: float = 4.0:
+	set(value):
+		http_timeout_seconds = clampf(value, 1.0, 30.0)
+@export_range(5000.0, 300000.0, 1000.0) var freshness_msec: float = 15000.0:
+	set(value):
+		freshness_msec = clampf(value, 5000.0, 300000.0)
 
 var _request: HTTPRequest
 var _pending: bool = false
@@ -22,7 +28,7 @@ var _failure: String = "not_observed"
 
 func _ready() -> void:
 	_request = HTTPRequest.new()
-	_request.timeout = HTTP_TIMEOUT_SECONDS
+	_request.timeout = http_timeout_seconds
 	_request.max_redirects = 0
 	add_child(_request)
 	_request.request_completed.connect(_on_request_completed)
@@ -53,7 +59,7 @@ func current_observation() -> Dictionary:
 			"observed_at_ms": 0
 		}
 	var view := _last_good.duplicate(true)
-	var expired := Time.get_ticks_msec() - _observed_at_ms > DEFAULT_FRESHNESS_MSEC
+	var expired := Time.get_ticks_msec() - _observed_at_ms > freshness_msec
 	if expired or not _failure.is_empty():
 		view["state"] = "stale"
 		view["error"] = "observation_expired" if expired and _failure.is_empty() else _failure

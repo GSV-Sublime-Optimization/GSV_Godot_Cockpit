@@ -5,17 +5,25 @@ extends Node
 ## impersonates an agent, or interprets an HTTP response as write authority.
 ## The /api/projects scan is slow (its backend times out after 15s), so this
 ## bridge is CACHED: observe() is a no-op (returns false) unless the last
-## fetch is older than MIN_REFRESH_MSEC or force is true. Never poll
-## unbounded projects directly from Godot.
+## fetch is older than min_refresh_msec or force is true. Never poll
+## unbounded projects directly from Godot. Timeout, freshness, and refresh
+## are configuration with safe defaults and bounds.
 
 signal observation_changed(observation: Dictionary)
 
 const PROJECTION = preload("res://scripts/entity/StudioProjectsProjection.gd")
 const LOCAL_STUDIO_BASE := "http://127.0.0.1:7340"
-const HTTP_TIMEOUT_SECONDS := 20.0
-const DEFAULT_FRESHNESS_MSEC := 300000
-const MIN_REFRESH_MSEC := 120000
 const MAX_BODY_BYTES := 262144
+
+@export_range(5.0, 60.0, 1.0) var http_timeout_seconds: float = 20.0:
+	set(value):
+		http_timeout_seconds = clampf(value, 5.0, 60.0)
+@export_range(60000.0, 1800000.0, 1000.0) var freshness_msec: float = 300000.0:
+	set(value):
+		freshness_msec = clampf(value, 60000.0, 1800000.0)
+@export_range(30000.0, 1800000.0, 1000.0) var min_refresh_msec: float = 120000.0:
+	set(value):
+		min_refresh_msec = clampf(value, 30000.0, 1800000.0)
 
 var _request: HTTPRequest
 var _pending: bool = false
@@ -26,7 +34,7 @@ var _failure: String = "not_observed"
 
 func _ready() -> void:
 	_request = HTTPRequest.new()
-	_request.timeout = HTTP_TIMEOUT_SECONDS
+	_request.timeout = http_timeout_seconds
 	_request.max_redirects = 0
 	add_child(_request)
 	_request.request_completed.connect(_on_request_completed)
@@ -34,7 +42,7 @@ func _ready() -> void:
 func observe(force: bool = false) -> bool:
 	if _pending:
 		return false
-	if not force and _last_fetch_ms > 0 and Time.get_ticks_msec() - _last_fetch_ms < MIN_REFRESH_MSEC:
+	if not force and _last_fetch_ms > 0 and Time.get_ticks_msec() - _last_fetch_ms < min_refresh_msec:
 		return false
 	_pending = true
 	_last_fetch_ms = Time.get_ticks_msec()
@@ -63,7 +71,7 @@ func current_observation() -> Dictionary:
 	var view := _last_good.duplicate(true)
 	var age_ms: int = Time.get_ticks_msec() - _observed_at_ms
 	view["age_ms"] = age_ms
-	var expired := age_ms > DEFAULT_FRESHNESS_MSEC
+	var expired := age_ms > freshness_msec
 	if expired or not _failure.is_empty():
 		view["state"] = "stale"
 		view["error"] = "observation_expired" if expired and _failure.is_empty() else _failure
