@@ -32,6 +32,7 @@ const EXPECTED_TABS: PackedStringArray = [
 	"Flight",
 	"Steer",
 	"Route",
+	"Hologram",
 ]
 
 var _failures: PackedStringArray = []

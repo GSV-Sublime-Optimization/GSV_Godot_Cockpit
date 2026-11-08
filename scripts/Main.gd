@@ -96,6 +96,9 @@ func _build_ui() -> void:
 	_add_tab("Flight", _fill_flight_tab)
 	_add_tab("Steer", _fill_steer_tab)
 	_add_tab("Route", _fill_route_tab)
+	# Slice 4 (hologram entry): the 3D volume. Built lazily on first visit
+	# like every other tab — the room and its senses start only then.
+	_add_tab("Hologram", _panel_filler("res://scripts/holo/HoloTab.gd"))
 
 	_tabs.tab_changed.connect(_materialize_tab)
 	# The tab that is already showing has no tab_changed to wait for.

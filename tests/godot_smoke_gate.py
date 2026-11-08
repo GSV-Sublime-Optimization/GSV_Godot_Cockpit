@@ -20,6 +20,7 @@ CASES = (
     ("import", "--import", "Godot Engine v"),
     ("boot", "res://tests/cockpit_boot_test.gd", "[boot-test] PASS"),
     ("portable", "res://tests/portable_offline_test.gd", "[portable-test] PASS"),
+    ("holo", "res://tests/holo_coordinate_stack_test.gd", "[holo-test] PASS"),
 )
 
 
