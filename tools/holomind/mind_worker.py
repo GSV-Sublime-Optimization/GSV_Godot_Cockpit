@@ -16,8 +16,8 @@ Now:
 - The LLM (qwen3:8b on the i3) only phrases the facts, and only when the GPU is free. With no facts and a busy
   GPU, the question waits in the queue (one 'queued' notice) and is answered when the slot ends.
 - Orders addressed to i3-mind:
-  - needing hands on a machine (restart, fix, commit, push, deploy, merge…): re-routed to the seat that owns that
-    machine, with the trail recorded;
+  - needing hands on a machine (restart, fix, commit, push, deploy, merge…): declined, naming the seat that owns that
+    machine. The Mind answers and reports; it never issues orders of its own;
   - questions, explanations or plans: answered, and the order closed with the answer as its note.
 
     python mind_worker.py            # loop (every 20 s)
@@ -37,6 +37,7 @@ import urllib.request
 HERE = pathlib.Path(__file__).parent
 sys.path.insert(0, str(HERE))
 import cockpit  # noqa: E402
+import mind  # noqa: E402
 
 FEED = pathlib.Path(r'C:\Users\Public\colony\mindview\feed.json')
 STATE = pathlib.Path(r'C:\Users\Public\colony\mindview\mind_worker.state.json')
@@ -129,7 +130,8 @@ def llm(question, facts):
     body = {'model': MODEL, 'stream': False, 'think': False, 'keep_alive': 0, 'options': {'num_predict': 200, 'temperature': 0.2},
             'messages': [{'role': 'system', 'content': 'You are the i3 Mind of the GSV colony. Answer in at most 3 short sentences, '
                                                       'using ONLY the TOOL FACTS. Cite PR numbers, checks and gate lines exactly. If the facts '
-                                                      'do not answer it, say what is unknown and which seat could find out. You cannot act.'},
+                                                      'do not answer it, say what is unknown and which seat could find out. You cannot act. '
+                                                      'Never say a PR is merged, or that anything is fixed, done, resolved or deployed, unless a TOOL FACT says exactly that.'},
                          {'role': 'user', 'content': 'TOOL FACTS:\n' + '\n'.join(facts or ['(none)']) + f'\n\nQUESTION: {question}'}]}
     req = urllib.request.Request(OLLAMA + '/api/chat', data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=150) as r:
@@ -144,12 +146,15 @@ def answer(question, asker):
         return 'From the colony\'s tools (no model needed): ' + ' · '.join(facts)[:1400], False
     if not busy:
         try:
-            text = llm(question, facts)
+            text, problems = mind.check_reply(llm(question, facts), feed(), question)
+            if problems:
+                log(f'model reply rejected: {problems}')
             return (text + ('\n[tools: ' + ' · '.join(facts)[:700] + ']' if facts else '')), False
         except Exception as exc:
+            log(f'model failed: {exc}')
             if facts:
                 return 'From the colony\'s tools (the model is unavailable): ' + ' · '.join(facts)[:1400], False
-            return f'(the i3 Mind could not reach its model: {str(exc)[:80]}; queued)', True
+            return None, True
     return None, True   # nothing mechanical to say and the GPU is busy: wait, don't drop it
 
 
@@ -186,51 +191,87 @@ def route_for(text):
     return 'any'
 
 
-def step(state):
+def step(state, clock=time.time):
+    """One pass: orders first (a reply unblocks a person), then questions, all under the rate limit. Whatever is not
+    sent this pass stays unanswered and is picked up next pass. State is updated even if a channel write fails midway,
+    so lines already sent are never sent twice."""
     lines = cockpit.all_lines()
     answered, notified = set(state.get('answered', [])), set(state.get('notified', []))
+    state['sent_at'] = list(state.get('sent_at', []))
     cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ')
     did = 0
-    # 1. questions addressed to the Mind
-    for m in lines:
-        if m.get('kind') or str(m.get('at', '')) < cutoff or str(m.get('from', '')).endswith('mind'):
-            continue
-        to, text = str(m.get('to', '')).lower(), str(m.get('text', ''))
-        if to not in ('mind', 'i3-mind') and not text.lower().startswith('@mind'):
-            continue   # broadcasts and messages for others are not the Mind's to answer
-        key = f"{m.get('at')}|{m.get('from')}|{text[:80]}"
-        if key in answered:
-            continue
-        reply, deferred = answer(text, str(m.get('from', '')))
-        if deferred:
-            if key not in notified:
-                cockpit.append({'at': now(), 'from': SEAT, 'model': MODEL, 'to': m.get('from'),
-                                'text': 'Queued: the i3 GPU is running a GameAttract slot and your question needs the model. I will answer as soon as the slot ends.'})
-                notified.add(key)
-            continue
-        cockpit.append({'at': now(), 'from': SEAT, 'model': MODEL, 'to': m.get('from'), 'text': reply})
-        answered.add(key)
-        did += 1
-    # 2. orders addressed to the Mind
-    for o in cockpit.fold_orders_all(lines):
-        if o['status'] != 'posted' or not str(o['to']).lower().startswith('i3-mind'):
-            continue
-        if HANDS.search(o['text']):
-            seat = route_for(o['text'])
-            nid = f"o-{dt.datetime.now(dt.timezone.utc).strftime('%m%d-%H%M%S')}-m"
-            cockpit.append({'at': now(), 'from': SEAT, 'kind': 'order', 'id': nid, 'to': seat, 'station': o.get('station') or 'anvil',
-                            'ref': 'reroute:' + o['id'], 'text': f"Re-routed by i3-mind from {o['id']} (it needs hands on a machine; the Mind can only look): {o['text']}"})
-            cockpit.append({'at': now(), 'from': SEAT, 'kind': 'order-status', 'id': o['id'], 'status': 'declined',
-                            'note': f'needs hands: re-routed to {seat} as {nid}', 'link': ''})
+
+    def can_send():
+        return mind.may_send(state['sent_at'], clock())
+
+    def sent():
+        state['sent_at'] = mind.note_sent(state['sent_at'], clock())
+
+    try:
+        # 1. orders addressed to the Mind. It answers and reports; it never issues orders of its own.
+        for o in cockpit.fold_orders_all(lines):
+            if o['status'] != 'posted' or not str(o['to']).lower().startswith('i3-mind'):
+                continue
+            if not can_send():
+                return did
+            if HANDS.search(o['text']):
+                seat = route_for(o['text'])
+                cockpit.append({'at': now(), 'from': SEAT, 'kind': 'order-status', 'id': o['id'], 'status': 'declined',
+                                'note': f'needs hands on a machine, and the Mind can only look. Suggested seat: {seat}', 'link': ''})
+                cockpit.append({'at': now(), 'from': SEAT, 'model': MODEL, 'to': o.get('from'),
+                                'text': f"I can't do {o['id']}: I can only answer and report. Suggested seat: {seat}."})
+                sent()
+                did += 1
+                continue
+            reply, deferred = answer(o['text'], str(o.get('from', '')))
+            if deferred:
+                continue
+            cockpit.append({'at': now(), 'from': SEAT, 'kind': 'order-status', 'id': o['id'], 'status': 'done', 'note': reply[:600], 'link': ''})
+            sent()
             did += 1
-            continue
-        reply, deferred = answer(o['text'], str(o.get('from', '')))
-        if deferred:
-            continue
-        cockpit.append({'at': now(), 'from': SEAT, 'kind': 'order-status', 'id': o['id'], 'status': 'done', 'note': reply[:600], 'link': ''})
-        did += 1
-    state['answered'], state['notified'] = sorted(answered)[-400:], sorted(notified)[-400:]
-    return did
+        # 2. questions addressed to the Mind
+        for m in lines:
+            if m.get('kind') or str(m.get('at', '')) < cutoff or str(m.get('from', '')).endswith('mind'):
+                continue
+            to, text = str(m.get('to', '')).lower(), str(m.get('text', ''))
+            if to not in ('mind', 'i3-mind') and not text.lower().startswith('@mind'):
+                continue   # broadcasts and messages for others are not the Mind's to answer
+            key = f"{m.get('at')}|{m.get('from')}|{text[:80]}"
+            if key in answered:
+                continue
+            if not can_send():
+                return did
+            reply, deferred = answer(text, str(m.get('from', '')))
+            if deferred:
+                if key not in notified:
+                    cockpit.append({'at': now(), 'from': SEAT, 'model': MODEL, 'to': m.get('from'),
+                                    'text': 'Queued: your question needs the model, which is busy with a GameAttract slot or unreachable. I will answer when it is free.'})
+                    notified.add(key)
+                    sent()
+                continue
+            cockpit.append({'at': now(), 'from': SEAT, 'model': MODEL, 'to': m.get('from'), 'text': reply})
+            answered.add(key)
+            sent()
+            did += 1
+        return did
+    finally:
+        state['answered'], state['notified'] = sorted(answered)[-400:], sorted(notified)[-400:]
+
+
+def log(text):
+    """Append, so one error can't overwrite the last. Logging must never take the worker down."""
+    try:
+        with open(STATE.parent / 'mind_worker.err.txt', 'a', encoding='utf-8') as f:
+            f.write(f'{now()} {text}\n')
+    except OSError:
+        pass
+
+
+def save(state):
+    try:
+        STATE.write_text(json.dumps(state), encoding='utf-8')
+    except OSError as exc:
+        log(f'state not saved: {exc}')
 
 
 def main():
@@ -242,16 +283,18 @@ def main():
     except Exception:
         state = {}
     while True:
+        n = None
         try:
             n = step(state)
-            STATE.write_text(json.dumps(state), encoding='utf-8')
-            if args.once:
-                print(f'mind_worker: handled {n}')
-                return
-        except Exception as exc:
-            (STATE.parent / 'mind_worker.err.txt').write_text(f'{now()} {exc}\n', encoding='utf-8')
+        except (Exception, SystemExit) as exc:   # cockpit.remote exits when xanadu is unreachable; the loop must survive it
+            log(exc)
             if args.once:
                 raise
+        finally:
+            save(state)
+        if args.once:
+            print(f'mind_worker: handled {n}')
+            return
         time.sleep(20)
 
 
