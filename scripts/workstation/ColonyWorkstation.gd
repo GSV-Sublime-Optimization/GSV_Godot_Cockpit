@@ -748,6 +748,11 @@ func _build_palette() -> void:
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 10)
 	_palette.add_child(content)
+	content.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	content.offset_left = 14
+	content.offset_right = -14
+	content.offset_top = 14
+	content.offset_bottom = -14
 	var title := Label.new()
 	title.text = "COMMAND PALETTE   /   Ctrl+K"
 	title.add_theme_color_override("font_color", SKIN.CYAN)
