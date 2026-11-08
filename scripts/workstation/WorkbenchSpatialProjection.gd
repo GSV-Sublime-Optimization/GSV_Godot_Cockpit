@@ -19,7 +19,7 @@ static func project(snapshot: Dictionary) -> Dictionary:
 	var edges: Array[Dictionary] = []
 	var by_key: Dictionary = {}
 	var state: Dictionary = {}
-	for key in ["body_feed_state", "project_feed_state", "mission_feed_state", "service_feed_state"]:
+	for key in ["body_feed_state", "project_feed_state", "mission_feed_state", "service_feed_state", "tool_atlas_state"]:
 		state[key] = _feed_state(String(snapshot.get(key, "unknown")))
 	var body_lookup: Dictionary = {}
 	var bodies: Variant = snapshot.get("bodies", [])
@@ -106,7 +106,29 @@ static func project(snapshot: Dictionary) -> Dictionary:
 				"source": "Studio colony health", "position": _orbit(i, selected.size(), 10.2, -0.1, 0.6),
 				"observed": true
 			})
-	return {"nodes": nodes, "edges": edges, "feeds": state, "source": "KiloCore Studio", "is_fixture": false}
+	# This fifth lens is only opt-in, local filesystem presence. Never confuse
+	# "source_present" with authenticated, callable, qualified, or admitted.
+	var tools: Variant = snapshot.get("tools", [])
+	if state["tool_atlas_state"] == "observed" and typeof(tools) == TYPE_ARRAY:
+		var selected_tools: Array = tools.slice(0, 32)
+		for i in range(selected_tools.size()):
+			var source_tool: Variant = selected_tools[i]
+			if typeof(source_tool) != TYPE_DICTIONARY:
+				continue
+			var id: String = String(source_tool.get("id", ""))
+			var status: String = String(source_tool.get("status", "unknown"))
+			if id.is_empty() or id.length() > 48 or not ["source_present", "directory_seen", "not_found"].has(status):
+				continue
+			_push(nodes, by_key, {
+				"key": "tool:" + id, "kind": "tool", "id": id,
+				"title": String(source_tool.get("name", id)).substr(0, 80),
+				"detail": "LOCAL PRESENCE ONLY / not callable or admitted",
+				"status": status,
+				"source": "Opt-in local tool atlas / read-only filesystem probe",
+				"position": _orbit(i, selected_tools.size(), 6.3, -1.45, 1.1),
+				"observed": true
+			})
+	return {"nodes": nodes, "edges": edges, "feeds": state, "source": "KiloCore Studio + opt-in local tool atlas", "is_fixture": false}
 
 static func _push(nodes: Array[Dictionary], lookup: Dictionary, entry: Dictionary) -> void:
 	if lookup.has(entry["key"]):
@@ -143,7 +165,7 @@ static func color_for(status: String) -> Color:
 			return Color("#39ecd0")
 		"running", "queued", "approved":
 			return Color("#56baff")
-		"awaiting_approval", "proposed":
+		"awaiting_approval", "proposed", "source_present", "directory_seen":
 			return Color("#ffcf72")
 		"failed", "invalid", "down", "error", "unhealthy", "degraded":
 			return Color("#ff647f")
