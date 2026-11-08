@@ -6,7 +6,7 @@ project:
   type: godot
   repo: GSV-Sublime-Optimization/GSV_Godot_Cockpit
 toolchains:
-  godot: "4"
+  godot: "4.7"
   python: "3"
 commands:
   check:
@@ -15,6 +15,15 @@ commands:
       requires: [godot]
     - name: Godot GDScript parse
       run: ${python} ${gsv_tools}/godot_parse_gate.py --project .
+      requires: [godot]
+    - name: Workstation mission contract and no-false-POST gate
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_mission_test.gd
+      requires: [godot]
+    - name: Workstation receipt evidence negative controls
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_evidence_test.gd
+      requires: [godot]
+    - name: Workstation UI scene smoke
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_ui_test.gd
       requires: [godot]
 security:
   network_required: false

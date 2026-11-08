@@ -1,5 +1,8 @@
 extends PanelContainer
 
+const EVIDENCE = preload("res://scripts/workstation/WorkbenchMissionEvidence.gd")
+const CATALOG = preload("res://scripts/workstation/WorkbenchCatalog.gd")
+
 ## A tab for *observed* mission logs or catalogued agent runtimes.
 ## Deliberately not a PTY. A process/CLI/session name cannot be an attach token.
 
@@ -8,6 +11,8 @@ var client: Node
 var _header: Label
 var _meta: Label
 var _read_log: Button
+var _read_evidence: Button
+var _evidence_http: HTTPRequest
 var _terminal: TextEdit
 
 func configure(selected: Dictionary, studio_client: Node) -> void:
@@ -15,6 +20,11 @@ func configure(selected: Dictionary, studio_client: Node) -> void:
 	client = studio_client
 
 func _ready() -> void:
+	_evidence_http = HTTPRequest.new()
+	_evidence_http.timeout = 6.0
+	_evidence_http.max_redirects = 0
+	add_child(_evidence_http)
+	_evidence_http.request_completed.connect(_on_evidence_completed)
 	var layout := VBoxContainer.new()
 	layout.add_theme_constant_override("separation", 12)
 	add_child(layout)
@@ -45,6 +55,11 @@ func _ready() -> void:
 	_read_log.disabled = entry.get("session_kind", "") != "mission_log"
 	_read_log.pressed.connect(refresh_log)
 	toolbar.add_child(_read_log)
+	_read_evidence = Button.new()
+	_read_evidence.text = "INSPECT RECEIPT / TESTS"
+	_read_evidence.disabled = entry.get("session_kind", "") != "mission_log"
+	_read_evidence.pressed.connect(refresh_evidence)
+	toolbar.add_child(_read_evidence)
 	var studio_button := Button.new()
 	studio_button.text = "OPEN STUDIO"
 	studio_button.pressed.connect(func(): OS.shell_open("http://127.0.0.1:7340/"))
@@ -109,6 +124,39 @@ func _on_mission_log(mission_id: String, lines: PackedStringArray, error: String
 		_terminal.text = "No log lines returned by Studio for this mission."
 		return
 	_terminal.text = "\n".join(lines).substr(0, 80000)
+
+func refresh_evidence() -> void:
+	if entry.get("session_kind", "") != "mission_log" or _read_evidence.disabled:
+		return
+	var id := String(entry.get("id", ""))
+	if not CATALOG.valid_mission_id(id):
+		return
+	var port := 7340
+	var supplied := OS.get_environment("GSV_STUDIO_ENTITY_PORT")
+	if supplied.is_valid_int() and not supplied.is_empty():
+		var candidate := int(supplied)
+		if candidate >= 1 and candidate <= 65535:
+			port = candidate
+	_read_evidence.disabled = true
+	_terminal.text = "Reading the owning Studio mission result and validator evidence..."
+	var code := _evidence_http.request("http://127.0.0.1:%d/api/missions/%s" % [port, id],
+		PackedStringArray(["Accept: application/json"]), HTTPClient.METHOD_GET)
+	if code != OK:
+		_read_evidence.disabled = false
+		_terminal.text = "Evidence unavailable / local read rejected."
+
+func _on_evidence_completed(result: int, status: int,
+		_headers: PackedStringArray, body: PackedByteArray) -> void:
+	_read_evidence.disabled = false
+	if result != HTTPRequest.RESULT_SUCCESS or status != 200 or body.size() > 131072:
+		_terminal.text = "Evidence UNKNOWN / no valid Studio mission GET reply."
+		return
+	var parsed: Dictionary = EVIDENCE.parse(
+		body.get_string_from_utf8(), String(entry.get("id", "")))
+	if not parsed.get("ok", false):
+		_terminal.text = "Evidence UNKNOWN / " + String(parsed.get("reason", "invalid_contract"))
+		return
+	_terminal.text = EVIDENCE.format(parsed["proof"])
 
 func _copy_id() -> void:
 	DisplayServer.clipboard_set(String(entry.get("id", "")))

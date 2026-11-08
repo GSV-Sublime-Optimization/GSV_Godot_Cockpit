@@ -6,6 +6,15 @@ A Godot visual membrane for **GSV Sublime Optimization**.
 
 The project presents colony-facing information such as agents, services, quests, and receipts through a Godot UI. Those views are projections of external owners; the cockpit must not silently become the canonical store for the systems it displays.
 
+## GPT-6 colony workstation bakeoff (experimental)
+
+The existing 13-tab cockpit remains the default scene. A separate modular workstation lives at
+`res://scenes/ColonyWorkstation.tscn`; it includes observed fleet/mission tabs, an explicit
+**BUILD SOFTWARE** desk using KiloCore Studio's actual mission API, and a read-only mission
+receipt/validator inspector. No unapproved terminal attachment or autonomous promotion is
+implied. See [Software Factory Seat](docs/WORKSTATION_FACTORY_SEAT.md) for exact scope,
+execution contract and tested vs untested boundaries.
+
 ## Status
 
 A working personal tool, not a general-purpose product: no release and no packaged

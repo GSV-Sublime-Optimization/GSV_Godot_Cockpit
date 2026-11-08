@@ -7,6 +7,7 @@ extends Control
 const CATALOG = preload("res://scripts/workstation/WorkbenchCatalog.gd")
 const STUDIO_CLIENT = preload("res://scripts/workstation/WorkbenchStudioClient.gd")
 const SESSION_PANE = preload("res://scripts/workstation/WorkbenchSessionPane.gd")
+const MISSION_DESK = preload("res://scripts/workstation/WorkbenchMissionDesk.gd")
 const SKIN = preload("res://scripts/workstation/WorkbenchTheme.gd")
 
 @export var auto_refresh: bool = true
@@ -209,6 +210,11 @@ func _build_topbar(frame: VBoxContainer) -> void:
 	refresh.text = "OBSERVE  F5"
 	refresh.pressed.connect(_refresh_sources)
 	bar.add_child(refresh)
+	var factory_btn := Button.new()
+	factory_btn.text = "BUILD SOFTWARE"
+	factory_btn.tooltip_text = "Compose an owner-backed Studio mission, not a shell"
+	factory_btn.pressed.connect(func(): _open_resource({"kind": "factory", "id": "factory", "name": "Software Factory"}))
+	bar.add_child(factory_btn)
 	var palette_btn := Button.new()
 	palette_btn.text = "JUMP  Ctrl+K"
 	palette_btn.pressed.connect(_show_palette)
@@ -252,6 +258,7 @@ func _refresh_navigation() -> void:
 	var groups := [
 		{"name": "WORKSPACES", "entries": [
 			{"kind": "fleet", "id": "fleet", "name": "Fleet / bodies"},
+			{"kind": "factory", "id": "factory", "name": "Software factory / build"},
 			{"kind": "sessions", "id": "sessions", "name": "Observed missions"},
 			{"kind": "services", "id": "services", "name": "Colony services"},
 			{"kind": "projects", "id": "projects", "name": "Project constellation"},
@@ -306,6 +313,8 @@ func _open_resource(meta: Dictionary) -> void:
 	var title := String(meta.get("name", id))
 	var key := kind + ":" + id
 	match kind:
+		"factory":
+			_open_tab(key, "FACTORY", meta, _make_factory)
 		"fleet":
 			_open_tab(key, "FLEET", meta, _make_fleet)
 		"sessions":
@@ -381,6 +390,27 @@ func _tab_changed(idx: int) -> void:
 	var key := String(panel.get_meta("workstation_key", ""))
 	if _page_meta.has(key):
 		_select_inspector(_page_meta[key])
+
+func _make_factory() -> Control:
+	var desk: PanelContainer = MISSION_DESK.new()
+	desk.mission_submitted.connect(func(id: String, state: String):
+		_note("Studio acknowledged mission %s (%s). Refreshing index; approval remains Studio-owned." % [id, state])
+		_client.refresh()
+	)
+	desk.mission_view_requested.connect(_open_observed_mission)
+	return desk
+
+func _open_observed_mission(id: String) -> void:
+	if _snapshot.get("mission_feed_state", "unknown") == "observed":
+		for mission in _snapshot.get("missions", []):
+			if String(mission.get("id", "")) == id:
+				var item: Dictionary = mission.duplicate(true)
+				item["kind"] = "mission"
+				item["name"] = mission.get("title", "Mission")
+				_open_resource(item)
+				return
+	_note("Mission not yet verified in Studio index; requesting a fresh observation.")
+	_client.refresh()
 
 func _make_fleet() -> Control:
 	var scroll := ScrollContainer.new()
@@ -732,6 +762,7 @@ func _apply_layout(index: int) -> void:
 func _build_palette() -> void:
 	_palette_commands = [
 		{"id": "fleet", "label": "Fleet overview"},
+		{"id": "factory", "label": "Build software via Studio mission"},
 		{"id": "sessions", "label": "Observed mission sessions"},
 		{"id": "services", "label": "Observed colony services"},
 		{"id": "projects", "label": "Project constellation"},
@@ -792,7 +823,7 @@ func _choose_palette(index: int) -> void:
 	var action := String(_palette_results.get_item_metadata(index))
 	_palette.hide()
 	match action:
-		"fleet", "sessions", "services", "projects", "games", "legacy":
+		"factory", "fleet", "sessions", "services", "projects", "games", "legacy":
 			var label := action.capitalize()
 			_open_resource({"kind": action, "id": action, "name": label})
 		"refresh":
