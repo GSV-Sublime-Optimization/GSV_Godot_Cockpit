@@ -37,6 +37,14 @@ func _run() -> void:
 	for i in 12:
 		session._on_studio_observation({"source": "fixture", "state": "stale", "error": "offline"})
 	_expect(session.recent_events().size() == 8, "history bounded at the clamped max")
+	# The readout reads the sensor bridge, not the event trace: drive the real
+	# bridge path (one good health reply, then a transport failure) to go stale.
+	var good := JSON.stringify({"schema": "kilocore-studio.cockpit-health.v2",
+		"missions": {"awaiting": 1, "running": 0, "queued": 0, "thermal_gate": "open"}})
+	session._sensor._on_request_completed(HTTPRequest.RESULT_SUCCESS, 200,
+		PackedStringArray(), good.to_utf8_buffer())
+	session._sensor._on_request_completed(HTTPRequest.RESULT_CANT_CONNECT, 0,
+		PackedStringArray(), PackedByteArray())
 	_expect(session.status_text().contains("STUDIO stale"), "readout follows the latest observation")
 	var body: Node = SCENE.instantiate()
 	root.add_child(body)
