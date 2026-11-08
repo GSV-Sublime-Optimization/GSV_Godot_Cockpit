@@ -51,7 +51,7 @@ def append(line):
     remote(f'''
 import os, sys
 p = os.path.expanduser("{CH}"); os.makedirs(os.path.dirname(p), exist_ok=True)
-open(p, "a", encoding="utf-8").write(sys.stdin.read() + "\n")
+open(p, "a", encoding="utf-8").write(sys.stdin.read() + "\\n")
 ''', json.dumps(line, ensure_ascii=False))
     return line
 
