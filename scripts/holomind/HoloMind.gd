@@ -946,8 +946,8 @@ func _layout_ui() -> void:
 	_typebox.position = Vector2(vp.x * 0.04, vp.y - 54)
 	_typebox.size = Vector2(vp.x * 0.92, 38)
 	if _bench_scroll != null:
-		_bench_scroll.position = Vector2(vp.x * 0.01, 112)
-		_bench_scroll.size = Vector2(vp.x * 0.27, vp.y - 250)
+		_bench_scroll.position = Vector2(vp.x * 0.01, 150)
+		_bench_scroll.size = Vector2(vp.x * 0.27, vp.y - 290)
 		_bench_backing.position = _bench_scroll.position - Vector2(8, 8)
 		_bench_backing.size = _bench_scroll.size + Vector2(16, 16)
 
