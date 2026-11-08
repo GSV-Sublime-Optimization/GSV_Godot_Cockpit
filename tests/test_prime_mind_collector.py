@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch, SimpleNamespace
+from unittest.mock import patch
+from types import SimpleNamespace
 
 SOURCE = Path(__file__).resolve().parents[1] / "tools" / "prime_mind" / "collect_once.py"
 spec = importlib.util.spec_from_file_location("prime_mind_collector", SOURCE)
