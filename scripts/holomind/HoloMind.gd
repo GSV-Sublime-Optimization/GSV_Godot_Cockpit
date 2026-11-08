@@ -87,6 +87,9 @@ func _ready() -> void:
 	# Renders and measurements must never take focus from whatever the person at the machine is doing.
 	if background or shot_path != "":
 		get_window().unfocusable = true
+		# Godot 4.7.1 clamps CLI --position onto the screen, so an off-screen render must move itself.
+		if shot_path != "" or "--position" in OS.get_cmdline_args():
+			DisplayServer.window_set_position(Vector2i(12000, 12000))
 	for arg: String in OS.get_cmdline_user_args():
 		if arg.begins_with("--as="):
 			_speaker = arg.get_slice("=", 1)
@@ -916,7 +919,7 @@ func _set_layer(l: int) -> void:
 func _shoot() -> void:
 	var img := get_viewport().get_texture().get_image()
 	img.save_png(shot_path)
-	print("HOLOMIND_SHOT ", shot_path, " ", img.get_width(), "x", img.get_height(), " frames=", _frames)
+	print("HOLOMIND_SHOT ", shot_path, " ", img.get_width(), "x", img.get_height(), " frames=", _frames, " window_at=", DisplayServer.window_get_position())
 	get_tree().quit(0)
 
 
