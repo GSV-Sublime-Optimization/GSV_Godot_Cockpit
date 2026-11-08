@@ -60,6 +60,9 @@ var _cine_target: Node3D = null
 var _cine_look: Vector3 = Vector3(0, 1.8, 0)
 const FLIGHT_SECONDS := 7.0              # slow enough to follow, eased in and out
 const FORGE_AT := Vector3(3.1, 0, -3.7)  # the Forge district: repositories as buildings
+const ExtrudedBarScript: Script = preload("res://scripts/kit/ExtrudedBar.gd")   # graphics kit (holo/graphics-kit)
+const RING_SHADER: Shader = preload("res://shaders/kit/stage_rings.gdshader")
+const RING_STAGES: Array[String] = ["approved", "changes", "needs-review", "stale-review", "draft"]
 const STAGE_COLOURS := {"draft": Color(0.45, 0.5, 0.62), "needs-review": Color(0.45, 0.72, 1.0), "stale-review": Color(0.7, 0.6, 1.0),
 	"changes": Color(1.0, 0.6, 0.25), "approved": Color(0.35, 0.95, 0.55)}
 var _settle: float = 3.0               # seconds of scene updates left; 0 = nothing changed, so nothing is touched or redrawn        # the first feed only records state: nothing flies for old news
@@ -1458,6 +1461,13 @@ func _rebuild_districts() -> void:
 	var services: Array = spine.get("services", []) if spine.get("services") is Array else []
 	var msi: Vector3 = BODY_PLACES["msi"]
 	var away := Vector3(msi.x, 0, msi.z).normalized()
+	if services.is_empty():
+		var stub: Node3D = ExtrudedBarScript.new()
+		stub.set("has_data", false)   # the kit draws a grey stub with "?": unknown, never "zero services"
+		stub.set("footprint", 0.3)
+		stub.position = msi + away * 2.15 + Vector3(0, -0.35, 0)
+		_districts.add_child(stub)
+		_label("spine: unknown (CHORUS unreachable)", 18, Color(0.6, 0.62, 0.7), stub.position + Vector3(0, 0.5, 0), _districts)
 	for i in services.size():
 		var s: Dictionary = services[i]
 		var up := bool(s.get("up", false))
@@ -1499,24 +1509,65 @@ func _rebuild_districts() -> void:
 		var rec2: Dictionary = by_repo[name]
 		var base := FORGE_AT + Vector3(float(i % cols) * 0.75 - 1.1, -0.4, float(int(i / cols)) * 0.75 - 0.6)
 		_repo_pos[name] = base
-		var y := 0.0
-		for st2: String in ["approved", "changes", "needs-review", "stale-review", "draft"]:
-			var count := int((rec2["stages"] as Dictionary).get(st2, 0))
-			if count == 0:
-				continue
-			var h3 := minf(0.06 * float(count), 1.8)
-			_box(Vector3(0.42, h3, 0.42), _glow(STAGE_COLOURS[st2] as Color, 2.6 if st2 in ["approved", "changes"] else (1.2 if st2 in ["needs-review", "stale-review"] else 0.18)), base + Vector3(0, y + h3 * 0.5, 0), _districts)
-			y += h3 + 0.02
+		var stages: Dictionary = rec2["stages"]
+		var moving := int(stages.get("approved", 0)) + int(stages.get("changes", 0)) + int(stages.get("needs-review", 0)) + int(stages.get("stale-review", 0))
 		var fail_share := float(rec2["fail"]) / float(maxi(int(rec2["n"]), 1))
-		if int(rec2["fail"]) > 0:
-			_box(Vector3(0.46, 0.05, 0.46), _glow(C_ALARM, 0.5 + 4.0 * fail_share), base + Vector3(0, y + 0.03, 0), _districts)
-		_label("%s\n%d open · %d CI fail" % [name, int(rec2["n"]), int(rec2["fail"])], 18, Color(0.8, 0.88, 1.0), base + Vector3(0, y + 0.3, 0), _districts)
+		# Bar height = PRs actually moving (not drafts); colour = the stage that most needs a hand; halo = CI failing share.
+		var col: Color = STAGE_COLOURS["needs-review"]
+		if int(stages.get("changes", 0)) > 0:
+			col = STAGE_COLOURS["changes"]
+		elif int(stages.get("approved", 0)) > 0:
+			col = STAGE_COLOURS["approved"]
+		elif moving == 0:
+			col = STAGE_COLOURS["draft"]
+		var bar: Node3D = ExtrudedBarScript.new()
+		bar.set("value", float(moving))
+		bar.set("unit_height", 0.16)
+		bar.set("footprint", 0.42)
+		bar.set("status_color", col)
+		bar.set("urgency", clampf(fail_share, 0.0, 1.0))
+		bar.set("alert_hatch", fail_share >= 0.5)
+		bar.set("has_data", true)
+		bar.set("caption", "")
+		bar.position = base + Vector3(0, 0.0, 0)
+		_districts.add_child(bar)
+		# Stage ring at its foot: every open PR including drafts, one notch per PR.
+		var quad := PlaneMesh.new()
+		quad.size = Vector2(0.72, 0.72)
+		var ring := MeshInstance3D.new()
+		ring.mesh = quad
+		ring.position = base + Vector3(0, 0.02, 0)
+		var rm := ShaderMaterial.new()
+		rm.shader = RING_SHADER
+		var counts := PackedFloat32Array()
+		var ring_cols := PackedVector4Array()
+		for st3: String in RING_STAGES:
+			counts.append(float(stages.get(st3, 0)))
+			var lc: Color = (STAGE_COLOURS[st3] as Color).srgb_to_linear()
+			ring_cols.append(Vector4(lc.r, lc.g, lc.b, 1.0))
+		rm.set_shader_parameter("stage_count", RING_STAGES.size())
+		rm.set_shader_parameter("counts", counts)
+		rm.set_shader_parameter("stage_colors", ring_cols)
+		rm.set_shader_parameter("has_data", 1.0)
+		ring.material_override = rm
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_districts.add_child(ring)
+		var y := 0.16 * float(moving)
+		_label("%s\n%d moving · %d draft · %d CI fail" % [name, moving, int(stages.get("draft", 0)), int(rec2["fail"])], 18, Color(0.8, 0.88, 1.0), base + Vector3(0, y + 0.3, 0), _districts)
 		var anchor := Node3D.new()
 		_districts.add_child(anchor)
 		anchor.position = base + Vector3(0, y * 0.5, 0)
 		_picks.append({"node": anchor, "title": "repository · " + name, "body": _repo_body(name), "url": _repo_url(name),
 			"ask": "What is %s for, and what's the highest-yield move on its %d open PRs?" % [name, int(rec2["n"])]})
 	_draw_relationships()
+	for n in _districts.get_children():
+		if n is Label3D:
+			var l := n as Label3D
+			l.fixed_size = true
+			l.pixel_size = 0.0007
+			l.visibility_range_end = 9.5
+			l.visibility_range_end_margin = 1.5
+			l.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	if not repos.is_empty():
 		_label("THE FORGE · %d repositories · floors = open PRs by stage" % repos.size(), 26, Color(0.6, 0.8, 1.0), FORGE_AT + Vector3(0, -0.35, 1.3), _districts)
 
