@@ -668,7 +668,7 @@ func _read_feed() -> void:
 	if not feed.is_empty() and String(fresh.get("at", "")) == String(feed.get("at", "")):
 		return   # nothing new: don't rebuild the scene
 	feed = fresh
-	feed_note = "feed " + String(feed.get("at", "?"))
+	feed_note = ("[%s] " % String(feed.get("source"))) + "frozen " + String(feed.get("at", "?")) if feed.has("source") else "feed " + String(feed.get("at", "?"))
 	_apply_feed()
 
 

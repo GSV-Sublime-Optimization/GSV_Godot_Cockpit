@@ -1,0 +1,107 @@
+{
+ "schema": "colony.mindview-feed/v0",
+ "at": "2026-11-08T06:48:00Z",
+ "source_ok": true,
+ "source": "SHARED FIXTURE mindview-20261108 (bakeoff #14)",
+ "bodies": {
+  "msi": {
+   "label": "MSI",
+   "role": "workshop",
+   "status": "green",
+   "failing": [],
+   "age_s": 177,
+   "detail": "RAM 5473 MB free; C: 8.5% free, K: 48.4% free, E: 67.1% free"
+  },
+  "i3": {
+   "label": "i3",
+   "role": "engine room",
+   "status": "red",
+   "failing": [
+    "docker"
+   ],
+   "age_s": 78,
+   "detail": "RAM 14786 MB free; C: 9.5% free, D: 88.1% free, K: 96.1% free, J: 64.9% free"
+  },
+  "l9": {
+   "label": "L9",
+   "role": "second engine",
+   "status": "green",
+   "failing": [],
+   "age_s": 700,
+   "detail": ""
+  },
+  "xanadu": {
+   "label": "xanadu",
+   "role": "librarian + watchman",
+   "status": "unknown",
+   "failing": [],
+   "age_s": null,
+   "detail": "no heartbeat in the shared fixture"
+  }
+ },
+ "events": [
+  {
+   "at": "2026-11-08T05:35:16+00:00",
+   "mind": "l9-triage-drone",
+   "model": "qwen3:4b-l9fast",
+   "level": "alarm",
+   "floor": "alarm",
+   "reasons": [
+    "i3 failing: docker",
+    "msi failing: dev-mentor",
+    "off-box backup 109 h old (alarm > 36 h)"
+   ],
+   "line": "Critical backups overdue (109h old) and multiple system failures: i3 and msi failing, with insufficient RAM and no green status.",
+   "ms": 3055,
+   "simulated": false,
+   "focus": "msi"
+  },
+  {
+   "at": "2026-11-08T06:16:16+00:00",
+   "mind": "l9-triage-drone",
+   "model": "qwen3:4b-l9fast",
+   "level": "notable",
+   "floor": "notable",
+   "reasons": [
+    "i3 failing: docker"
+   ],
+   "line": "i3 failing: docker",
+   "ms": 1794,
+   "focus": "i3",
+   "simulated": false
+  },
+  {
+   "at": "2026-11-08T06:21:04+00:00",
+   "mind": "l9-triage-drone",
+   "model": "qwen3:4b-l9fast",
+   "level": "notable",
+   "floor": "notable",
+   "reasons": [
+    "i3 failing: docker"
+   ],
+   "line": "i3 failing: docker",
+   "ms": 1711,
+   "focus": "i3",
+   "simulated": false
+  },
+  {
+   "at": "2026-11-08T06:36:20+00:00",
+   "mind": "l9-triage-drone",
+   "model": "qwen3:4b-l9fast",
+   "level": "notable",
+   "floor": "notable",
+   "reasons": [
+    "i3 failing: docker"
+   ],
+   "line": "i3 failing: docker",
+   "ms": 16578,
+   "focus": "i3",
+   "simulated": false
+  }
+ ],
+ "attention": "i3",
+ "screen": "",
+ "agents": [],
+ "channel": [],
+ "actions": []
+}
