@@ -1,0 +1,1 @@
+{"schema": "colony.heartbeat/v1", "rig": "l9", "at": "2026-11-08T06:36:20Z", "green": true, "observer": "msi (triage drone)", "checks": [{"name": "ollama-mind", "ok": true, "ms": 16578, "detail": "qwen3:4b-l9fast on :11435"}]}

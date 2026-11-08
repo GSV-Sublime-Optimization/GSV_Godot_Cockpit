@@ -1,0 +1,43 @@
+{
+ "schema": "colony.heartbeat/v1",
+ "rig": "i3",
+ "at": "2026-11-08T06:46:42Z",
+ "green": false,
+ "ram_avail_mb": 14786,
+ "disks": {
+  "C": {
+   "free_gb": 22.1,
+   "pct_free": 9.5
+  },
+  "D": {
+   "free_gb": 205.1,
+   "pct_free": 88.1
+  },
+  "K": {
+   "free_gb": 1789.9,
+   "pct_free": 96.1
+  },
+  "J": {
+   "free_gb": 2419.3,
+   "pct_free": 64.9
+  }
+ },
+ "checks": [
+  {
+   "name": "ollama",
+   "ok": true,
+   "ms": 21665,
+   "detail": "qwen3:8b 1-token gen, keep_alive=0 (21665 ms incl. load)"
+  },
+  {
+   "name": "gameattract",
+   "ok": true,
+   "detail": "director running, state=waiting, status 0 s old"
+  },
+  {
+   "name": "docker",
+   "ok": false,
+   "detail": "Command '['docker', 'info', '--format', '{{.ServerVersion}}']' timed out after 20 seconds"
+  }
+ ]
+}
