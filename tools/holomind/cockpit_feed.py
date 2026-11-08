@@ -166,6 +166,26 @@ def chorus_facts():
                       'down': [x.get('name') for x in sp.get('services', []) if not x.get('up', True)]}}
 
 
+ORDER_RANK = {'working': 0, 'taken': 1, 'posted': 2, 'declined': 3, 'done': 4}
+
+
+def fold_orders(lines):
+    """Work orders in the shared channel, in CHORUS's shape: {kind:'order', id, to, station, text[, ref]} then
+    {kind:'order-status', id, status: taken|working|done|declined, note, link}. One queue for every cockpit."""
+    state = {}
+    for m in lines:
+        if m.get('kind') == 'order' and m.get('id'):
+            state[m['id']] = {'id': m['id'], 'at': m.get('at'), 'from': m.get('from'), 'to': m.get('to', 'any'),
+                              'station': m.get('station', 'anvil'), 'text': m.get('text', ''), 'ref': m.get('ref', ''),
+                              'url': m.get('url', ''), 'status': 'posted', 'by': None, 'note': '', 'link': '',
+                              'history': [{'at': m.get('at'), 'status': 'posted', 'by': m.get('from')}]}
+        elif m.get('kind') == 'order-status' and m.get('id') in state:
+            o = state[m['id']]
+            o.update(status=m.get('status', o['status']), by=m.get('from'), note=m.get('note', o['note']), link=m.get('link', o['link']))
+            o['history'].append({'at': m.get('at'), 'status': m.get('status'), 'by': m.get('from')})
+    return sorted(state.values(), key=lambda o: (ORDER_RANK.get(o['status'], 5), o['at'] or ''))
+
+
 def actions(bodies, awaiting, cards, channel, colony=None):
     """The colony's work queue: what needs doing, where it lives in the cockpit, and who it's for."""
     out = []
@@ -261,7 +281,9 @@ def tick(state):
                 listed.setdefault(str(m.get('from')), set()).update(str(a) for a in m['reads'])
             else:
                 reads[str(m.get('from'))] = max(reads.get(str(m.get('from')), ''), str(m.get('at', '')))
-    channel = [m for m in raw_channel if m.get('kind') != 'read']
+    orders = fold_orders(raw_channel)
+    decisions = {str(m.get('card')): m for m in raw_channel if m.get('kind') == 'decision'}
+    channel = [m for m in raw_channel if m.get('kind') not in ('read', 'order-status', 'decision')]
     for i, m in enumerate(channel):
         who = str(m.get('from', ''))
         rb = sorted({s for s, t in reads.items() if t >= str(m.get('at', ''))}
@@ -283,13 +305,23 @@ def tick(state):
         state['colony'] = fresh or state.get('colony')
     feed['colony'] = state.get('colony')
     feed['actions'] = actions(bodies, state.get('awaiting', []), remote.get('cards', []), channel, feed['colony'])
+    feed['orders'] = orders[-30:]
+    feed['decisions'] = list(decisions.values())[-30:]
+    ordered = {o.get('ref') for o in orders if o.get('status') not in ('declined',)}
+    for a in feed['actions']:
+        a['id'] = a.get('id') or (a['kind'] + ':' + a.get('url', a['title'])[:120])
+        if a['id'] in ordered:
+            a['ordered'] = next(o for o in reversed(orders) if o.get('ref') == a['id'])['status']
+        if a['kind'] == 'decision' and a['title'] in decisions:
+            a['decided'] = decisions[a['title']].get('verdict')
+    feed['actions'] = [a for a in feed['actions'] if not a.get('decided')]
     def publish():
         tmp = FEED.with_suffix('.tmp')
         tmp.write_text(json.dumps(feed, ensure_ascii=False), encoding='utf-8')
         tmp.replace(FEED)
     # Publish first, so a Mind busy thinking never freezes the view.
     pending = [m for m in channel if f"{m.get('at')}|{m.get('from')}|{m.get('text')}" not in set(state.get('answered', []))
-               and not m.get('from', '').endswith('mind') and str(m.get('to', 'mind')).lower() in ('mind', '', 'all')
+               and not m.get('kind') and not m.get('from', '').endswith('mind') and str(m.get('to', 'mind')).lower() in ('mind', '', 'all')
                and not (age_s(m.get('at')) is not None and age_s(m.get('at')) > 600)]
     feed['mind_thinking'] = len(pending)
     publish()
@@ -298,7 +330,7 @@ def tick(state):
     budget = 1
     for m in channel:
         key = f"{m.get('at')}|{m.get('from')}|{m.get('text')}"
-        if key in answered or m.get('from', '').endswith('mind') or str(m.get('to', 'mind')).lower() not in ('mind', '', 'all'):
+        if key in answered or m.get('kind') or m.get('from', '').endswith('mind') or str(m.get('to', 'mind')).lower() not in ('mind', '', 'all'):
             continue
         if age_s(m.get('at')) is not None and age_s(m.get('at')) > 600:
             answered.add(key)
@@ -319,7 +351,7 @@ def tick(state):
                       'rigs': {k: {'status': v['status'], 'failing': v['failing']} for k, v in bodies.items()},
                       'agents': [{'agent': g['agent'], 'latest': f"{g['recent'][0]['repo']}#{g['recent'][0]['number']} {g['recent'][0]['title']}"}
                                  for g in feed['agents']],
-                      'actions': feed['actions'][:30], 'channel': channel[-8:]}
+                      'actions': feed['actions'][:30], 'orders': [o for o in orders if o['status'] not in ('done', 'declined')][-20:], 'channel': channel[-8:]}
     feed['mind_thinking'] = max(0, len(pending) - (1 - budget))
     publish()
     return feed

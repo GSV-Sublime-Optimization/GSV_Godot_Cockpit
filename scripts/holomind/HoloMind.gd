@@ -67,6 +67,11 @@ var _chat: RichTextLabel
 var _typebox: LineEdit
 var _speaker: String = "keath"
 var _far: Node3D
+var _bench: VBoxContainer
+var _bench_scroll: ScrollContainer
+var _bench_backing: ColorRect
+const SEATS: Array[String] = ["claude (i3 seat)", "claude (msi seat)", "gpt-6", "muse", "codex", "any"]
+const STATION_FOR: Dictionary = {"review": "pegs", "rig": "anvil", "decision": "ledger", "reply": "bell"}
 var _hud_clock: float = 0.0
 var _sent_local: Array[Dictionary] = []   # what you typed this session, to show sent > delivered > read
 var _actions_root: Node3D
@@ -98,6 +103,7 @@ func _ready() -> void:
 	_build_mind()
 	_build_cockpit()
 	_build_hud()
+	_build_bench()
 	_layout_ui()
 	get_viewport().size_changed.connect(_layout_ui)
 	_read_feed()
@@ -696,6 +702,7 @@ func _apply_feed() -> void:
 	_rebuild_memory()
 	_rebuild_agents()
 	_rebuild_actions()
+	_rebuild_bench()
 	_apply_channel()
 	_count_waiting()
 	var events: Array = feed.get("events", [])
@@ -906,6 +913,11 @@ func _layout_ui() -> void:
 	backing.size = _chat.size + Vector2(20, 16)
 	_typebox.position = Vector2(vp.x * 0.04, vp.y - 54)
 	_typebox.size = Vector2(vp.x * 0.92, 38)
+	if _bench_scroll != null:
+		_bench_scroll.position = Vector2(vp.x * 0.01, 80)
+		_bench_scroll.size = Vector2(vp.x * 0.27, vp.y - 210)
+		_bench_backing.position = _bench_scroll.position - Vector2(8, 8)
+		_bench_backing.size = _bench_scroll.size + Vector2(16, 16)
 
 
 func _set_layer(l: int) -> void:
@@ -914,6 +926,152 @@ func _set_layer(l: int) -> void:
 		if c is Label3D and c.has_meta("detail"):
 			(c as Label3D).text = String(c.get_meta("detail")) if focus_layer == 1 else "vitals"
 	_update_hud()
+
+
+## THE WORKBENCH: the cockpit as a workstation. Every work item can be assigned to a seat, opened, asked about,
+## or (for your decisions) approved or declined. Orders use CHORUS's shape in the shared channel, so both
+## cockpits and every agent (cockpit.py orders/take/status) work one queue; receipts land back here.
+func _build_bench() -> void:
+	var layer := _chat.get_parent()
+	_bench_backing = ColorRect.new()
+	_bench_backing.color = Color(0.02, 0.03, 0.07, 0.78)
+	layer.add_child(_bench_backing)
+	_bench_scroll = ScrollContainer.new()
+	_bench_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	layer.add_child(_bench_scroll)
+	_bench = VBoxContainer.new()
+	_bench.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_bench.add_theme_constant_override("separation", 6)
+	_bench_scroll.add_child(_bench)
+
+
+func _bench_label(text: String, font_size: int, col: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(80, 0)
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.add_theme_font_size_override("font_size", font_size)
+	l.add_theme_color_override("font_color", col)
+	return l
+
+
+func _bench_button(text: String, tip: String, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.tooltip_text = tip
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size", 13)
+	b.pressed.connect(cb)
+	return b
+
+
+func _rebuild_bench() -> void:
+	if _bench == null:
+		return
+	for c in _bench.get_children():
+		c.queue_free()
+	var orders: Array = feed.get("orders", [])
+	var open_count := 0
+	for o: Variant in orders:
+		if not (String((o as Dictionary).get("status", "")) in ["done", "declined"]):
+			open_count += 1
+	_bench.add_child(_bench_label("WORKBENCH · assign work, approve decisions, watch receipts land", 14, Color(0.49, 0.54, 0.66)))
+	if not orders.is_empty():
+		_bench.add_child(_bench_label("ORDERS · %d open" % open_count, 15, Color(1.0, 0.82, 0.48)))
+		for o: Variant in orders.slice(-8):
+			var d: Dictionary = o
+			var st := String(d.get("status", "posted"))
+			var col := Color(0.62, 0.85, 1.0)
+			if st == "done":
+				col = Color(0.27, 0.83, 0.54)
+			elif st in ["taken", "working"]:
+				col = Color(0.96, 0.69, 0.25)
+			elif st == "declined":
+				col = Color(0.6, 0.6, 0.66)
+			var by := String(d.get("by")) if d.get("by") != null else ""
+			var row := VBoxContainer.new()
+			row.add_child(_bench_label("%s → %s · %s%s" % [st.to_upper(), String(d.get("to", "any")), String(d.get("text", "")).left(140),
+				("  · " + by) if by != "" else ""], 13, col))
+			if String(d.get("note", "")) != "":
+				row.add_child(_bench_label("“" + String(d.get("note")) + "”", 12, Color(0.8, 0.86, 1.0)))
+			var link := String(d.get("link", ""))
+			if link != "":
+				row.add_child(_bench_button("Open receipt", link, func() -> void: OS.shell_open(link)))
+			_bench.add_child(row)
+	var acts: Array = feed.get("actions", [])
+	_bench.add_child(_bench_label("WORK WAITING · %d" % acts.size(), 15, Color(1.0, 0.82, 0.48)))
+	for x: Variant in acts.slice(0, 24):
+		var a: Dictionary = x
+		var kind := String(a.get("kind", ""))
+		var box := VBoxContainer.new()
+		var ordered := String(a.get("ordered", ""))
+		var kc: Color = KIND_COLOURS.get(kind, Color(0.8, 0.85, 1.0))
+		box.add_child(_bench_label("[%s] %s%s" % [kind.to_upper(), String(a.get("title", "")).left(150), ("  · ordered: " + ordered) if ordered != "" else ""], 13, kc.lightened(0.25)))
+		var bar := HBoxContainer.new()
+		bar.add_theme_constant_override("separation", 4)
+		if kind == "decision" and String(a.get("where", "")) in ["keath", _speaker.to_lower()]:
+			bar.add_child(_bench_button("Approve", "Your decision goes to the shared channel for the Steward and the seats", func() -> void: _decide(a, "approve")))
+			bar.add_child(_bench_button("Decline", "Decline this request", func() -> void: _decide(a, "decline")))
+		var pick := OptionButton.new()
+		pick.focus_mode = Control.FOCUS_NONE
+		pick.add_theme_font_size_override("font_size", 13)
+		for seat: String in SEATS:
+			pick.add_item(seat)
+		pick.tooltip_text = "Which seat should do it"
+		bar.add_child(pick)
+		bar.add_child(_bench_button("Assign", "Post a work order to that seat", func() -> void: _order(a, pick.get_item_text(pick.selected))))
+		var url := String(a.get("url", ""))
+		if url != "":
+			bar.add_child(_bench_button("Open", url, func() -> void: OS.shell_open(url)))
+		bar.add_child(_bench_button("Ask", "Ask the Mind about this", func() -> void: _send("About “%s”: what matters here, and who should take it?" % String(a.get("title", "")))))
+		box.add_child(bar)
+		_bench.add_child(box)
+
+
+func _emit(line: Dictionary) -> bool:
+	if shot_path != "":
+		return false
+	var mode := FileAccess.READ_WRITE if FileAccess.file_exists(OUTBOX) else FileAccess.WRITE
+	var f := FileAccess.open(OUTBOX, mode)
+	if f == null:
+		_subtitle.text = "(could not write the outbox: is the feeder folder there?)"
+		return false
+	f.seek_end()
+	f.store_line(JSON.stringify(line))
+	f.close()
+	return true
+
+
+func _now_iso() -> String:
+	return Time.get_datetime_string_from_system(true) + "Z"
+
+
+func _order(a: Dictionary, seat: String) -> void:
+	var stamp := Time.get_datetime_string_from_system(true).replace("-", "").replace(":", "").replace("T", "-")
+	var text := String(a.get("title", ""))
+	if String(a.get("url", "")) != "":
+		text += "  " + String(a.get("url"))
+	var line := {"at": _now_iso(), "from": _speaker, "kind": "order", "id": "o-" + stamp.right(11) + "-h", "to": seat,
+		"station": String(STATION_FOR.get(String(a.get("kind", "")), "anvil")), "text": text, "ref": String(a.get("id", "")),
+		"url": String(a.get("url", "")), "via": "holomind"}
+	if _emit(line):
+		_subtitle.text = "Order posted to %s: “%s” · it shows TAKEN, then DONE with a receipt, as the seat works it" % [seat, String(a.get("title", "")).left(80)]
+		_flash_bench("ORDER → " + seat)
+
+
+func _decide(a: Dictionary, verdict: String) -> void:
+	var line := {"at": _now_iso(), "from": _speaker, "kind": "decision", "card": String(a.get("title", "")), "verdict": verdict, "via": "holomind"}
+	if _emit(line):
+		_subtitle.text = "You chose %s: “%s” · recorded in the shared channel for the Steward and the seats" % [verdict, String(a.get("title", "")).left(90)]
+		_flash_bench(verdict.to_upper())
+
+
+func _flash_bench(text: String) -> void:
+	# A visible reaction in the room: the Mind's card flares with what you just did.
+	_card_label.text = text
+	_card_label.modulate = Color(1.0, 0.85, 0.5)
+	_card.scale = Vector3.ONE * 0.01
 
 
 func _shoot() -> void:

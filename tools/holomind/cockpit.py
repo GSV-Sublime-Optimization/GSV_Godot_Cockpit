@@ -7,7 +7,13 @@ Mind answers. This is the agent-side tool: Claude seats, Codex, scripts, cron jo
   python cockpit.py read [--last 20] [--for "claude (msi seat)"]
   python cockpit.py ask "question"   --as "claude (i3 seat)"     # says it to the mind, waits up to 60 s for its answer
 
-It only reads and appends chat lines. It can't run anything anywhere.
+Work orders (the same queue CHORUS uses; HOLOMIND assigns them from its work cards):
+  python cockpit.py orders [--for "claude (i3 seat)"]          # open orders, yours first
+  python cockpit.py take ID --as "claude (i3 seat)"              # you're on it (shows as TAKEN on the card)
+  python cockpit.py status ID done --as SEAT --link URL --note "approved, 17/17"   # working|done|declined
+
+It only reads and appends channel lines. It can't run anything anywhere: the agent does the work in its own lanes
+(gsv review post, Studio missions, PRs) and posts the receipt here.
 """
 import argparse
 import base64
@@ -39,6 +45,43 @@ p = os.path.expanduser("{CH}"); os.makedirs(os.path.dirname(p), exist_ok=True)
 open(p, "a", encoding="utf-8").write(sys.stdin.read() + "\\n")
 ''', json.dumps(line))
     return line
+
+
+def append(line):
+    remote(f'''
+import os, sys
+p = os.path.expanduser("{CH}"); os.makedirs(os.path.dirname(p), exist_ok=True)
+open(p, "a", encoding="utf-8").write(sys.stdin.read() + "\n")
+''', json.dumps(line, ensure_ascii=False))
+    return line
+
+
+def now():
+    return dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def all_lines():
+    out = remote(f'''
+import os
+p = os.path.expanduser("{CH}")
+print(open(p, encoding="utf-8").read() if os.path.exists(p) else "")
+''')
+    lines = []
+    for l in out.splitlines():
+        try:
+            lines.append(json.loads(l))
+        except Exception:
+            pass
+    return lines
+
+
+def open_orders(seat=None):
+    sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent))
+    from cockpit_feed import fold_orders
+    os_ = [o for o in fold_orders(all_lines()) if o['status'] not in ('done', 'declined')]
+    if seat:
+        os_.sort(key=lambda o: (0 if o['to'].lower() == seat.lower() else 1 if o['to'] == 'any' else 2))
+    return os_
 
 
 def read(last=20, who=None):
@@ -76,7 +119,24 @@ def main():
     q = sub.add_parser('ask'); q.add_argument('text'); q.add_argument('--as', dest='who', required=True)
     b = sub.add_parser('brief', help='the colony in one screen: rigs, agents at work, the work queue, the last messages')
     b.add_argument('--json', action='store_true')
+    o = sub.add_parser('orders', help='open work orders (yours first)'); o.add_argument('--for', dest='who')
+    t = sub.add_parser('take', help='take an order'); t.add_argument('id'); t.add_argument('--as', dest='who', required=True)
+    st = sub.add_parser('status', help='report on an order'); st.add_argument('id'); st.add_argument('status', choices=['working', 'done', 'declined'])
+    st.add_argument('--as', dest='who', required=True); st.add_argument('--link', default=''); st.add_argument('--note', default='')
     args = a.parse_args()
+    if args.cmd == 'orders':
+        os_ = open_orders(args.who)
+        if not os_:
+            print('no open orders')
+        for x in os_:
+            print(f"{x['id']}  [{x['status']:7}] to {x['to']:20} {x['text'][:110]}" + (f"  ({x['by']})" if x['by'] else ''))
+        return
+    if args.cmd in ('take', 'status'):
+        status = 'taken' if args.cmd == 'take' else args.status
+        line = append({'at': now(), 'from': args.who, 'kind': 'order-status', 'id': args.id, 'status': status,
+                       'note': getattr(args, 'note', ''), 'link': getattr(args, 'link', '')})
+        print(json.dumps(line, ensure_ascii=False))
+        return
     if args.cmd == 'brief':
         raw = remote('import os; p = os.path.expanduser("~/steward/cockpit/brief.json"); print(open(p, encoding="utf-8").read() if os.path.exists(p) else "{}")')
         d = json.loads(raw or '{}')
