@@ -81,8 +81,17 @@ static func parse_mission_list(text: String) -> Dictionary:
 		if typeof(risk) != TYPE_STRING or not ["R0", "R1", "R2", "R3"].has(risk):
 			return {"ok": false, "reason": "mission_risk_unrecognized"}
 		ids[id] = true
+		var repository := ""
+		var source_repo: Variant = raw.get("repo", "")
+		if typeof(source_repo) == TYPE_STRING and source_repo.length() <= 500 and source_repo.is_absolute_path() and not source_repo.contains(".."):
+			repository = source_repo
+		var updated := ""
+		var source_time: Variant = raw.get("updated_at", "")
+		if typeof(source_time) == TYPE_STRING and source_time.length() <= 48:
+			updated = source_time
 		out.append({
 			"id": id,
+			"repo": repository, "updated_at": updated,
 			"title": title.strip_edges().substr(0, 110),
 			"status": state,
 			"risk": risk,

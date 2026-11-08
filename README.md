@@ -10,7 +10,7 @@ The project presents colony-facing information such as agents, services, quests,
 
 The existing 13-tab cockpit remains the default scene. A separate modular workstation lives at
 `res://scenes/ColonyWorkstation.tscn`; it includes observed fleet/mission tabs, an explicit
-**BUILD SOFTWARE** desk using KiloCore Studio's actual mission API, and a read-only mission
+**BUILD SOFTWARE** desk using KiloCore Studio's actual mission API, a navigable native-3D **HYPERSPACE** source graph (with project-to-mission links and source-validated mission prefill), and a read-only mission
 receipt/validator inspector. No unapproved terminal attachment or autonomous promotion is
 implied. See [Software Factory Seat](docs/WORKSTATION_FACTORY_SEAT.md) for exact scope,
 execution contract and tested vs untested boundaries.
