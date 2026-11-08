@@ -9,6 +9,7 @@ const STUDIO_CLIENT = preload("res://scripts/workstation/WorkbenchStudioClient.g
 const SESSION_PANE = preload("res://scripts/workstation/WorkbenchSessionPane.gd")
 const MISSION_DESK = preload("res://scripts/workstation/WorkbenchMissionDesk.gd")
 const HYPERSPACE = preload("res://scripts/workstation/WorkbenchHyperspace.gd")
+const REVIEW_DESK = preload("res://scripts/workstation/WorkbenchReviewDesk.gd")
 const SKIN = preload("res://scripts/workstation/WorkbenchTheme.gd")
 
 @export var auto_refresh: bool = true
@@ -169,7 +170,7 @@ func _build_ui() -> void:
 	var footer := HBoxContainer.new()
 	frame.add_child(footer)
 	var help := Label.new()
-	help.text = "HOLO DIVE  •  DRAG orbit  •  CLICK focus  •  TAB next  •  F dive  •  1–6 decks  •  R refresh  •  Ctrl+K tools"
+	help.text = "HOLO DIVE  /  CLICK signal  /  F dive  /  TAB cycle  /  F5 observe  /  F8 PR Ops  /  Ctrl+K tools"
 	help.add_theme_color_override("font_color", SKIN.MUTED)
 	help.add_theme_font_size_override("font_size", 11)
 	help.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -230,6 +231,11 @@ func _build_topbar(frame: VBoxContainer) -> void:
 	factory_btn.tooltip_text = "Compose an owner-backed Studio mission, not a shell"
 	factory_btn.pressed.connect(func(): _open_resource({"kind": "factory", "id": "factory", "name": "Software Factory"}))
 	bar.add_child(factory_btn)
+	var review_btn := Button.new()
+	review_btn.text = "REVIEW OPS   F8"
+	review_btn.tooltip_text = "Read the source-bound, exact-head GitHub PR queue and prepare evidence briefs. No automatic merge."
+	review_btn.pressed.connect(func(): _open_resource({"kind": "reviews", "id": "reviews", "name": "Review Operations"}))
+	bar.add_child(review_btn)
 	var palette_btn := Button.new()
 	palette_btn.text = "JUMP  Ctrl+K"
 	palette_btn.pressed.connect(_show_palette)
@@ -276,6 +282,7 @@ func _refresh_navigation() -> void:
 			{"kind": "fleet", "id": "fleet", "name": "Fleet / bodies"},
 			{"kind": "hyperspace", "id": "hyperspace", "name": "Hyperspace / 3D source graph"},
 			{"kind": "factory", "id": "factory", "name": "Software factory / build"},
+			{"kind": "reviews", "id": "reviews", "name": "Review operations / exact PR heads"},
 			{"kind": "sessions", "id": "sessions", "name": "Observed missions"},
 			{"kind": "services", "id": "services", "name": "Colony services"},
 			{"kind": "projects", "id": "projects", "name": "Project constellation"},
@@ -334,6 +341,8 @@ func _open_resource(meta: Dictionary) -> void:
 			_open_tab(key, "HYPERSPACE", meta, _make_hyperspace)
 		"factory":
 			_open_tab(key, "FACTORY", meta, _make_factory)
+		"reviews":
+			_open_tab(key, "REVIEW OPS", meta, _make_review_operations)
 		"fleet":
 			_open_tab(key, "FLEET", meta, _make_fleet)
 		"sessions":
@@ -439,6 +448,9 @@ func _compose_from_space(context: Dictionary) -> void:
 	var desk: Node = page.get_child(0)
 	desk.apply_context(context)
 	_note("Hyperspace sent source context to the Factory. Studio will requalify the selected project.")
+
+func _make_review_operations() -> Control:
+	return REVIEW_DESK.new()
 
 func _make_factory() -> Control:
 	var desk: PanelContainer = MISSION_DESK.new()
@@ -812,6 +824,7 @@ func _build_palette() -> void:
 		{"id": "hyperspace", "label": "Holo Dive / 3D spatial operations"},
 		{"id": "fleet", "label": "Fleet overview"},
 		{"id": "factory", "label": "Build software via Studio mission"},
+		{"id": "reviews", "label": "Exact-head GitHub review operations"},
 		{"id": "sessions", "label": "Observed mission sessions"},
 		{"id": "services", "label": "Observed colony services"},
 		{"id": "projects", "label": "Project constellation"},
@@ -872,7 +885,7 @@ func _choose_palette(index: int) -> void:
 	var action := String(_palette_results.get_item_metadata(index))
 	_palette.hide()
 	match action:
-		"factory", "fleet", "hyperspace", "sessions", "services", "projects", "games", "legacy":
+		"factory", "fleet", "hyperspace", "reviews", "sessions", "services", "projects", "games", "legacy":
 			var label := action.capitalize()
 			_open_resource({"kind": action, "id": action, "name": label})
 		"refresh":
@@ -891,6 +904,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_show_palette()
 	elif key.keycode == KEY_F5:
 		_refresh_sources()
+	elif key.keycode == KEY_F8:
+		_open_resource({"kind": "reviews", "id": "reviews", "name": "Review Operations"})
 	elif key.keycode == KEY_F6:
 		_inspector_panel.visible = not _inspector_panel.visible
 	elif key.keycode == KEY_F7:

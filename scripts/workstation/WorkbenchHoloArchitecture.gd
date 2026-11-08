@@ -112,6 +112,7 @@ static func stage(world: Node) -> Dictionary:
 	kernel_scope.pixel_size = 0.010
 
 	for deck in [
+		{"name": "REVIEW GATE / READ-ONLY", "radius": 11.0, "y": 7.0, "hue": GOLD},
 		{"name": "PROJECT CONCOURSE", "radius": 7.5, "y": 4.0, "hue": CYAN},
 		{"name": "MISSION TRANSECT", "radius": 4.7, "y": 0.6, "hue": GOLD},
 		{"name": "FLEET VAULT", "radius": 10.6, "y": -3.0, "hue": AZURE},
@@ -142,6 +143,8 @@ static func object(parent: Node3D, entry: Dictionary, color: Color) -> Dictionar
 	var root := Node3D.new()
 	root.name = "Observed_" + String(entry.get("kind", "node"))
 	root.position = entry["position"]
+	if entry.get("kind", "") == "review":
+		root.scale = Vector3.ONE * 0.52
 	parent.add_child(root)
 	var kind: String = entry["kind"]
 	var radius := 0.65 if kind == "rig" else 0.46
@@ -165,6 +168,15 @@ static func object(parent: Node3D, entry: Dictionary, color: Color) -> Dictionar
 			var lower := cylinder(spin, 0.0, 0.48, 0.75, 5, color, Vector3(0, -0.35, 0), 1.35)
 			lower.rotation.x = PI
 			torus(root, 0.54, 0.026, color, Vector3(0, -0.57, 0), 1.25)
+		"review":
+			# A literal gate, not a generic glowing orb: admission is an observed review problem.
+			cylinder(root, 0.16, 0.18, 1.38, 6, color, Vector3(-0.47, 0, 0), 0.85)
+			cylinder(root, 0.16, 0.18, 1.38, 6, color, Vector3(0.47, 0, 0), 0.85)
+			cylinder(root, 0.62, 0.62, 0.14, 6, GOLD, Vector3(0, 0.78, 0), 0.75)
+			var token := BoxMesh.new()
+			token.size = Vector3(0.62, 0.64, 0.15)
+			mesh(spin, token, color, 1.0, 0.85, "PullRequestSource")
+			torus(root, 0.71, 0.023, color, Vector3(0, -0.80, 0), 0.8)
 		"service":
 			cylinder(root, 0.33, 0.45, 1.25, 4, color, Vector3.ZERO, 0.7, 0.8)
 			cylinder(spin, 0.02, 0.33, 0.26, 4, color, Vector3(0, 0.75, 0), 1.4)
@@ -179,7 +191,9 @@ static func object(parent: Node3D, entry: Dictionary, color: Color) -> Dictionar
 	vertical.visible = true
 	torus(selection, radius * 1.45, 0.025, GOLD, Vector3(0, 1.2, 0), 2.0)
 
-	var label := legend(root, String(entry["title"]).substr(0, 15), Vector3(0, 1.40, 0), 27, Color("#e4f5ff"))
+	var shown_title := ("PR #" + str(entry.get("number", "?")) if kind == "review" else
+		String(entry["title"]).substr(0, 15))
+	var label := legend(root, shown_title, Vector3(0, 1.40, 0), 27, Color("#e4f5ff"))
 	label.pixel_size = 0.013
 	var status_label := legend(root, String(entry["status"]).to_upper().substr(0, 18),
 		Vector3(0, -1.02, 0), 18, color)

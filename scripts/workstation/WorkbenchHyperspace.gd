@@ -13,10 +13,14 @@ const PROJECTION = preload("res://scripts/workstation/WorkbenchSpatialProjection
 const ARCH = preload("res://scripts/workstation/WorkbenchHoloArchitecture.gd")
 const ATLAS = preload("res://scripts/workstation/WorkbenchAtlasBridge.gd")
 const CAPSULE = preload("res://scripts/workstation/WorkbenchAgentCapsule.gd")
+const REVIEW_LEDGER = preload("res://scripts/workstation/WorkbenchReviewLedger.gd")
 
 var _snapshot: Dictionary = {}
 var _capabilities: Array[Dictionary] = []
 var _atlas_source := "not_connected"
+var _review_world_caption: Label3D
+var _review_rows: Array[Dictionary] = []
+var _review_state := "not_exported"
 var _export_button: Button
 var _graph: Dictionary = {}
 var _display: SubViewportContainer
@@ -41,6 +45,7 @@ var _cinematic := false
 var _focus_target := Vector3(0, 0.5, 0)
 var _camera_focus := Vector3(0, 0.5, 0)
 var _clock := 0.0
+var _motion_accumulator := 0.0
 var _selected := ""
 var _yaw := 0.0
 var _pitch := 0.72
@@ -54,12 +59,15 @@ func _ready() -> void:
 	_build_ui()
 	_build_world()
 	_load_atlas()
+	_load_review_queue()
 	_update_camera()
+	_refresh_motion()
 
 func set_snapshot(snapshot: Dictionary) -> void:
 	_snapshot = snapshot.duplicate(true)
 	if _scene == null:
 		return
+	_load_review_queue(false)
 	_render()
 
 func _build_ui() -> void:
@@ -80,10 +88,10 @@ func _build_ui() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	_lens = OptionButton.new()
-	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "GAMES", "CAPABILITY ATLAS"]:
+	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "GAMES", "CAPABILITY ATLAS", "PR REVIEW GATE"]:
 		_lens.add_item(name)
 	_lens.tooltip_text = "Change the resource domain, not the underlying state."
-	_lens.item_selected.connect(func(_index): _apply_visibility())
+	_lens.item_selected.connect(_on_lens_selected)
 	header.add_child(_lens)
 	_time = OptionButton.new()
 	for name in ["ALL OBSERVED", "UPDATED ≤24H", "UPDATED ≤1H"]:
@@ -108,13 +116,17 @@ func _build_ui() -> void:
 	var orbit := Button.new()
 	orbit.text = "CINEMATIC ORBIT"
 	orbit.tooltip_text = "Toggle slow presentation-only camera rotation; not a source of agent activity."
-	orbit.pressed.connect(func(): _cinematic = not _cinematic)
+	orbit.pressed.connect(func():
+		_cinematic = not _cinematic
+		_refresh_motion())
 	header.add_child(orbit)
 	var observe := Button.new()
 	_refresh_button = observe
 	observe.text = "↻  RE-OBSERVE"
 	observe.tooltip_text = "Request a fresh bounded read of the owning Studio API. Never starts a job."
-	observe.pressed.connect(func(): refresh_requested.emit())
+	observe.pressed.connect(func():
+		_load_review_queue()
+		refresh_requested.emit())
 	header.add_child(observe)
 	_display = SubViewportContainer.new()
 	_display.name = "HyperspaceViewport"
@@ -204,7 +216,7 @@ func _build_ui() -> void:
 	inspector.add_child(_export_button)
 	var instructions := Label.new()
 	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	instructions.text = "DRAG orbit   /   WHEEL dive   /   CLICK select   /   F focus\nTAB cycle   /   1-7 decks   /   R re-observe\nFourth dimension = source timestamp only.\nLuminous geometry is illustrative, NOT proof of live execution."
+	instructions.text = "DRAG orbit   /   WHEEL dive   /   CLICK select   /   F focus\nTAB cycle   /   1-8 decks   /   R re-observe\nFourth dimension = source timestamp only.\nLuminous geometry is illustrative, NOT proof of live execution."
 	instructions.add_theme_font_size_override("font_size", 11)
 	instructions.add_theme_color_override("font_color", Color("#93a9bb"))
 	inspector.add_child(instructions)
@@ -228,6 +240,14 @@ func _build_world() -> void:
 	world.environment = env
 	_viewport.add_child(world)
 	_architecture = ARCH.stage(_viewport)
+	_review_world_caption = Label3D.new()
+	_review_world_caption.text = "PR REVIEW GATE / SOURCE UNKNOWN"
+	_review_world_caption.font_size = 42
+	_review_world_caption.pixel_size = 0.016
+	_review_world_caption.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_review_world_caption.modulate = Color("#ffe0a1")
+	_review_world_caption.position = Vector3(0, 9.5, 0)
+	_viewport.add_child(_review_world_caption)
 	_make_orbit(13.0, -4.2, Color("#57416b"))
 	var lamp := OmniLight3D.new()
 	lamp.position = Vector3(0, 7, 6)
@@ -263,13 +283,24 @@ func _load_atlas() -> void:
 	if _scene != null:
 		_render()
 
+func _load_review_queue(redraw: bool = true) -> void:
+	var source: Dictionary = REVIEW_LEDGER.read_optional()
+	_review_rows.clear()
+	_review_state = String(source.get("reason", "unknown"))
+	if source.get("ok", false):
+		_review_state = "observed"
+		for item in source.get("items", []):
+			_review_rows.append(item.duplicate(true))
+	if redraw and _scene != null:
+		_render()
+
 func _render() -> void:
 	for child in _scene.get_children():
 		_scene.remove_child(child)
 		child.queue_free()
 	_meshes.clear()
 	_links.clear()
-	_graph = PROJECTION.project(_snapshot, _capabilities, _atlas_source)
+	_graph = PROJECTION.project(_snapshot, _capabilities, _atlas_source, _review_rows)
 	var lookup: Dictionary = {}
 	for entry in _graph.get("nodes", []):
 		var id: String = entry["key"]
@@ -280,19 +311,44 @@ func _render() -> void:
 		var b: String = link["to"]
 		if lookup.has(a) and lookup.has(b):
 			var relation: Node3D = ARCH.evidence_link(_scene, lookup[a]["position"], lookup[b]["position"])
-			_links.append({"root": relation, "from": a, "to": b})
+			var live_relation: bool = (lookup[b]["kind"] == "mission" and lookup[b]["status"] == "running")
+			var packet_shape := SphereMesh.new()
+			packet_shape.radius = 0.13
+			packet_shape.height = 0.26
+			packet_shape.radial_segments = 10
+			packet_shape.rings = 6
+			var packet := ARCH.mesh(relation, packet_shape, Color("#f7e5a3"), 1.6, 1.0, "VerifiedRunningWorkPacket")
+			packet.visible = live_relation
+			packet.position = lookup[a]["position"]
+			_links.append({"root": relation, "from": a, "to": b,
+				"packet": packet, "active": live_relation,
+				"start": lookup[a]["position"], "end": lookup[b]["position"]})
 	_apply_visibility()
 	_refresh_inspector()
+
+func _on_lens_selected(index: int) -> void:
+	if index == 7:
+		# Looking down into the high PR gate is a navigation affordance.
+		# No actor execution is inferred from the camera movement.
+		_yaw = 0.0
+		_pitch = 0.65
+		_distance = 27.0
+		_focus_target = Vector3(0, 6.5, 0)
+		_camera_focus = _focus_target
+		_update_camera()
+	_apply_visibility()
 
 func _apply_visibility() -> void:
 	if _lens == null or _time == null:
 		return
-	var selected_domain: String = ["all", "rig", "project", "mission", "service", "game", "capability"][_lens.selected]
+	var selected_domain: String = ["all", "rig", "project", "mission", "service", "game", "capability", "review"][_lens.selected]
 	for id in _meshes:
 		var item: Dictionary = _meshes[id]
 		var entry: Dictionary = item["entry"]
 		var domain_ok: bool = (selected_domain == "all" or entry["kind"] == selected_domain
 			or (selected_domain == "game" and entry.get("game", false)))
+		if entry["kind"] == "review" and selected_domain == "all" and int(entry.get("queue_index", 0)) >= 6:
+			domain_ok = false
 		var time_ok := true
 		if entry["kind"] == "mission" and (_time.selected > 0 or (_time_check != null and _time_check.button_pressed)):
 			var stamp := String(entry.get("updated_at", ""))
@@ -324,9 +380,15 @@ func _apply_visibility() -> void:
 		feeds.get("mission_feed_state", "unknown"),
 		feeds.get("service_feed_state", "unknown")
 	]
+	if _review_world_caption != null:
+		_review_world_caption.text = ("PR ADMISSION / %d SNAPSHOT-VERIFIED" % int(_graph.get("review_count", 0))
+			if _review_state == "observed" else "PR ADMISSION / " + _review_state.to_upper())
+	_status.text += "     |     REVIEWS %d / %s" % [
+		int(_graph.get("review_count", 0)), _review_state]
 	_status.text += "     |     ATLAS %d STATIC (%d hidden) / %s" % [
 		int(_graph.get("atlas_count", 0)), int(_graph.get("atlas_omitted", 0)), _atlas_source]
 	_update_label_lod()
+	_refresh_motion()
 
 func _update_label_lod() -> void:
 	## Projection geometry is dense. Do not flood the theatre with billboards.
@@ -340,9 +402,13 @@ func _update_label_lod() -> void:
 			_lens.selected == 3 and kind == "mission" or
 			_lens.selected == 4 and kind == "service" or
 			_lens.selected == 5 and row["entry"].get("game", false) or
-			_lens.selected == 6 and kind == "capability")
+			_lens.selected == 6 and kind == "capability" or
+			_lens.selected == 7 and kind == "review")
+		var priority_review := (kind == "review" and _lens.selected == 7 and
+			int(row["entry"].get("queue_index", 999)) < 5)
 		row["label"].visible = row["root"].visible and (focused or kind == "rig" or
-			(domain_only and context_zoom))
+			priority_review or (domain_only and context_zoom and
+			(kind != "review" or int(_graph.get("review_count", 0)) <= 6)))
 		row["status_label"].visible = row["root"].visible and focused
 
 func _update_camera() -> void:
@@ -352,6 +418,8 @@ func _update_camera() -> void:
 	_camera.position = center + Vector3(
 		sin(_yaw) * cos(_pitch), sin(_pitch), cos(_yaw) * cos(_pitch)) * _distance
 	_camera.look_at(center, Vector3.UP)
+	if _viewport != null:
+		_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 func _on_view_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -387,7 +455,7 @@ func _on_view_input(event: InputEvent) -> void:
 			_focus_next()
 		elif code == KEY_R:
 			refresh_requested.emit()
-		elif code >= KEY_1 and code <= KEY_6:
+		elif code >= KEY_1 and code <= KEY_8:
 			_lens.select(code - KEY_1)
 			_apply_visibility()
 		else:
@@ -457,9 +525,8 @@ func _refresh_inspector() -> void:
 	if entry.has("updated_at") and not String(entry["updated_at"]).is_empty():
 		_info.text += "\n\nSOURCE UPDATED\n" + String(entry["updated_at"])
 	var kind := String(entry["kind"])
-	_export_button.disabled = false
-	_open_button.disabled = not ["rig", "project", "mission"].has(kind)
-	_open_button.disabled = not ["rig", "project", "mission", "service"].has(kind)
+	_export_button.disabled = kind == "review"
+	_open_button.disabled = not ["rig", "project", "mission", "service", "review"].has(kind)
 	_compose_button.disabled = not (kind == "project" and entry.get("observed", false)) and not (
 		kind == "mission" and not String(entry.get("repo", "")).is_empty())
 	_focus_button.disabled = false
@@ -478,6 +545,13 @@ func _refresh_inspector() -> void:
 	elif kind == "mission":
 		_info.text += "\n\nOWNING REPOSITORY\n" + String(entry.get("repo", "UNREPORTED"))
 		_info.text += "\n\nStudio controls approval, runner, receipt and promotion."
+	elif kind == "review":
+		_info.text += "\n\nEXACT HEAD\n" + String(entry.get("head", "UNKNOWN"))
+		_info.text += "\n\nSOURCE-SAMPLED REVIEW LANE\n" + String(entry.get("lane", ""))
+		_info.text += "\n\nCI / REVIEW\n" + String(entry.get("ci", "")) + " / " + String(entry.get("review", ""))
+		_info.text += "\n\nOBSERVED BLOCKERS\n" + ", ".join(entry.get("blockers", []))
+		_info.text += "\n\nACTOR CANDIDATE (NOT ASSIGNED)\n" + String(entry.get("suggested_actor", "UNOBSERVED"))
+		_info.text += "\n\nGSV gate MUST recheck this exact head. Open PR Operations for investigation."
 	elif kind == "project":
 		_info.text += "\n\nREPOSITORY\n" + String(entry.get("repo", ""))
 		_info.text += "\n\nLaunchable game: UNVERIFIED / requires game-specific playtest evidence."
@@ -491,6 +565,7 @@ func _focus_selected() -> void:
 	_distance = 7.4 if _meshes[_selected]["entry"]["kind"] == "rig" else 6.6
 	_cinematic = false
 	_update_label_lod()
+	_refresh_motion()
 
 func _focus_next() -> void:
 	var keys: Array[String] = []
@@ -505,22 +580,53 @@ func _focus_next() -> void:
 	_select(next_key)
 	_focus_selected()
 
+func _refresh_motion() -> void:
+	if _viewport == null:
+		return
+	var moving := _camera_focus.distance_to(_focus_target) > 0.028
+	var observed_work := false
+	for link in _links:
+		if link.get("active", false) and link["root"].visible:
+			observed_work = true
+			break
+	# Completely stop frame callbacks when there is no source-observed
+	# work and no operator camera travel. A status colour isn't activity.
+	set_process(_cinematic or moving or observed_work)
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+
 func _process(delta: float) -> void:
 	if not is_visible_in_tree():
 		return
-	_clock += minf(delta, 0.1)
+	var moving := _camera_focus.distance_to(_focus_target) > 0.028
+	_motion_accumulator += minf(delta, 0.1)
+	# 30 fps for operator camera travel, 12 fps for real work packets.
+	var interval := 0.033 if moving else 0.083
+	if _motion_accumulator < interval:
+		return
+	var elapsed := minf(_motion_accumulator, 0.14)
+	_motion_accumulator = 0.0
+	_clock += elapsed
 	if _cinematic and not _mouse_held:
-		_yaw += delta * 0.07
-	_camera_focus = _camera_focus.lerp(_focus_target, clampf(delta * 5.0, 0.0, 1.0))
-	_update_camera()
-	for item in _architecture.get("animated", []):
-		if is_instance_valid(item):
-			item.rotate_y(delta * 0.10)
+		_yaw += elapsed * 0.07
+	if moving:
+		_camera_focus = _camera_focus.lerp(_focus_target, clampf(elapsed * 5.0, 0.0, 1.0))
+		_update_camera()
+	if _cinematic:
+		for dial in _architecture.get("animated", []):
+			if is_instance_valid(dial):
+				dial.rotate_y(elapsed * 0.12)
+	for link in _links:
+		if link.get("active", false) and link["root"].visible:
+			var fraction := fposmod(_clock * 0.27, 1.0)
+			link["packet"].position = link["start"].lerp(link["end"], fraction)
+			link["packet"].visible = true
 	for record in _meshes.values():
-		var status := String(record["entry"]["status"])
-		record["spin"].rotate_y(delta * (0.65 if status in ["running", "queued"] else 0.06))
-		if record["halo"].visible:
-			record["pulse"].scale = Vector3.ONE * (1.0 + 0.09 * sin(_clock * 2.0))
+		if record["entry"]["kind"] == "mission" and record["entry"]["status"] == "running" and record["root"].visible:
+			record["spin"].rotate_y(elapsed * 0.75)
+	# Single invalidation. The immutable review / atlas / rig geometry
+	# never continuously renders, regardless of its visual complexity.
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	_refresh_motion()
 
 func _export_handoff() -> void:
 	if not _meshes.has(_selected) or _export_button.disabled:
@@ -545,6 +651,9 @@ func _open_selected() -> void:
 	if not _meshes.has(_selected) or _open_button.disabled:
 		return
 	var item: Dictionary = _meshes[_selected]["entry"]
+	if item["kind"] == "review":
+		resource_activated.emit({"kind": "reviews", "id": "reviews", "name": "Review Operations"})
+		return
 	if item["kind"] == "service":
 		resource_activated.emit({"kind": "services", "id": "services", "name": "Observed Services"})
 		return

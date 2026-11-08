@@ -22,6 +22,15 @@ launch the experience. See [HOLO DIVE operational stage](docs/HOLODIVE_OPERATION
 and [Software Factory Seat](docs/WORKSTATION_FACTORY_SEAT.md) for exact API
 boundaries, tests, and remaining live software-build acceptance gates.
 
+**REVIEW OPS (F8)** is a new source-bound GitHub PR investigation instrument.
+Run **EXPORT_REVIEW_QUEUE.cmd** to gather a bounded read-only exact-head
+snapshot, then use the searchable queue or select **PR REVIEW GATE** in
+HYPERSPACE. No reviews/merges are performed by the renderer. See
+[Review Operations](docs/REVIEW_OPERATIONS_WORKSTATION.md) and the
+[Bakeoff cross-reference](docs/COCKPIT_BAKEOFF_CROSS_REFERENCE.md).
+Running-mission work packets animate only on verified project-to-mission
+edges; idle 3D rendering is invalidation-driven.
+
 ## Status
 
 A working personal tool, not a general-purpose product: no release and no packaged

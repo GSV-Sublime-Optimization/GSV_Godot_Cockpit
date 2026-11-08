@@ -10,12 +10,13 @@ const MAX_PROJECTS := 32
 const MAX_MISSIONS := 24
 const MAX_SERVICES := 24
 const MAX_CAPABILITIES := 24
+const MAX_REVIEWS := 16
 const BODY_POSITIONS := [
 	Vector3(-8.0, -3.0, -4.0), Vector3(8.0, -3.0, -4.0),
 	Vector3(-8.0, -3.0, 4.0), Vector3(8.0, -3.0, 4.0),
 ]
 
-static func project(snapshot: Dictionary, capability_snapshot: Array = [], atlas_source: String = "not_connected") -> Dictionary:
+static func project(snapshot: Dictionary, capability_snapshot: Array = [], atlas_source: String = "not_connected", review_snapshot: Array = []) -> Dictionary:
 	var nodes: Array[Dictionary] = []
 	var edges: Array[Dictionary] = []
 	var by_key: Dictionary = {}
@@ -141,9 +142,38 @@ static func project(snapshot: Dictionary, capability_snapshot: Array = [], atlas
 			"position": _orbit(i, mini(MAX_CAPABILITIES, allowed.size()), 13.0, -4.2, 0.26),
 			"observed": false, "admitted": false
 		})
+	var pr_count := mini(MAX_REVIEWS, review_snapshot.size())
+	for i in range(pr_count):
+		var row: Variant = review_snapshot[i]
+		if typeof(row) != TYPE_DICTIONARY:
+			continue
+		var key := String(row.get("key", ""))
+		var head := String(row.get("head", ""))
+		var lane := String(row.get("lane", ""))
+		if key.is_empty() or head.length() != 40 or lane.is_empty():
+			continue
+		var status := ("failed" if row.get("ci") == "failed" else
+			"awaiting_approval" if lane == "independent_review" else
+			"approved" if lane == "gate_recheck_candidate" else
+			"proposed" if row.get("draft", false) else "stale")
+		_push(nodes, by_key, {
+			"key": "review:" + key, "kind": "review", "id": key,
+			"number": int(row.get("number", 0)), "queue_index": i,
+			"title": String(row.get("repo", "")).get_file() + "#" + str(row.get("number", 0)),
+			"detail": String(row.get("title", "")).substr(0, 110),
+			"status": status, "head": head, "lane": lane,
+			"ci": String(row.get("ci", "unobserved")),
+			"review": String(row.get("review", "UNVERIFIED")),
+			"blockers": row.get("blockers", []).duplicate(true),
+			"suggested_actor": String(row.get("suggested_actor", "")),
+			"source": "GitHub gh-cli export; advisory only",
+			"position": _orbit(i, pr_count, 11.0, 7.0, 0.22),
+			"observed": true, "admitted": false
+		})
 	return {"nodes": nodes, "edges": edges, "feeds": state, "source": "KiloCore Studio",
 		"atlas_source": atlas_source, "atlas_count": allowed.size(),
-		"atlas_omitted": maxi(0, allowed.size() - MAX_CAPABILITIES), "is_fixture": false}
+		"atlas_omitted": maxi(0, allowed.size() - MAX_CAPABILITIES),
+		"review_count": pr_count, "is_fixture": false}
 
 static func _push(nodes: Array[Dictionary], lookup: Dictionary, entry: Dictionary) -> void:
 	if lookup.has(entry["key"]):
