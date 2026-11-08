@@ -22,6 +22,7 @@ const MAX_BODY_BYTES := 8192
 
 var _request: HTTPRequest
 var _pending: bool = false
+var _request_started_ms: int = 0
 var _last_good: Dictionary = {}
 var _observed_at_ms: int = 0
 var _failure: String = "not_observed"
@@ -37,6 +38,9 @@ func observe() -> bool:
 	if _pending:
 		return false
 	_pending = true
+	# Slice 7: the round-trip is measured here so the Gateway card can grow
+	# from the single word "ok" to status + latency (design §2).
+	_request_started_ms = Time.get_ticks_msec()
 	# This adapter is specifically a same-host observation. Another machine
 	# needs an authenticated, Kilo_Core-owned transport, not a configurable URL.
 	var result := _request.request(
@@ -81,6 +85,7 @@ func _on_request_completed(result: int, response_code: int,
 	_observed_at_ms = Time.get_ticks_msec()
 	_last_good = projection["observation"].duplicate(true)
 	_last_good["observed_at_ms"] = _observed_at_ms
+	_last_good["latency_ms"] = Time.get_ticks_msec() - _request_started_ms
 	_failure = ""
 	observation_changed.emit(current_observation())
 

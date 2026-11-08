@@ -67,6 +67,9 @@ func _run() -> void:
 		_fail("no TabContainer found under the main scene")
 	else:
 		_check_tab_surface(tabs)
+		# Slice 7: the entry boots into the room, not the Status log.
+		if tabs.current_tab != 13 or tabs.get_tab_title(tabs.current_tab) != "Hologram":
+			_fail("boot tab is '%s' (%d), expected 'Hologram' (13)" % [tabs.get_tab_title(tabs.current_tab), tabs.current_tab])
 		await _check_lazy_tabs(tabs)
 
 	main.queue_free()

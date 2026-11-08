@@ -25,8 +25,23 @@ extends Node3D
 ## (paint-first-then-probe); senses start after first paint. The volume mesh
 ## is never rotated — the raymarcher marches in object space and assumes a
 ## translation + uniform-scale-only transform (see shaders/holo_volume.gdshader).
+##
+## Slice 7 (alive): the room boots as the default view with the local rig
+## (MSI) selected; motion is event-driven only (the 14 s slice sweep and the
+## sin(t) desk flicker are removed — the slice advances one step per
+## observation, degraded amplitude is a state value); seats read live
+## activity from the CHORUS feed.json smiths stream where available and are
+## otherwise labelled "seen 2026-11-07"; the web nodes CHATDEV / OLLAMA /
+## SKYCLAW are spine observations, not literals; selection (one model for
+## rigs / services / seats / PRs / missions / Atlas entries / PUs) glides
+## the camera, dims the rest to 40%, and reports to HoloTab's detail panel.
 
 signal ledger_changed(text: String)
+signal selection_changed(node: Dictionary)
+signal needs_changed(items: Array)
+signal tape_changed(events: Dictionary)
+signal suggestions_changed(suggestions: Dictionary)
+signal doors_changed(doors: Array)
 
 const ENTITY_SESSION_SCENE: PackedScene = preload("res://scenes/EntitySession.tscn")
 const HOLO_LAYER_SCRIPT: Script = preload("res://scripts/holo/HoloLayer.gd")
@@ -36,13 +51,22 @@ const DEV_MENTOR_BRIDGE: Script = preload("res://scripts/holo/DevMentorObservati
 const FLEET_READER: Script = preload("res://scripts/holo/FleetTelemetryReader.gd")
 const ATLAS_READER: Script = preload("res://scripts/holo/CapabilityAtlasReader.gd")
 const ATLAS_LAYER_SCRIPT: Script = preload("res://scripts/holo/CapabilityAtlasLayer.gd")
+const CHORUS_READER: Script = preload("res://scripts/holo/ChorusFeedReader.gd")
+const EVENTS_READER: Script = preload("res://scripts/holo/CockpitEventsReader.gd")
+const PU_READER: Script = preload("res://scripts/holo/PuQueueReader.gd")
+const SUGGESTIONS_READER: Script = preload("res://scripts/holo/CockpitSuggestionsReader.gd")
+const SYNC_DOORS: Script = preload("res://scripts/holo/SyncDoors.gd")
+const SELECTION_SCRIPT: Script = preload("res://scripts/holo/HoloSelection.gd")
 
 const SLICE_AXES: PackedStringArray = ["time", "sense", "age"]
 ## Slice sweep ranges, in world units of the volume's own data axes:
 ## time cuts vertically (magnitude), sense cuts across sense index (x),
 ## age cuts across the age axis (z). The slice plane is the human's inquiry
 ## into the dataset embedded in the volume — a data axis, not just world_y.
-const SLICE_CYCLE_SECONDS := 14.0
+## Slice 7: the slice plane is EVENT-STEPPED, not timer-swept. Each new
+## observation advances it one step (16 steps across the axis range); a
+## still colony holds a still plane. The old 14 s sweep is removed.
+const SLICE_STEPS := 16
 
 var _camera: Camera3D
 var _camera_base: Vector3 = Vector3(0.0, 9.5, 8.5)
@@ -61,7 +85,8 @@ var _volume_label: Label3D
 var _web_instance: MeshInstance3D
 var _skyclaw_desk_mat: StandardMaterial3D
 var _slice_axis_index: int = 0
-var _slice_time: float = 0.0
+var _slice_step: int = 0
+var _slice_dirty: bool = true
 var _simulated_density: bool = false
 var _mouse_pos: Vector2 = Vector2.ZERO
 var _mouse_in_view: bool = false
@@ -69,6 +94,27 @@ var _model: Dictionary = {}
 var _mentor_observation: Dictionary = {}
 var _density: Dictionary = {}
 var _seat_count: int = 0
+var _chorus_reader: Node
+var _chorus: Dictionary = {}
+var _events_reader: Node
+var _events: Dictionary = {}
+var _pu_reader: Node
+var _pu: Dictionary = {}
+var _suggestions_reader: Node
+var _suggestions: Dictionary = {}
+var _selection: HoloSelection
+var _selection_nodes: Array = []
+var _needs_items: Array = []
+var _doors: Array = []
+var _seat_labels: Dictionary = {}
+var _seat_mats: Dictionary = {}
+var _seat_anchors: Dictionary = {}
+var _gliding: bool = false
+var _glide_t: float = 0.0
+var _glide_from_pos: Vector3 = Vector3.ZERO
+var _glide_to_pos: Vector3 = Vector3.ZERO
+var _glide_from_target: Vector3 = Vector3.ZERO
+var _glide_to_target: Vector3 = Vector3.ZERO
 
 
 func _ready() -> void:
@@ -85,30 +131,70 @@ func _ready() -> void:
 	_mount_fleet_reader()
 	_mount_atlas_layer()
 	_mount_atlas_reader()
+	_mount_chorus_reader()
+	_mount_events_reader()
+	_mount_pu_reader()
+	_mount_suggestions_reader()
+	_selection = SELECTION_SCRIPT.new()
 	_rebuild_density()
 	_rebuild_web()
 	_refresh_layer_texts()
+	_rebuild_selection_nodes()
+	_build_needs_items()
+	_build_doors()
+	# Default selection: the local rig (MSI) — never Xanadu. The camera
+	# starts on it; there is no glide at boot, the boot IS the focus event.
+	var default_node := HoloSelection.default_node(_selection_nodes)
+	if not default_node.is_empty():
+		_selection.select(default_node)
+		_apply_selection_camera()
+		_apply_focus_dim()
 	_emit_ledger()
 	_observe_after_paint()
 
 
+## Slice 7: the room's _process does work ONLY while something is actually
+## happening — a camera glide (click event), pointer parallax (pointer
+## event), a pull animating toward its target (click event), or a slice step
+## (observation event). A still colony costs ~nothing per frame: no timers,
+## no sin(t), no always-on animation. If nothing happens the room goes
+## honestly still.
 func _process(delta: float) -> void:
-	_slice_time += delta
-	_update_camera_parallax()
+	var camera_moved := false
+	if _gliding:
+		camera_moved = _step_glide(delta)
+	elif not _selection.has_selection():
+		camera_moved = _update_camera_parallax()
+	if _slice_dirty:
+		_update_slice_uniform()
+		_slice_dirty = false
+	if not _needs_frame(camera_moved):
+		return
 	for layer in _layers:
 		(layer as HoloLayer).update_frame(delta, _camera)
 	if _atlas_layer != null:
 		_atlas_layer.update_frame(delta, _camera)
-	_update_slice_uniform()
-	if _skyclaw_desk_mat != null:
-		# The degraded desk flickers: honest about Skyclaw's state.
-		_skyclaw_desk_mat.emission_energy_multiplier = 0.6 + 0.5 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 180.0))
+
+
+## True while a pull is still animating, the camera just moved (layers must
+## re-billboard), or a glide is in flight. Everything else is idle.
+func _needs_frame(camera_moved: bool) -> bool:
+	if camera_moved or _gliding:
+		return true
+	for layer in _layers:
+		var l := layer as HoloLayer
+		if absf(l.pull - l.pull_target) > 0.001:
+			return true
+	if _atlas_layer != null and absf(_atlas_layer.pull - _atlas_layer.pull_target) > 0.001:
+		return true
+	return false
 
 
 # ── Public API (called by HoloTab's buttons and pointer forwarding) ──────────
 
 func cycle_slice_axis() -> String:
 	_slice_axis_index = (_slice_axis_index + 1) % SLICE_AXES.size()
+	_advance_slice()
 	_emit_ledger()
 	return SLICE_AXES[_slice_axis_index]
 
@@ -179,6 +265,18 @@ func pointer_moved(screen_pos: Vector2) -> void:
 func pointer_clicked(screen_pos: Vector2) -> void:
 	_mouse_pos = screen_pos
 	_mouse_in_view = true
+	# Seats first (they sit in front of the table), then layers, then the
+	# Atlas header — nearest hit wins. A hit SELECTS the node (camera glides,
+	# room filters, detail panel reports); the layer also lifts. Clicking
+	# empty space clears the selection back to the whole room.
+	for seat_id in _seat_anchors.keys():
+		var anchor := _seat_anchors[seat_id] as Node3D
+		var seat_hit: Dictionary = HoloCoordinateStack.hit_layer(
+			_camera, screen_pos, anchor, Vector2(0.6, 0.9)
+		)
+		if bool(seat_hit.get("hit", false)):
+			select_node("seat", String(seat_id))
+			return
 	var entries: Array = []
 	for i in _layers.size():
 		var layer := _layers[i] as HoloLayer
@@ -194,9 +292,12 @@ func pointer_clicked(screen_pos: Vector2) -> void:
 		if bool(hit.get("hit", false)):
 			if _atlas_layer != null and node == _atlas_layer.header_node():
 				_atlas_layer.toggle_pull()
-			else:
-				(node as HoloLayer).toggle_pull()
+				return
+			var layer := node as HoloLayer
+			layer.toggle_pull()
+			select_node(_layer_kind(layer.layer_id), _layer_node_id(layer.layer_id))
 			return
+	reset_view()
 
 
 func layer_count() -> int:
@@ -217,6 +318,166 @@ func get_session() -> Node:
 
 func density_state() -> Dictionary:
 	return _density
+
+
+# ── Selection (Slice 7, design §3) ───────────────────────────────────────────
+
+func select_node(kind: String, node_id: String) -> void:
+	var node := HoloSelection.find_node(_selection_nodes, kind, node_id)
+	if node.is_empty():
+		return
+	_selection.select(node)
+	_start_glide(_focus_position(node), _focus_target(node))
+	_apply_focus_dim()
+	var layer_id := String(node.get("layer_id", ""))
+	if not layer_id.is_empty() and _layer_by_id.has(layer_id):
+		(_layer_by_id[layer_id] as HoloLayer).pull_target = 1.0
+	selection_changed.emit(_selection.selected())
+	_emit_ledger()
+
+
+func reset_view() -> void:
+	_selection.clear()
+	_start_glide(_camera_base, Vector3(0.0, 1.0, 0.0))
+	_apply_focus_dim()
+	selection_changed.emit({})
+	_emit_ledger()
+
+
+func selected_node() -> Dictionary:
+	return _selection.selected()
+
+
+func selection_nodes() -> Array:
+	return _selection_nodes.duplicate()
+
+
+func needs_items() -> Array:
+	return _needs_items.duplicate()
+
+
+func doors() -> Array:
+	return _doors.duplicate()
+
+
+func current_chorus() -> Dictionary:
+	return _chorus
+
+
+func current_events() -> Dictionary:
+	return _events
+
+
+func current_pu() -> Dictionary:
+	return _pu
+
+
+func current_suggestions() -> Dictionary:
+	return _suggestions
+
+
+func _focus_position(node: Dictionary) -> Vector3:
+	var focus: Vector3 = node.get("focus", HoloSelection.TABLE_FOCUS)
+	return focus + Vector3(0.0, 4.5, 6.0)
+
+
+func _focus_target(node: Dictionary) -> Vector3:
+	return node.get("focus", HoloSelection.TABLE_FOCUS)
+
+
+func _apply_selection_camera() -> void:
+	if not _selection.has_selection():
+		_camera.position = _camera_base
+		_camera.look_at(_camera_target, Vector3.UP)
+		return
+	var node := _selection.selected()
+	_camera.position = _focus_position(node)
+	_camera.look_at(_focus_target(node), Vector3.UP)
+	_camera_target = _focus_target(node)
+
+
+func _start_glide(to_pos: Vector3, to_target: Vector3) -> void:
+	_glide_from_pos = _camera.position
+	_glide_to_pos = to_pos
+	_glide_from_target = _camera_target
+	_glide_to_target = to_target
+	_glide_t = 0.0
+	_gliding = true
+
+
+func _step_glide(delta: float) -> bool:
+	_glide_t += delta / 0.9
+	var t := clampf(_glide_t, 0.0, 1.0)
+	var smooth := t * t * (3.0 - 2.0 * t)
+	_camera.position = _glide_from_pos.lerp(_glide_to_pos, smooth)
+	var target := _glide_from_target.lerp(_glide_to_target, smooth)
+	_camera.look_at(target, Vector3.UP)
+	if t >= 1.0:
+		_gliding = false
+		_camera_target = _glide_to_target
+	return true
+
+
+## Non-focused layers and seats dim to 40% but stay visible — context is
+## never deleted (design §3.2). Layers with no selection node (terminals,
+## Mind View) dim whenever anything is selected.
+func _apply_focus_dim() -> void:
+	for layer in _layers:
+		var l := layer as HoloLayer
+		var ident := _layer_selection_id(l.layer_id)
+		if ident.is_empty():
+			l.set_dimmed(_selection.has_selection())
+		else:
+			l.set_dimmed(_selection.is_dimmed(ident))
+	for seat_id in _seat_labels.keys():
+		var dimmed := _selection.has_selection() and not (
+			_selection.selected_kind() == "seat" and _selection.selected_id() == String(seat_id)
+		)
+		_apply_seat_dim(String(seat_id), dimmed)
+
+
+func _apply_seat_dim(seat_id: String, dimmed: bool) -> void:
+	var label := _seat_labels.get(seat_id, null) as Label3D
+	if label != null:
+		label.modulate = Color(0.34, 0.36, 0.4) if dimmed else Color(0.85, 0.9, 1.0)
+	var stored: Dictionary = _seat_mats.get(seat_id, {})
+	if stored.is_empty():
+		return
+	var mat := stored.get("mat", null) as StandardMaterial3D
+	if mat == null:
+		return
+	var factor := HoloSelection.DIMMED_FACTOR if dimmed else 1.0
+	mat.albedo_color = (stored.get("albedo", Color.WHITE) as Color) * factor
+	mat.emission_energy_multiplier = float(stored.get("energy", 0.8)) * factor
+
+
+func _layer_kind(layer_id: String) -> String:
+	if layer_id.begins_with("rig-"):
+		return "rig"
+	return "service"
+
+
+func _layer_node_id(layer_id: String) -> String:
+	if layer_id.begins_with("rig-"):
+		return layer_id.trim_prefix("rig-")
+	match layer_id:
+		"studio-health":
+			return "studio"
+		"gateway-health":
+			return "gateway"
+		"constellation":
+			return "constellation"
+		"fleet-bodies":
+			return "fleet-bodies"
+		"dev-mentor-game":
+			return "dev-mentor"
+	return layer_id
+
+
+func _layer_selection_id(layer_id: String) -> Dictionary:
+	if layer_id.begins_with("terminal-") or layer_id == "mind-view":
+		return {}
+	return {"kind": _layer_kind(layer_id), "id": _layer_node_id(layer_id)}
 
 
 # ── Construction ─────────────────────────────────────────────────────────────
@@ -356,14 +617,22 @@ func _build_seats() -> void:
 		desk.mesh = desk_mesh
 		desk.position = pos + Vector3(0.0, 0.75, 0.0)
 		add_child(desk)
+		_seat_anchors[String(seat.get("id", ""))] = desk
 
 		if bool(seat.get("creature", false)):
-			var creature_mat: StandardMaterial3D = live_mat
+			# One material instance per seat (not the shared base): selection
+			# dimming scales this seat's material without dimming the others.
+			var creature_mat: StandardMaterial3D = live_mat.duplicate()
 			match String(seat.get("state", "")):
 				"dimmed":
-					creature_mat = dimmed_mat
+					creature_mat = dimmed_mat.duplicate()
 				"degraded":
-					creature_mat = degraded_mat
+					creature_mat = degraded_mat.duplicate()
+			_seat_mats[String(seat.get("id", ""))] = {
+				"mat": creature_mat,
+				"albedo": creature_mat.albedo_color,
+				"energy": creature_mat.emission_energy_multiplier,
+			}
 			var body := MeshInstance3D.new()
 			var capsule := CapsuleMesh.new()
 			capsule.radius = 0.22
@@ -396,12 +665,9 @@ func _build_seats() -> void:
 		label.outline_size = 4
 		label.modulate = Color(0.85, 0.9, 1.0)
 		label.position = pos + Vector3(0.0, 2.0, 0.0)
-		label.text = "%s\n%s\n%s" % [
-			String(seat.get("name", "?")),
-			String(seat.get("state", "unknown")),
-			String(seat.get("note", "")),
-		]
+		label.text = _seat_label_text(seat)
 		add_child(label)
+		_seat_labels[String(seat.get("id", ""))] = label
 
 
 func _build_layers() -> void:
@@ -481,27 +747,42 @@ func _on_paint_timer() -> void:
 		_fleet_reader.read_now()
 	if is_instance_valid(_atlas_reader):
 		_atlas_reader.read_now()
+	if is_instance_valid(_chorus_reader):
+		_chorus_reader.read_now()
+	if is_instance_valid(_events_reader):
+		_events_reader.read_now()
+	if is_instance_valid(_pu_reader):
+		_pu_reader.read_now()
+	if is_instance_valid(_suggestions_reader):
+		_suggestions_reader.read_now()
 
 
 # ── Per-frame ────────────────────────────────────────────────────────────────
 
-func _update_camera_parallax() -> void:
+## Pointer parallax: the camera drifts with the pointer (a query, not an
+## ambient animation — it moves only while the pointer moves, and never
+## while a node is selected). Returns true when the camera moved.
+func _update_camera_parallax() -> bool:
 	if not _mouse_in_view:
-		return
+		return false
 	var size: Vector2 = get_viewport().get_visible_rect().size
 	if size.x <= 0.0 or size.y <= 0.0:
-		return
+		return false
 	var uv: Vector2 = _mouse_pos / size
-	# Head movement becomes a query: a small camera drift reveals the
-	# dependencies hidden behind the current layer (real parallax).
-	_camera.position = _camera_base + Vector3((uv.x - 0.5) * 1.2, (0.5 - uv.y) * 0.6, 0.0)
+	var next_pos := _camera_base + Vector3((uv.x - 0.5) * 1.2, (0.5 - uv.y) * 0.6, 0.0)
+	if next_pos.distance_to(_camera.position) < 0.001:
+		return false
+	_camera.position = next_pos
 	_camera.look_at(_camera_target, Vector3.UP)
+	return true
 
 
+## Event-stepped slice: the plane advances one of SLICE_STEPS positions per
+## observation (or per Slice-button press) and then holds. No sweep.
 func _update_slice_uniform() -> void:
 	if _volume_mat == null:
 		return
-	var t := fmod(_slice_time, SLICE_CYCLE_SECONDS) / SLICE_CYCLE_SECONDS
+	var t := float(_slice_step % SLICE_STEPS) / float(SLICE_STEPS)
 	var plane := Vector4(0.0, 1.0, 0.0, -100.0)
 	match SLICE_AXES[_slice_axis_index]:
 		"time":
@@ -511,6 +792,11 @@ func _update_slice_uniform() -> void:
 		"age":
 			plane = Vector4(0.0, 0.0, 1.0, lerpf(-1.3, 1.3, t))
 	_volume_mat.set_shader_parameter("slice_plane", plane)
+
+
+func _advance_slice() -> void:
+	_slice_step += 1
+	_slice_dirty = true
 
 
 # ── Observations -> layers / density / web / ledger ──────────────────────────
@@ -532,6 +818,38 @@ func _mount_atlas_layer() -> void:
 	_atlas_layer = ATLAS_LAYER_SCRIPT.new() as CapabilityAtlasLayer
 	_atlas_layer.name = "CapabilityAtlasLayer"
 	add_child(_atlas_layer)
+
+
+func _mount_chorus_reader() -> void:
+	_chorus_reader = CHORUS_READER.new()
+	_chorus_reader.name = "ChorusFeedReader"
+	add_child(_chorus_reader)
+	_chorus_reader.feed_changed.connect(_on_chorus_feed)
+	_chorus = _chorus_reader.current_feed()
+
+
+func _mount_events_reader() -> void:
+	_events_reader = EVENTS_READER.new()
+	_events_reader.name = "CockpitEventsReader"
+	add_child(_events_reader)
+	_events_reader.events_changed.connect(_on_events)
+	_events = _events_reader.current_events()
+
+
+func _mount_pu_reader() -> void:
+	_pu_reader = PU_READER.new()
+	_pu_reader.name = "PuQueueReader"
+	add_child(_pu_reader)
+	_pu_reader.queue_changed.connect(_on_pu_queue)
+	_pu = _pu_reader.current_queue()
+
+
+func _mount_suggestions_reader() -> void:
+	_suggestions_reader = SUGGESTIONS_READER.new()
+	_suggestions_reader.name = "CockpitSuggestionsReader"
+	add_child(_suggestions_reader)
+	_suggestions_reader.suggestions_changed.connect(_on_suggestions)
+	_suggestions = _suggestions_reader.current_suggestions()
 
 
 func _mount_atlas_reader() -> void:
@@ -556,6 +874,9 @@ func _on_fleet_telemetry(_telemetry: Dictionary) -> void:
 	_fleet = _fleet_reader.current_telemetry()
 	_rebuild_web()
 	_refresh_layer_texts()
+	_rebuild_selection_nodes()
+	_build_needs_items()
+	_advance_slice()
 	_emit_ledger()
 
 
@@ -564,13 +885,59 @@ func _on_self_model(_model_dict: Dictionary) -> void:
 	_rebuild_density()
 	_rebuild_web()
 	_refresh_layer_texts()
+	_rebuild_selection_nodes()
+	_advance_slice()
 	_emit_ledger()
 
 
 func _on_mentor_observation(_observation: Dictionary) -> void:
 	_mentor_observation = _dev_mentor.current_observation()
 	_refresh_layer_texts()
+	_advance_slice()
 	_emit_ledger()
+
+
+func _on_chorus_feed(_feed: Dictionary) -> void:
+	_chorus = _chorus_reader.current_feed()
+	_refresh_seat_labels()
+	_refresh_skyclaw_desk()
+	_rebuild_web()
+	_rebuild_selection_nodes()
+	_build_needs_items()
+	_advance_slice()
+	_emit_ledger()
+
+
+func _on_events(_events_dict: Dictionary) -> void:
+	_events = _events_reader.current_events()
+	_rebuild_selection_nodes()
+	_advance_slice()
+	tape_changed.emit(_events)
+	_emit_ledger()
+
+
+func _on_pu_queue(_queue: Dictionary) -> void:
+	_pu = _pu_reader.current_queue()
+	_rebuild_selection_nodes()
+	_build_doors()
+	_advance_slice()
+	_emit_ledger()
+
+
+func _on_suggestions(_suggestions_dict: Dictionary) -> void:
+	_suggestions = _suggestions_reader.current_suggestions()
+	suggestions_changed.emit(_suggestions)
+	_emit_ledger()
+
+
+func _rebuild_selection_nodes() -> void:
+	_selection_nodes = HoloSelection.build_nodes(_fleet, _model, _chorus, _events, _atlas, _pu)
+	# A selected node that vanished from the data clears back to the room.
+	if _selection != null and _selection.has_selection():
+		var node := HoloSelection.find_node(_selection_nodes, _selection.selected_kind(), _selection.selected_id())
+		if node.is_empty():
+			_selection.clear()
+			_apply_focus_dim()
 
 
 func _rebuild_density() -> void:
@@ -592,9 +959,11 @@ func _rebuild_web() -> void:
 	for entry in bodies:
 		if typeof(entry) == TYPE_DICTIONARY and String(entry.get("state", "")) == "reported_fresh":
 			reported += 1
-	# Node states: senses are LIVE observations; seat nodes are registry
-	# verdicts (Lane B, 2026-11-07) — dated evidence, not live probes;
-	# rig nodes are snapshot states (fleet_feed.ps1, <= 5 min old).
+	# Node states: senses are LIVE observations; rig nodes are snapshot
+	# states (fleet_feed.ps1, <= 5 min old). CHATDEV / OLLAMA / SKYCLAW are
+	# spine observations from the CHORUS feed — the hardcoded literals are
+	# gone (Slice 6 §3.3). With no feed they read "unknown", never "live":
+	# a live that can never turn red is wallpaper.
 	var rigs: Dictionary = _fleet.get("rigs", {})
 	var node_states: Array = [
 		["STUDIO", String(sensor.get("state", "unknown"))],
@@ -602,9 +971,9 @@ func _rebuild_web() -> void:
 		["CONSTELLATION", String(constellation.get("state", "unknown"))],
 		["FLEET", "live" if reported > 0 else "unknown"],
 		["DEV-MENTOR", String(_mentor_observation.get("state", "unknown"))],
-		["CHATDEV", "live"],
-		["OLLAMA", "live"],
-		["SKYCLAW", "degraded"],
+		["CHATDEV", _spine_service_state("chatdev")],
+		["OLLAMA", _spine_service_state("ollama")],
+		["SKYCLAW", _spine_service_state("skyclaw")],
 		["MSI", String((rigs.get("msi", {}) as Dictionary).get("state", "unknown"))],
 		["I3", String((rigs.get("i3", {}) as Dictionary).get("state", "unknown"))],
 		["L9", String((rigs.get("l9", {}) as Dictionary).get("state", "unknown"))],
@@ -628,6 +997,17 @@ func _rebuild_web() -> void:
 	_web_instance.mesh = mesh
 
 
+## Spine service state from the CHORUS feed: live / unavailable / unknown
+## (no feed). Skyclaw's Lane B verdict was "degraded" (2026-11-07); the
+## spine is the fresher source when the feed is live.
+func _spine_service_state(service_name: String) -> String:
+	var spine: Dictionary = _chorus.get("spine", {})
+	for svc in spine.get("services", []):
+		if typeof(svc) == TYPE_DICTIONARY and String(svc.get("name", "")) == service_name:
+			return "live" if bool(svc.get("up", false)) else "unavailable"
+	return "unknown"
+
+
 func _add_web_line(mesh: ImmediateMesh, a: Vector3, b: Vector3, color: Color) -> void:
 	mesh.surface_set_color(color)
 	mesh.surface_add_vertex(a)
@@ -649,6 +1029,59 @@ func _web_node_color(state: String) -> Color:
 			return Color(0.45, 0.6, 0.8)
 		_:
 			return Color(0.35, 0.35, 0.4)
+
+
+## A seat's billboard line: live activity (CHORUS smiths, freshest entry
+## in the last 3 h) replaces the frozen Lane B verdict; without it the seat
+## is labelled with its dated evidence — "seen 2026-11-07", never live.
+func _seat_label_text(seat: Dictionary) -> String:
+	var seat_id := String(seat.get("id", ""))
+	var line2 := String(seat.get("state", "unknown"))
+	var line3 := String(seat.get("note", ""))
+	var doing := _seat_doing(seat_id)
+	if not doing.is_empty():
+		line2 = "doing: " + String(doing.get("doing", ""))
+		line3 = HoloSelection.age_text(float(doing.get("t", 0.0))) + " · " + String(doing.get("station", ""))
+	else:
+		line3 = String(seat.get("note", "")) + " — seen 2026-11-07"
+	return "%s\n%s\n%s" % [String(seat.get("name", "?")), line2, line3]
+
+
+func _seat_doing(seat_id: String) -> Dictionary:
+	var best: Dictionary = {}
+	var best_t := 0.0
+	var now := Time.get_unix_time_from_system()
+	for entry in _chorus.get("smiths", []):
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var mapped := String(HoloSelection.SMITHS_SEAT.get(String(entry.get("name", "")).to_lower(), ""))
+		if mapped != seat_id:
+			continue
+		var t := float(entry.get("t", 0.0))
+		if now - t > 10800.0:
+			continue
+		if t > best_t:
+			best_t = t
+			best = entry
+	return best
+
+
+func _refresh_seat_labels() -> void:
+	for seat in HoloLayerRegistry.seat_defs():
+		var seat_id := String(seat.get("id", ""))
+		var label := _seat_labels.get(seat_id, null) as Label3D
+		if label != null:
+			label.text = _seat_label_text(seat)
+
+
+## Skyclaw's desk amplitude is a state value, not a timer: fixed emission
+## while the spine reports Skyclaw up, dim while down/unknown. Called on
+## chorus feed changes — never per frame (Slice 7).
+func _refresh_skyclaw_desk() -> void:
+	if _skyclaw_desk_mat == null:
+		return
+	var state := _spine_service_state("skyclaw")
+	_skyclaw_desk_mat.emission_energy_multiplier = 0.8 if state == "live" else 0.35
 
 
 func _refresh_layer_texts() -> void:
@@ -713,10 +1146,20 @@ func _studio_lines(sensor: Dictionary) -> PackedStringArray:
 	var state := String(sensor.get("state", "unknown"))
 	if state == "live" or state == "stale":
 		var counts: Dictionary = sensor.get("mission_counts", {})
-		return PackedStringArray([
+		var lines := PackedStringArray([
 			"missions %d/%d/%d" % [int(counts.get("awaiting", 0)), int(counts.get("running", 0)), int(counts.get("queued", 0))],
 			"thermal: " + String(sensor.get("thermal_gate", "")),
 		])
+		# Slice 7: the 4-service colony_observation the feed already carries
+		# (dispatch / lattice-model-router / NuSyQ-Hub / OpenClaw) — the
+		# projection used to drop it, leaving the card at three zeros.
+		var headline := String(sensor.get("colony_headline", ""))
+		if not headline.is_empty():
+			lines.append(headline)
+		for svc in sensor.get("services", []):
+			if typeof(svc) == TYPE_DICTIONARY:
+				lines.append("%s %s" % [String(svc.get("id", "?")), String(svc.get("label", "?"))])
+		return lines
 	if state == "unavailable":
 		return PackedStringArray(["UNAVAILABLE", String(sensor.get("error", ""))])
 	return PackedStringArray(["unknown — not yet observed"])
@@ -725,7 +1168,13 @@ func _studio_lines(sensor: Dictionary) -> PackedStringArray:
 func _gateway_lines(gateway: Dictionary) -> PackedStringArray:
 	var state := String(gateway.get("state", "unknown"))
 	if state == "live" or state == "stale":
-		return PackedStringArray(["status " + String(gateway.get("gateway_status", ""))])
+		var lines := PackedStringArray(["status " + String(gateway.get("gateway_status", ""))])
+		# Slice 7: the card grows from one word to latency (measured by the
+		# bridge itself, round-trip ms) — the design's Gateway-card fix.
+		var latency := int(gateway.get("latency_ms", -1))
+		if latency >= 0:
+			lines.append("latency %dms" % latency)
+		return lines
 	if state == "unavailable":
 		return PackedStringArray(["UNAVAILABLE", String(gateway.get("error", ""))])
 	return PackedStringArray(["unknown — not yet observed"])
@@ -777,6 +1226,17 @@ func _rig_lines(rig_id: String, rig_name: String) -> PackedStringArray:
 		var seats := String(rig.get("seats", ""))
 		if not seats.is_empty():
 			lines.append("seats: " + seats)
+		# Slice 7: the processes block (design §4.14) lands in the fleet
+		# feed; until the feed carries it, the card says so — the rig is
+		# never shown as process-checked when it was not.
+		var processes: Dictionary = rig.get("processes", {})
+		if processes.is_empty():
+			lines.append("processes: feed predates process block")
+		else:
+			var names: PackedStringArray = []
+			for proc_name in processes.keys():
+				names.append(str(proc_name))
+			lines.append("processes: " + ", ".join(names))
 		var note := String(rig.get("note", ""))
 		if not note.is_empty():
 			lines.append(note)
@@ -802,6 +1262,107 @@ func _mentor_lines() -> PackedStringArray:
 	return PackedStringArray(["unknown — not yet observed"])
 
 
+## "What needs you" (CHORUS pattern): severity-ranked, each item = what is
+## wrong + how long noticed + measured why + copyable next move + owner.
+## Severity rank: red (confirmed failure) first, then amber.
+func _build_needs_items() -> void:
+	var items: Array = []
+	for entry in _chorus.get("doctor", []):
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var verdict := String(entry.get("verdict", ""))
+		var confirmed := verdict.begins_with("confirmed")
+		var evidence: Array = entry.get("evidence", [])
+		items.append({
+			"severity": "red" if confirmed else "amber",
+			"what": String(entry.get("key", "?")),
+			"since": String(entry.get("at", "")),
+			"why": verdict,
+			"move": "Doctor evidence: " + ("; ".join(evidence) if not evidence.is_empty() else "no evidence recorded"),
+			"owner": "Keath" if String(entry.get("key", "")).begins_with("i3:") else "MSI Claude",
+		})
+	var spine: Dictionary = _chorus.get("spine", {})
+	for svc in spine.get("services", []):
+		if typeof(svc) == TYPE_DICTIONARY and not bool(svc.get("up", true)):
+			items.append({
+				"severity": "red",
+				"what": "spine service down: " + String(svc.get("name", "?")),
+				"since": "spine feed age " + str(_chorus.get("age_ms", -1)) + " ms",
+				"why": "Dev-Mentor /api/spine/services reports up=false",
+				"move": "Check the service on the MSI, then re-probe the spine.",
+				"owner": "MSI Claude",
+			})
+	for waiting in _chorus.get("prs_waiting", []):
+		if typeof(waiting) != TYPE_DICTIONARY:
+			continue
+		items.append({
+			"severity": "amber",
+			"what": "PR waiting for a reviewer: " + String(waiting.get("repo", "")) + "#" + str(waiting.get("number", 0)),
+			"since": "opened " + String(waiting.get("created", "")),
+			"why": String(waiting.get("title", "")),
+			"move": "Review " + String(waiting.get("url", "")),
+			"owner": "reviewer",
+		})
+	var rigs: Dictionary = _fleet.get("rigs", {})
+	for rig_id in ["msi", "i3", "l9", "xanadu"]:
+		var rig: Dictionary = rigs.get(rig_id, {})
+		var state := String(rig.get("state", "unknown"))
+		if state == "stale" or state == "unavailable":
+			items.append({
+				"severity": "amber",
+				"what": "rig " + rig_id.to_upper() + " " + state,
+				"since": "fleet snapshot age " + str(_fleet.get("age_ms", -1)) + " ms",
+				"why": String(rig.get("note", "no live source")),
+				"move": "Wait for the next fleet snapshot (5 min) or check the rig directly.",
+				"owner": "fleet feed",
+			})
+	items.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var ra := 0 if String(a.get("severity", "")) == "red" else 1
+		var rb := 0 if String(b.get("severity", "")) == "red" else 1
+		return ra < rb
+	)
+	_needs_items = items
+	needs_changed.emit(_needs_items)
+
+
+func _build_doors() -> void:
+	var facts := {
+		"omnisynapse_checkout": DirAccess.dir_exists_absolute("C:/dev/active/OMNISYNAPSE"),
+		"vault_newest_age": _newest_bridge_age(),
+		"gitnexus_note": "process check owed via fleet feed processes block",
+		"pu": _pu,
+	}
+	_doors = SYNC_DOORS.build_doors(facts)
+	doors_changed.emit(_doors)
+
+
+## Newest file age under <vault>/Bridge/live — the only vault freshness the
+## room can observe without the (not installed) bridge task. Returns
+## "unknown" when the directory cannot be read.
+func _newest_bridge_age() -> String:
+	var dir := DirAccess.open("C:/dev/vault/Bridge/live")
+	if dir == null:
+		return "unknown (Bridge/live unreadable)"
+	var newest := 0
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "":
+		if not dir.current_is_dir():
+			var mtime := FileAccess.get_modified_time("C:/dev/vault/Bridge/live/" + file_name)
+			if mtime > newest:
+				newest = mtime
+		file_name = dir.get_next()
+	dir.list_dir_end()
+	if newest <= 0:
+		return "no Bridge files found"
+	var age_h := (Time.get_unix_time_from_system() - float(newest)) / 3600.0
+	if age_h < 1.0:
+		return "%d min old" % int(age_h * 60.0)
+	if age_h < 48.0:
+		return "%.1f h old" % age_h
+	return "%d d old" % int(age_h / 24.0)
+
+
 func _emit_ledger() -> void:
 	var lines: PackedStringArray = []
 	lines.append("HOLOGRAM — observation_only · actuators 0 · slice: " + SLICE_AXES[_slice_axis_index])
@@ -811,7 +1372,30 @@ func _emit_ledger() -> void:
 	lines.append(_fleet_line())
 	lines.append(_atlas_line())
 	lines.append("TERMINALS broker needed (4) · MIND VIEW incoming (PR #12)")
+	lines.append(_tape_line())
+	lines.append(_suggestions_line())
+	lines.append(SYNC_DOORS.ledger_line(_doors))
 	ledger_changed.emit("\n".join(lines))
+
+
+func _tape_line() -> String:
+	var evs: Array = _events.get("events", [])
+	if evs.is_empty():
+		return "TAPE: no events yet (cockpit_events.json empty or missing)"
+	var last: Dictionary = evs[0]
+	return "TAPE last: %s %s#%d %s" % [
+		String(last.get("kind", "?")), String(last.get("repo", "?")),
+		int(last.get("number", 0)), String(last.get("at", "")),
+	]
+
+
+func _suggestions_line() -> String:
+	var items: Array = _suggestions.get("suggestions", [])
+	var open_count := 0
+	for item in items:
+		if typeof(item) == TYPE_DICTIONARY and String(item.get("status", "")) == "open":
+			open_count += 1
+	return "SUGGESTIONS %d open / %d total (docs/suggestions/)" % [open_count, items.size()]
 
 
 func _fleet_line() -> String:
