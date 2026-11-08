@@ -232,14 +232,20 @@ def tick(state):
         e['focus'] = e.get('focus') or next((b for b in ('i3', 'msi', 'l9', 'xanadu') if b in text), 'xanadu')
     raw_channel = remote.get('channel', [])
     # Read receipts: {"kind": "read", "from": seat, "at": t} lines say "seat has read everything up to t".
-    reads = {}
+    # Two receipt shapes, both valid: a watermark {kind, from, at} (HOLOMIND) and a list {kind, from, reads: [at...]} (CHORUS).
+    reads, listed = {}, {}
     for m in raw_channel:
         if m.get('kind') == 'read':
-            reads[str(m.get('from'))] = max(reads.get(str(m.get('from')), ''), str(m.get('at', '')))
+            if isinstance(m.get('reads'), list):
+                listed.setdefault(str(m.get('from')), set()).update(str(a) for a in m['reads'])
+            else:
+                reads[str(m.get('from'))] = max(reads.get(str(m.get('from')), ''), str(m.get('at', '')))
     channel = [m for m in raw_channel if m.get('kind') != 'read']
     for i, m in enumerate(channel):
         who = str(m.get('from', ''))
-        rb = sorted(s for s, t in reads.items() if t >= str(m.get('at', '')) and s.lower() != who.lower())
+        rb = sorted({s for s, t in reads.items() if t >= str(m.get('at', ''))}
+                    | {s for s, ats in listed.items() if str(m.get('at', '')) in ats})
+        rb = [s for s in rb if s.lower() != who.lower()]
         # Anyone who replied to this sender afterwards has evidently read it.
         for n in channel[i + 1:]:
             if str(n.get('to', '')).lower() == who.lower() and str(n.get('from')) not in rb and str(n.get('from')).lower() != who.lower():
