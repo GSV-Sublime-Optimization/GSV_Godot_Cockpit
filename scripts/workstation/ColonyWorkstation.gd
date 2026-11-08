@@ -44,6 +44,10 @@ var _selected_meta: Dictionary = {}
 var _view_ready := false
 
 func _ready() -> void:
+	## Redraw only when something changed. Without this the idle 3D theatre
+	## re-renders every vsync frame (~8.8% of one core on the i3, over the
+	## bakeoff's 5% idle budget); with it idle measured ~0.3%.
+	OS.low_processor_usage_mode = true
 	theme = SKIN.make_theme()
 	_client = STUDIO_CLIENT.new()
 	add_child(_client)
