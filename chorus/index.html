@@ -440,7 +440,8 @@ function label(text, font, color) {
     const m = cx.measureText ? (cx.font = font, cx.measureText(text)) : {width: text.length * 8};
     const w = Math.ceil(m.width) + 8, h = 26, c = canvas(w * DPR, h * DPR), g = c.getContext("2d");
     g.scale(DPR, DPR); g.font = font; g.fillStyle = color; g.textAlign = "center"; g.textBaseline = "middle";
-    g.shadowColor = "rgba(0,0,0,0.8)"; g.shadowBlur = 6; g.fillText(text, w / 2, h / 2);
+    g.shadowColor = "rgba(3,5,12,0.95)"; g.shadowBlur = 7;
+    for (let i = 0; i < 3; i++) g.fillText(text, w / 2, h / 2);     // a dark halo, so threads never cut the text
     l = {c, w, h}; labels.set(key, l);
   }
   return l;
@@ -532,6 +533,7 @@ function drawSky(t) {
   for (const r of RIGS) drawRig(r, t);
   drawMoons(t, false);
   drawOrbiters(t);
+  drawWork(t);
   // 3. thoughts in flight, and where they landed
   ripples = ripples.filter(p => t - p.t0 < 2400);
   for (const p of ripples) {
@@ -781,7 +783,8 @@ async function poll() {
     const d = await r.json(); const fresh = d.events.length && d.events[d.events.length - 1].at !== events[events.length - 1]?.at;
     events = d.events; heartbeats = d.heartbeats; live = true; nowFn = () => Date.now(); setSource(); drawRiver();
     extras = {backup: d.backup, mirror: d.mirror, steward_cards: d.steward_cards || [], prs_waiting: d.prs_waiting || [],
-              channel: d.channel || [], claude_activity: d.claude_activity || [], spine: d.spine || extras.spine};
+              channel: d.channel || [], claude_activity: d.claude_activity || [], spine: d.spine || extras.spine,
+              work: d.work || extras.work};
     renderNeeds(); renderTalk(); renderTick();
     if (!card.hidden) openRig(RIGS.find(r => r.id === card.dataset.rig));
     if (fresh && !rehearsing) show(events[events.length - 1]);
@@ -862,6 +865,11 @@ function needs() {
     what: `${down.length} spine services are down on MSI`, meta: `${extras.spine.up}/${extras.spine.total} up · ${down.map(s => s.name).join(", ")}`,
     why: "Dev-Mentor's spine probes every colony service on MSI; these did not answer.",
     move: SPINE_MOVES[down[0].name] || `Check ${down[0].name}`, owner: "anyone on MSI"});
+  for (const c of workAtRisk().filter(c => c.ahead >= 3 || (c.ahead > 0 && c.dirty >= 20))) out.push({level: "notable",
+    what: `Unpushed work in ${c.label}`,
+    meta: `${c.branch || "?"} · ${c.ahead} commits ahead · ${c.dirty || 0} uncommitted${c.last_commit_h != null ? ` · last commit ${Number(c.last_commit_h).toFixed(1)} h ago` : ""}`,
+    why: "Commits that exist only on MSI are lost if the disk is.",
+    move: `git -C ${c.path} log --oneline @{u}..  (then push the branch or open a PR)`, owner: "whoever owns that repo"});
   if (extras.steward_cards.length) out.push({level: "routine", what: `${extras.steward_cards.length} questions from the xanadu Steward`,
     meta: `oldest ${Math.round(Math.max(...extras.steward_cards.map(c => c.age_d || 0)))} days`, why: "Several were answered tonight; the cards were never closed.",
     move: "Answer or close them in xanadu:~/steward/outbox/ (dev#419 has the re-checked digest)", owner: "Keath + MSI Claude"});
@@ -903,6 +911,9 @@ extras.spine = {up: 13, total: 18, services: [
   {name: "redis", tier: "lattice", up: true}, {name: "dispatch", tier: "core", up: true}, {name: "chatdev", tier: "agents", up: true},
   {name: "simulatedverse", tier: "game", up: true}, {name: "gordon", tier: "agents", up: true}, {name: "serena", tier: "tools", up: true},
   {name: "openhands", tier: "agents", up: true}, {name: "studio", tier: "ui", up: true}, {name: "rimapi", tier: "optional", up: true}]};
+
+// Work (captured 2026-11-08 ~07:50 UTC from the colony claims board and a scan of MSI's checkouts)
+extras.work = {"claims": [{"agent": "cc-d5505ce5-d44e-4df3-8e1e-", "repo": "cockpit/mindview-msiclaude", "files": ["index.html", "chorus.py", "studio_bridge.py", "test_studio_bridge.py", "work.py", "doctor.py"], "age_min": 0.6}, {"agent": "cc-d5505ce5-d44e-4df3-8e1e-", "repo": "devmentor/fleet-mode", "files": ["fleet_mode.py", "fleet.py", "main.py", "commands.py", "fleet.md", "test_fleet_mode.py"], "age_min": 3.3}, {"agent": "cc-d5505ce5-d44e-4df3-8e1e-", "repo": "scratchpad", "files": ["install_chorus_hooks.py", "summary.py", "sky.js"], "age_min": 4.9}], "at_risk": [{"path": "C:\\dev\\active\\Kilo_Core", "label": "Kilo_Core", "branch": "master", "dirty": 55, "ahead": 15, "no_upstream": false, "last_commit_h": 58.0}, {"path": "C:\\dev\\active\\Dev-Mentor", "label": "Dev-Mentor", "branch": "main", "dirty": 18, "ahead": 3, "no_upstream": false, "last_commit_h": 28.1}, {"path": "K:\\dev\\worktrees\\cockpit\\mindview-msiclaude", "label": "cockpit/mindview-msiclaude", "branch": "bakeoff/mindview-msiclaude", "dirty": 6, "ahead": 3, "no_upstream": false, "last_commit_h": 0.0}, {"path": "C:\\dev\\active\\Bandmate_Clefspace-e2e", "label": "Bandmate_Clefspace-e2e", "branch": "test/e2e-slice-walk", "dirty": 2, "ahead": 3, "no_upstream": false, "last_commit_h": 1090.4}, {"path": "C:\\dev\\active\\structured-chaos-colony-bridge", "label": "structured-chaos-colony-bridge", "branch": "kilo/handshake-packet-v0.1", "dirty": 0, "ahead": 3, "no_upstream": false, "last_commit_h": 1363.5}, {"path": "C:\\dev\\active\\clawd-code-rust", "label": "clawd-code-rust", "branch": "main", "dirty": 0, "ahead": 2, "no_upstream": false, "last_commit_h": 55.1}, {"path": "K:\\dev\\worktrees\\devmentor\\pr286", "label": "devmentor/pr286", "branch": "HEAD (no branch)", "dirty": 2046, "ahead": 0, "no_upstream": false, "last_commit_h": 2.6}, {"path": "K:\\dev\\worktrees\\pr-dev42-convergence", "label": "pr-dev42-convergence", "branch": "HEAD (no branch)", "dirty": 312, "ahead": 0, "no_upstream": false, "last_commit_h": 1030.4}]};
 
 // ---------- the spine and MSI Claude, drawn around MSI ----------
 const SPINE_MOVES = {
@@ -954,6 +965,39 @@ function drawOrbiters(t) {
   cx.globalAlpha = 1; blit(img, hx, hy, 18 + busy * 5); blit(SP.white, hx, hy, 9);
   cx.globalCompositeOperation = "source-over";
 }
+// ---------- work: who has claimed what, and what exists only on MSI ----------
+const workClaims = () => Array.isArray(extras.work?.claims) ? extras.work.claims : [];
+const workAtRisk = () => Array.isArray(extras.work?.at_risk) ? extras.work.at_risk : [];
+function claimGroups() {
+  const by = new Map();
+  for (const c of workClaims()) {
+    const g = by.get(c.repo) || {repo: c.repo || "?", agents: [], files: 0, age: Infinity};
+    if (!g.agents.includes(agentName(c.agent))) g.agents.push(agentName(c.agent));
+    g.files += (c.files || []).length; g.age = Math.min(g.age, c.age_min ?? Infinity); by.set(c.repo, g);
+  }
+  return [...by.values()];
+}
+const agentName = a => /^cc-/.test(a || "") ? `Claude ${a.slice(3, 11)}` : a || "?";
+const AGENT_TINT = a => /claude|^cc-/i.test(a) ? "--msi" : /codex|gpt/i.test(a) ? "--l9" : /goose|chatdev|openhands/i.test(a) ? "--attento" : "--xanadu";
+// Each repo someone has claimed is a small craft circling MSI, outside the spine: the bigger, the more files
+// claimed; tinted by who holds it (brass Claude, glacier Codex/GPT, amber the other agents, lilac anyone else).
+let crafts = [];
+function drawWork(t) {
+  const gs = claimGroups(); crafts = [];
+  if (!gs.length) return;
+  const [x, y] = rigXY("msi"), R = 98 * (W < 520 ? 0.8 : 1);
+  cx.globalCompositeOperation = "lighter";
+  gs.forEach((g, i) => {
+    const a = i / gs.length * 6.283 - (reduced ? 0 : t / 41000) + 0.4, mx = x + Math.cos(a) * R, my = y + Math.sin(a) * R * 0.62;
+    const img = SP.dot[AGENT_TINT(g.agents[0])], sz = 12 + Math.min(14, g.files * 1.5);
+    cx.globalAlpha = 0.9; blit(img, mx, my, sz);
+    cx.globalAlpha = 0.5;                                   // a short exhaust behind the craft
+    for (let j = 1; j <= 3; j++) { const b = a + j * 0.05; blit(img, x + Math.cos(b) * R, y + Math.sin(b) * R * 0.62, sz * (1 - j * 0.22)); }
+    crafts.push({...g, x: mx, y: my});
+  });
+  cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
+}
+const craftAt = (x, y) => crafts.find(c => Math.hypot(x - c.x, y - c.y) < 12);
 function renderTick() {
   const el = document.getElementById("claude-tick"), acts = (extras.claude_activity || []).slice(-3).reverse();
   el.replaceChildren();
@@ -1019,6 +1063,15 @@ function openRig(r) {
     if (disks.length) rows.push(`<div class="row">disks <b>${esc(disks.join(" · "))}</b></div>`);
     for (const c of hb.checks || []) rows.push(`<div class="row ${c.ok ? "" : "bad"}">${c.ok ? "ok  " : "FAIL"} <b>${esc(c.name)}</b> ${esc(String(c.detail || "").slice(0, 110))}</div>`);
   } else if (r.id !== "xanadu") rows.push(`<div class="row bad">No heartbeat yet.</div>`);
+  if (r.id === "msi") {
+    const claims = workClaims(), risk = workAtRisk();
+    if (claims.length) rows.push(`<div class="row">working now <b>${claims.length} claim${claims.length > 1 ? "s" : ""}</b> · ${esc(claimGroups().map(g => `${g.repo} (${g.agents.join(", ")})`).join(" · "))}</div>`);
+    if (extras.work?.error) rows.push(`<div class="row bad">work scan failed: ${esc(String(extras.work.error).slice(0, 90))}</div>`);
+    if (risk.length) {
+      rows.push(`<div class="row">work at risk <b>${risk.length} checkout${risk.length > 1 ? "s" : ""}</b> (riskiest first)</div>`);
+      for (const c of risk.slice(0, 5)) rows.push(`<div class="row ${c.ahead >= 3 ? "bad" : ""}">· <b>${esc(c.label)}</b> ${esc(c.branch || "?")}${c.no_upstream ? " (no upstream)" : ""} · ${c.ahead || 0} ahead · ${c.dirty || 0} dirty</div>`);
+    }
+  }
   if (r.id === "msi" && extras.spine) rows.push(`<div class="row">spine <b>${extras.spine.up}/${extras.spine.total} up</b> · down: ${esc(extras.spine.services.filter(s => !s.up).map(s => s.name).join(", ") || "none")}</div>`);
   for (const e of said) rows.push(`<div class="row">${esc(hm(e.at))} ${esc(e.mind)}: <span class="said">${esc(e.line)}</span></div>`);
   card.style.setProperty("--c", `var(${r.color})`);
@@ -1035,7 +1088,11 @@ function openRig(r) {
   card.dataset.rig = r.id;
 }
 sky.addEventListener("click", e => { const r = rigAt(e.clientX, e.clientY); if (r) openRig(r); else card.hidden = true; });
-sky.addEventListener("mousemove", e => sky.classList.toggle("pointing", !!rigAt(e.clientX, e.clientY)));
+sky.addEventListener("mousemove", e => {
+  sky.classList.toggle("pointing", !!rigAt(e.clientX, e.clientY));
+  const c = craftAt(e.clientX, e.clientY), tip = c ? `${c.repo} · ${c.agents.join(", ")} · ${c.files} file${c.files === 1 ? "" : "s"} claimed · ${Math.round(c.age)} min` : "";
+  if (sky.title !== tip) sky.title = tip;
+});
 addEventListener("keydown", e => { if (e.key === "Escape") card.hidden = true;
   const i = ["1", "2", "3", "4"].indexOf(e.key); if (i >= 0 && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) openRig(RIGS[i]); });
 
@@ -1058,6 +1115,12 @@ function buildBrief() {
   for (const e of events.slice(-5)) L.push(`  ${hm(e.at)} ${e.mind} [${e.level}]: ${e.line}  (reasons: ${(e.reasons || []).join("; ") || "none"})`);
   L.push("", "4. CONVERSATION (latest last)");
   for (const m of (extras.channel || []).slice(-8)) L.push(`  ${hm(m.at)} ${m.from} -> ${m.to}: ${m.text}`);
+  const cl = claimGroups(), risk = workAtRisk();
+  L.push("", "WORK");
+  L.push(cl.length ? `  claims: ${cl.map(g => `${g.repo} (${g.agents.join(", ")}, ${g.files} files)`).join("; ")}` : "  claims: none");
+  if (extras.work?.error) L.push(`  work scan failed: ${extras.work.error}`);
+  L.push(risk.length ? "  at risk (riskiest first):" : "  at risk: none");
+  for (const c of risk.slice(0, 8)) L.push(`    ${c.label} ${c.branch || "?"}${c.no_upstream ? " (no upstream)" : ""} · ${c.ahead || 0} ahead · ${c.dirty || 0} dirty${c.last_commit_h != null ? ` · last commit ${Number(c.last_commit_h).toFixed(1)} h ago` : ""}  ${c.path}`);
   const sp = extras.spine;
   if (sp) L.push("", `5. SPINE ${sp.up}/${sp.total} up`, `  down: ${sp.services.filter(x => !x.up).map(x => x.name + (EXPECTED_DOWN.has(x.name) ? " (expected)" : "")).join(", ") || "none"}`);
   return L.join("\n");
