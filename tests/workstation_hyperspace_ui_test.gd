@@ -93,6 +93,19 @@ func _run() -> void:
 	view._lens.select(0)
 	view._apply_visibility()
 	_assert(view.is_processing(), "restored running mission resumes meaningful animation")
+	view.set_snapshot({"tool_atlas_state": "observed",
+		"tools": [{"id": "omnisynapse", "name": "OMNISYNAPSE",
+			"status": "source_present", "path": "C:/dev/active/OMNISYNAPSE"}]})
+	_assert(view._meshes.has("tool:omnisynapse"), "opt-in local tool appears only with observed atlas")
+	view._lens.select(5)
+	view._apply_visibility()
+	_assert(view._directory_keys.size() == 1, "sixth lens filters to local tool sources")
+	view._on_directory_selected(0)
+	_assert(view._selected == "tool:omnisynapse", "tool can be selected instead of Xanadu")
+	_assert(view._open_button.disabled and view._compose_button.disabled,
+		"filesystem presence cannot authorize opening executable session or mission")
+	_assert(view._info.text.contains("not proof of a running service"),
+		"operator sees presence versus qualification nudge")
 	view.queue_free()
 	await process_frame
 	await process_frame
