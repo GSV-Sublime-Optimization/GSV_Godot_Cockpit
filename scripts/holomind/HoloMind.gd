@@ -44,6 +44,15 @@ var _flights: Array[Dictionary] = []   # real events in flight: {node, from, to,
 var _hb_age: Dictionary = {}             # last seen heartbeat age per rig, to spot a NEW heartbeat
 var _order_state: Dictionary = {}        # order id -> last seen status, to spot new orders and receipts
 var _flights_primed: bool = false
+var _districts: Node3D
+var _text_hidden: bool = false           # H: visuals only (every label and panel hidden) to dial in the look
+var _cine: bool = false                  # V: the camera follows the newest real event, then returns
+var _cine_target: Node3D = null
+var _cine_look: Vector3 = Vector3(0, 1.8, 0)
+const FLIGHT_SECONDS := 7.0              # slow enough to follow, eased in and out
+const FORGE_AT := Vector3(3.1, 0, -3.7)  # the Forge district: repositories as buildings
+const STAGE_COLOURS := {"draft": Color(0.45, 0.5, 0.62), "needs-review": Color(0.45, 0.72, 1.0), "stale-review": Color(0.7, 0.6, 1.0),
+	"changes": Color(1.0, 0.6, 0.25), "approved": Color(0.35, 0.95, 0.55)}
 var _settle: float = 3.0               # seconds of scene updates left; 0 = nothing changed, so nothing is touched or redrawn        # the first feed only records state: nothing flies for old news
 var _stars: Node3D
 var _memory: Node3D
@@ -123,6 +132,11 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_layout_ui)
 	_read_feed()
 	for arg: String in OS.get_cmdline_user_args():
+		if arg == "--visuals-only":
+			_text_hidden = true
+			_apply_text_visibility()
+		if arg == "--cine":
+			_cine = true
 		if arg.begins_with("--palette="):   # for receipts: render with the palette open on a query
 			_open_palette()
 			_palette_input.text = arg.get_slice("=", 1)
@@ -717,7 +731,9 @@ func _apply_feed() -> void:
 	_rebuild_agents()
 	_rebuild_actions()
 	_apply_activity()
+	_rebuild_districts()
 	_detect_flights()
+	_apply_text_visibility()
 	_rebuild_bench()
 	_apply_channel()
 	_count_waiting()
@@ -822,7 +838,22 @@ func _process(delta: float) -> void:
 		_read_feed()
 	# The camera moves only when you drag it (no idle drift: motion on screen must mean something).
 	var cam_want := Vector3(cos(_yaw) * cos(_pitch), sin(_pitch), sin(_yaw) * cos(_pitch)) * _dist + Vector3(0, 1.6, 0)
-	if not _cam.position.is_equal_approx(cam_want):
+	if _cine:
+		# Follow the newest real event in flight; with nothing happening, settle back to the wide view and hold.
+		var look := Vector3(0, 1.8, 0)
+		if _cine_target != null and is_instance_valid(_cine_target):
+			look = _cine_target.global_position
+			var side := Vector3(look.x, 0, look.z).normalized() if Vector3(look.x, 0, look.z).length() > 0.1 else Vector3(0, 0, 1)
+			cam_want = look + side * 4.2 + Vector3(0, 2.4, 0)
+		else:
+			_cine_target = null
+		var k := clampf(delta * 0.7, 0.0, 1.0)
+		if not _cam.position.is_equal_approx(cam_want):
+			_cam.position = _cam.position.lerp(cam_want, k)
+			_cine_look = _cine_look.lerp(look, k)
+			_cam.look_at(_cine_look, Vector3.UP)
+			_settle = maxf(_settle, 0.5)
+	elif not _cam.position.is_equal_approx(cam_want):
 		_cam.position = cam_want
 		_settle = maxf(_settle, 0.5)
 		_cam.look_at(Vector3(0, 1.8, 0), Vector3.UP)
@@ -933,7 +964,7 @@ backup %s h old%s · mirror %s h, %s failures · MSI spine %s/%s up%s" % [str(b.
 
 
 func _update_hud() -> void:
-	_hud.text = "HOLOMIND · the colony workstation (i3 Claude) · acts through orders you assign · %s · WORK WAITING: %s\n%s · motion = real events only (heartbeat → xanadu · order → seat · receipt → you) · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · F11: fullscreen · Esc: quit" % [
+	_hud.text = "HOLOMIND · the colony workstation (i3 Claude) · acts through orders you assign · %s · WORK WAITING: %s\n%s · motion = real events only (heartbeat → xanadu · order → seat · receipt → you) · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · H: visuals only · V: cinematic · F11: fullscreen · Esc: quit" % [
 		feed_note, _waiting_text, ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"] + _colony_text
 
 
@@ -1324,19 +1355,140 @@ func _fly(from: Vector3, to: Vector3, col: Color, text: String) -> void:
 	_label(text, 30, col.lightened(0.3), Vector3(0, 0.35, 0), holder)
 	holder.global_position = from
 	_flights.append({"node": holder, "from": from, "to": to, "t": 0.0})
+	_cine_target = holder   # the cinematic camera (V) follows the newest real event
+	_apply_text_visibility()
 
 
 func _update_flights(delta: float) -> void:
 	for i in range(_flights.size() - 1, -1, -1):
 		var f: Dictionary = _flights[i]
-		f["t"] = float(f["t"]) + delta / 2.5
+		f["t"] = float(f["t"]) + delta / FLIGHT_SECONDS
 		var n: Node3D = f["node"]
-		var u := clampf(float(f["t"]), 0.0, 1.0)
-		var arc := Vector3(0, 1.2 * sin(u * PI), 0)   # a visible arc so you can follow it, nothing more
+		var u := smoothstep(0.0, 1.0, clampf(float(f["t"]), 0.0, 1.0))   # ease in and out: slow, followable
+		var arc := Vector3(0, 1.6 * sin(u * PI), 0)   # a visible arc so you can follow it, nothing more
 		n.global_position = (f["from"] as Vector3).lerp(f["to"] as Vector3, u) + arc
 		if float(f["t"]) >= 1.0:
 			n.queue_free()
 			_flights.remove_at(i)
+
+
+## DISTRICTS: the colony laid out as what is actually there, rebuilt from each feed. Nothing here is decorative.
+## - Around each rig, one pylon per heartbeat check: green = passing, red = failing (height = how long it took).
+## - Around the MSI, one tower per spine service from CHORUS: cyan = up, red = down; core services stand taller.
+## - Around xanadu, one slab per open Steward decision card (the library's unanswered questions).
+## - The Forge: one building per repository. Its floors are its open PRs, stacked and coloured by pipeline stage
+##   (grey draft, blue needs review, violet stale review, orange changes requested, green approved); a red cap
+##   glows as bright as the share of its PRs failing CI.
+func _glow(col: Color, energy: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = col.darkened(0.55)
+	m.emission_enabled = true
+	m.emission = col
+	m.emission_energy_multiplier = energy
+	m.roughness = 0.35
+	m.metallic = 0.6
+	return m
+
+
+func _box(size: Vector3, mat: Material, at: Vector3, parent: Node3D) -> MeshInstance3D:
+	var b := BoxMesh.new()
+	b.size = size
+	return _mesh(b, mat, at, parent)
+
+
+func _rebuild_districts() -> void:
+	var ship: Node3D = _layer_roots[0]
+	if _districts != null:
+		_districts.queue_free()
+	_districts = Node3D.new()
+	ship.add_child(_districts)
+	var bodies: Dictionary = feed.get("bodies", {})
+	# Heartbeat check pylons around each rig.
+	for id: String in bodies:
+		var b: Dictionary = bodies[id]
+		var checks: Array = b.get("checks", []) if b.get("checks") is Array else []
+		var at: Vector3 = BODY_PLACES.get(id, Vector3.ZERO)
+		for i in checks.size():
+			var c: Dictionary = checks[i]
+			var ok := bool(c.get("ok", false))
+			var ms := float(c.get("ms")) if c.get("ms") != null else 50.0
+			var h := 0.2 + clampf(log(maxf(ms, 1.0)) / log(30000.0), 0.0, 1.0) * 0.7
+			var ang := TAU * float(i) / float(maxi(checks.size(), 1))
+			var p := at + Vector3(cos(ang) * 1.25, h * 0.5 - 0.35, sin(ang) * 1.25)
+			_box(Vector3(0.09, h, 0.09), _glow(C_CALM if ok else C_ALARM, 1.2 if ok else 3.0), p, _districts)
+			_label(String(c.get("name", "?")), 20, (C_CALM if ok else C_ALARM).lightened(0.3), p + Vector3(0, h * 0.5 + 0.12, 0), _districts)
+	# Spine service towers around the MSI.
+	var colony: Dictionary = feed.get("colony", {}) if feed.get("colony") is Dictionary else {}
+	var spine: Dictionary = colony.get("spine", {}) if colony.get("spine") is Dictionary else {}
+	var services: Array = spine.get("services", []) if spine.get("services") is Array else []
+	var msi: Vector3 = BODY_PLACES["msi"]
+	var away := Vector3(msi.x, 0, msi.z).normalized()
+	for i in services.size():
+		var s: Dictionary = services[i]
+		var up := bool(s.get("up", false))
+		var tier := String(s.get("tier", ""))
+		var h2 := 0.9 if tier == "core" else 0.55
+		var ang2 := atan2(away.z, away.x) + (float(i) - float(services.size() - 1) * 0.5) * 0.19
+		var p2 := msi + Vector3(cos(ang2) * 2.15, h2 * 0.5 - 0.35, sin(ang2) * 2.15)
+		_box(Vector3(0.14, h2, 0.14), _glow(C_HOLO if up else C_ALARM, 1.0 if up else 3.2), p2, _districts)
+		_label(String(s.get("name", "?")), 18, (C_HOLO if up else C_ALARM).lightened(0.35), p2 + Vector3(0, h2 * 0.5 + 0.12, 0), _districts)
+	# The library's open questions: Steward decision cards as slabs around xanadu.
+	var cards := 0
+	for x: Variant in feed.get("actions", []):
+		if String((x as Dictionary).get("kind", "")) == "decision" and String((x as Dictionary).get("title", "")).begins_with("xanadu card"):
+			cards += 1
+	for i in cards:
+		var ang3 := TAU * float(i) / float(maxi(cards, 1)) + 0.3
+		_box(Vector3(0.05, 0.42, 0.28), _glow(C_WATCH, 1.6), Vector3(cos(ang3) * 1.55, -0.12, sin(ang3) * 1.55), _districts)
+	# The Forge: repositories as buildings, floors = open PRs by stage, red cap = CI failing share.
+	var by_repo := {}
+	for x: Variant in feed.get("pipeline", []):
+		var pr: Dictionary = x
+		var r := String(pr.get("repo", "?"))
+		if not by_repo.has(r):
+			by_repo[r] = {"stages": {}, "fail": 0, "n": 0}
+		var rec: Dictionary = by_repo[r]
+		var st := String(pr.get("stage", "draft"))
+		(rec["stages"] as Dictionary)[st] = int((rec["stages"] as Dictionary).get(st, 0)) + 1
+		rec["n"] = int(rec["n"]) + 1
+		if String(pr.get("ci", "")) == "fail":
+			rec["fail"] = int(rec["fail"]) + 1
+	var repos: Array = by_repo.keys()
+	repos.sort()
+	var cols := 4
+	for i in repos.size():
+		var name := String(repos[i])
+		var rec2: Dictionary = by_repo[name]
+		var base := FORGE_AT + Vector3(float(i % cols) * 0.75 - 1.1, -0.4, float(int(i / cols)) * 0.75 - 0.6)
+		var y := 0.0
+		for st2: String in ["approved", "changes", "needs-review", "stale-review", "draft"]:
+			var count := int((rec2["stages"] as Dictionary).get(st2, 0))
+			if count == 0:
+				continue
+			var h3 := minf(0.06 * float(count), 1.8)
+			_box(Vector3(0.42, h3, 0.42), _glow(STAGE_COLOURS[st2] as Color, 2.6 if st2 in ["approved", "changes"] else (1.2 if st2 in ["needs-review", "stale-review"] else 0.18)), base + Vector3(0, y + h3 * 0.5, 0), _districts)
+			y += h3 + 0.02
+		var fail_share := float(rec2["fail"]) / float(maxi(int(rec2["n"]), 1))
+		if int(rec2["fail"]) > 0:
+			_box(Vector3(0.46, 0.05, 0.46), _glow(C_ALARM, 0.5 + 4.0 * fail_share), base + Vector3(0, y + 0.03, 0), _districts)
+		_label("%s\n%d open · %d CI fail" % [name, int(rec2["n"]), int(rec2["fail"])], 18, Color(0.8, 0.88, 1.0), base + Vector3(0, y + 0.3, 0), _districts)
+	if not repos.is_empty():
+		_label("THE FORGE · %d repositories · floors = open PRs by stage" % repos.size(), 26, Color(0.6, 0.8, 1.0), FORGE_AT + Vector3(0, -0.35, 1.3), _districts)
+
+
+## Visuals only (H): hide every label and panel, so the look can be judged and dialled in on its own.
+func _apply_text_visibility() -> void:
+	for c in get_children():
+		if c is CanvasLayer:
+			(c as CanvasLayer).visible = not _text_hidden
+	_set_labels_visible(self, not _text_hidden)
+
+
+func _set_labels_visible(n: Node, v: bool) -> void:
+	for c in n.get_children():
+		if c is Label3D:
+			(c as Label3D).visible = v
+		_set_labels_visible(c, v)
 
 
 func _shoot() -> void:
@@ -1370,6 +1522,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
 		elif k >= KEY_0 and k <= KEY_3:
 			_set_layer((k - KEY_1) if k != KEY_0 else -1)
+		elif k == KEY_H:
+			_text_hidden = not _text_hidden
+			_apply_text_visibility()
+		elif k == KEY_V:
+			_cine = not _cine
+			_subtitle.text = "Cinematic camera ON: it follows each real event (heartbeat, order, receipt), then returns to the wide view." if _cine else "Cinematic camera off: drag to orbit."
 		elif k == KEY_C and not (event as InputEventKey).ctrl_pressed:
 			DisplayServer.clipboard_set(_brief_text())
 			_subtitle.text = "Copied the whole cockpit brief to the clipboard: fleet, agents, work waiting, conversation, next steps."

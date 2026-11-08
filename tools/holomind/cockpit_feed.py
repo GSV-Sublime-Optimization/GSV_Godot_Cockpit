@@ -198,6 +198,7 @@ def chorus_facts():
     return {'at': iso(), 'backup': f.get('backup'), 'mirror': {k: v for k, v in (f.get('mirror') or {}).items() if k != 'repos'},
             'doctor': [{'key': d.get('key'), 'verdict': d.get('verdict'), 'evidence': (d.get('evidence') or [])[:2]} for d in (f.get('doctor') or [])][:20],
             'spine': {'up': sp.get('up'), 'total': sp.get('total'),
+                      'services': [{'name': x.get('name'), 'tier': x.get('tier'), 'up': bool(x.get('up')), 'ms': x.get('ms')} for x in sp.get('services', [])][:40],
                       'down': [x.get('name') for x in sp.get('services', []) if not x.get('up', True)]}}
 
 
@@ -339,7 +340,9 @@ def tick(state):
             disks = ', '.join(f"{k}: {v.get('pct_free')}% free" for k, v in (hb.get('disks') or {}).items())
             parts = ([f"RAM {hb['ram_avail_mb']} MB free"] if hb.get('ram_avail_mb') is not None else []) + ([disks] if disks else [])
             bodies[rig].update(status='silent' if a is None or a > SILENT_AFTER_S else ('green' if hb.get('green') else 'red'),
-                               failing=failing, age_s=a, detail='; '.join(parts))
+                               failing=failing, age_s=a, detail='; '.join(parts),
+                               checks=[{'name': c.get('name'), 'ok': bool(c.get('ok')), 'ms': c.get('ms')} for c in hb.get('checks', [])][:24],
+                               ram_mb=hb.get('ram_avail_mb'), disks={k: v.get('pct_free') for k, v in (hb.get('disks') or {}).items()})
     bodies['xanadu'].update(status='green', age_s=0, detail='answering')
     screen = ''
     try:
