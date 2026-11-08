@@ -51,7 +51,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string"}, "node": {"type": "string", "description": "optional: rig:i3, check:i3/docker, pr:dev#429, svc:litellm, or JSON"}},
          "required": ["text"]}},
-    {"name": "chorus_send", "description": "Route and send as this seat. Overrides: to (a target id such as 'claude (i3 seat)', 'local:l9', 'gpt6', 'all'), where, kind, when ('after #424', 'at 14:30', 'next hourly cycle'), why. Local models answer inline; GitHub/Studio/ChatDev come back prepared.",
+    {"name": "chorus_send", "description": "Route and send as this seat. Overrides: to (a target id such as 'claude (i3 seat)', 'local:l9', 'gpt-6', 'codex', 'muse', 'all'; cloud seats are mirrored to GitHub), where, kind, when ('after #424', 'at 14:30', 'next hourly cycle'), why. Local models answer inline; GitHub/Studio/ChatDev come back prepared.",
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string"}, "node": {"type": "string"}, "to": {"type": "string"}, "where": {"type": "string"},
          "kind": {"type": "string"}, "when": {"type": "string"}, "why": {"type": "string"}}, "required": ["text"]}},

@@ -112,7 +112,7 @@ class ComposerTest(unittest.TestCase):
 
     def test_github_is_prepared_not_sent_by_default(self):
         node = {"kind": "pr", "repo": "dev", "number": 429, "url": "https://github.com/GSV-Sublime-Optimization/dev/pull/429"}
-        code, j = self.post("/send", {"kind": "review-request", "to": "gpt6", "where": "github", "text": "review @everyone",
+        code, j = self.post("/send", {"kind": "review-request", "to": "gpt-6", "where": "github", "text": "review @everyone",
                                       "node": node})
         self.assertEqual(code, 200, j)
         res = j["message"]
@@ -120,6 +120,47 @@ class ComposerTest(unittest.TestCase):
         self.assertIn("gh pr comment https://github.com/GSV-Sublime-Optimization/dev/pull/429", res["prepared"]["command"])
         self.assertNotIn("@", res["prepared"]["body"])                      # never pings anyone
         self.assertEqual(self.lines[0]["kind"], "sent")                     # the ledger shows it
+
+    def test_order_to_a_cloud_seat_is_mirrored_to_the_pr(self):
+        node = {"kind": "pr", "repo": "dev", "number": 428, "branch": "claude/fork-atlas",
+                "url": "https://github.com/GSV-Sublime-Optimization/dev/pull/428"}
+        code, j = self.post("/send", {"kind": "order", "to": "codex", "where": "channel", "text": "rebase onto main",
+                                      "node": node})
+        self.assertEqual(code, 200, j)
+        res = j["message"]
+        self.assertFalse(res["delivered"])                                   # prepared, not commented
+        self.assertIn("gh pr comment https://github.com/GSV-Sublime-Optimization/dev/pull/428",
+                      res["mirror"]["prepared"]["command"])
+        order, ledger = self.lines
+        self.assertEqual((order["kind"], order["to"]), ("order", "codex"))   # the seat is a real channel address
+        self.assertEqual((ledger["kind"], ledger["mirror_of"]), ("sent", order["id"]))
+        self.assertIn(order["id"], res["mirror"]["prepared"]["body"])
+
+    def test_channel_line_to_a_cloud_seat_without_a_pr_goes_to_the_review_queue(self):
+        code, j = self.post("/send", {"kind": "ask", "to": "muse", "where": "channel", "text": "what is blocking dev#425?"})
+        self.assertEqual(code, 200, j)
+        self.assertIn("issue comment https://github.com/GSV-Sublime-Optimization/dev/issues/431",
+                      j["message"]["mirror"]["prepared"]["command"])
+        self.assertEqual([m["kind"] for m in self.lines[1:]], ["sent"])
+
+    def test_legacy_gpt6_id_is_accepted(self):
+        code, j = self.post("/send", {"kind": "status", "to": "gpt6", "where": "review-queue", "text": "fyi"})
+        self.assertEqual(code, 200, j)
+        self.assertEqual(self.lines[0]["to"], "gpt-6")
+
+    def test_review_of_a_claude_pr_by_a_claude_seat_is_refused(self):
+        node = {"kind": "pr", "repo": "dev", "number": 428, "branch": "claude/fork-atlas",
+                "url": "https://github.com/GSV-Sublime-Optimization/dev/pull/428"}
+        code, _ = self.post("/send", {"kind": "review-request", "to": "claude (i3 seat)", "where": "channel",
+                                      "text": "please review", "node": node})
+        self.assertEqual(code, 400)
+        self.assertEqual(self.lines, [])
+
+    def test_action_order_to_a_cloud_seat_is_refused(self):
+        code, _ = self.post("/send", {"kind": "action-order", "to": "gpt-6", "where": "channel", "text": "restart",
+                                      "action": "restart", "target": "x"})
+        self.assertEqual(code, 400)
+        self.assertEqual(self.lines, [])
 
     def test_github_refuses_a_foreign_url(self):
         node = {"kind": "pr", "url": "https://github.com/someone/else/pull/1"}

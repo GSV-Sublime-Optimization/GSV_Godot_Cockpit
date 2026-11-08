@@ -52,12 +52,15 @@ TARGETS: dict[str, dict] = {
     "local:l9": {"label": "L9 drone (local)", "type": "local", "rig": "l9", "vendor": "local", "reach": "live",
                  "where": ["local"], "owns": set(), "url": "http://127.0.0.1:11435/v1/chat/completions",
                  "model": "qwen3:4b-l9fast", "aliases": ["l9 local", "l9 drone", "l3 local", "l9 ollama", "drone"]},
-    "gpt6": {"label": "GPT-6", "type": "cloud", "rig": "cloud", "vendor": "openai", "reach": "prepared",
-             "where": ["github", "review-queue"], "owns": set(), "aliases": ["gpt-6", "gpt6", "gpt 6", "chatgpt"]},
-    "codex": {"label": "Codex", "type": "cloud", "rig": "cloud", "vendor": "openai", "reach": "prepared",
-              "where": ["github", "review-queue"], "owns": set(), "aliases": ["codex", "i3 codex"]},
-    "muse": {"label": "Muse", "type": "cloud", "rig": "cloud", "vendor": "muse", "reach": "prepared",
-             "where": ["github", "review-queue"], "owns": set(), "aliases": ["muse"]},
+    # Cloud seats: they hold a seat on the channel (so an order can name them) but do NOT read xanadu's
+    # channel file. "mirror" = a channel line to them is also mirrored where they look (the node's PR, else
+    # the review queue dev#431), prepared as a `gh` command unless CHORUS_ALLOW_GH_COMMENT=1.
+    "gpt-6": {"label": "GPT-6", "type": "cloud", "rig": "cloud", "vendor": "openai", "reach": "prepared", "mirror": True,
+              "where": ["github", "review-queue", "channel"], "owns": set(), "aliases": ["gpt-6", "gpt6", "gpt 6", "chatgpt"]},
+    "codex": {"label": "Codex", "type": "cloud", "rig": "cloud", "vendor": "openai", "reach": "prepared", "mirror": True,
+              "where": ["github", "review-queue", "channel"], "owns": set(), "aliases": ["codex", "i3 codex"]},
+    "muse": {"label": "Muse", "type": "cloud", "rig": "cloud", "vendor": "muse", "reach": "prepared", "mirror": True,
+             "where": ["github", "review-queue", "channel"], "owns": set(), "aliases": ["muse"]},
     "studio": {"label": "Studio mission", "type": "studio", "rig": "msi", "vendor": "studio", "reach": "prepared",
                "where": ["studio"], "owns": set(), "aliases": ["studio", "mission"]},
     "chatdev": {"label": "ChatDev queue", "type": "queue", "rig": "msi", "vendor": "chatdev", "reach": "prepared",
@@ -66,6 +69,20 @@ TARGETS: dict[str, dict] = {
             "where": ["channel"], "owns": set(), "aliases": ["everyone", "all agents", "all seats", "all minds", "@all"]},
 }
 SEAT_NAMES = {"claude (msi seat)": "MSI Claude", "claude (i3 seat)": "i3 Claude", "i3-mind": "i3 Mind"}
+CLOUD_SEATS = ("gpt-6", "codex", "muse")              # seats that need a GitHub mirror to be reached
+LEGACY_IDS = {"gpt6": "gpt-6"}                         # target ids older clients (MCP, pages) still send
+
+
+def target_id(to) -> str | None:
+    """A target id as sent by any client -> the registry id, or None when unknown."""
+    to = LEGACY_IDS.get(str(to or ""), str(to or ""))
+    return to if to in TARGETS else None
+
+
+def second_actor_conflict(kind: str, node: dict | None, to: str) -> bool:
+    """True when a review request would go to the PR author's own kind (a Claude reviewing a Claude)."""
+    author = node_author(node or {})
+    return kind == "review-request" and bool(author) and TARGETS.get(to, {}).get("vendor") == author
 
 ASK = re.compile(r"^\s*(what|why|how|who|when|where|which|is|are|does|do|can|could|should|explain|tell me)\b|\?\s*$", re.I)
 SUMMARY = re.compile(r"\b(summari[sz]e|summary|tl;?dr|digest|explain|in plain words|what does .* mean)\b", re.I)
@@ -206,7 +223,7 @@ def atlas_hint(text: str) -> list[dict]:
 ATLAS_TO_TARGET = (("ollama|local inference|think_local|litellm", ("local:msi", "local:i3", "local:l9")),
                    ("codex", ("codex",)), ("chatdev", ("chatdev",)), ("studio|mission", ("studio",)),
                    ("remote-control|sendmessage|claude", ("claude (msi seat)", "claude (i3 seat)")),
-                   ("review|pr-agent", ("gpt6", "codex", "muse")))
+                   ("review|pr-agent", CLOUD_SEATS))
 
 
 # ------------------------------------------------------------------ inference
@@ -331,7 +348,7 @@ def _candidates(kind: str, node: dict, text: str, feed: dict | None, hint: list[
                 continue               # second-actor rule: never the author's own kind
             if t["type"] == "cloud":
                 score += 4; why.append("independent reviewer")
-                if tid == "gpt6":
+                if tid == "gpt-6":
                     score += 0.5
             elif t["type"] == "seat" and tid != "i3-mind":
                 score += 3 if author and author != "claude" else (1 if not author else 0)
@@ -392,7 +409,7 @@ def route(text: str, node: dict | None = None, feed: dict | None = None, kind: s
     node = node if isinstance(node, dict) else {}
     text = _s(text, 600)
     forced_to, body = explicit_target(text)
-    to = to if to in TARGETS else forced_to
+    to = target_id(to) or forced_to
     if kind not in KINDS:
         kind = infer_kind(body, node)
         if to == "all" and kind == "ask" and body and not ASK.search(body):
@@ -407,7 +424,7 @@ def route(text: str, node: dict | None = None, feed: dict | None = None, kind: s
             t = TARGETS[to]
             where = ("github" if node.get("url") else "review-queue") if t["type"] == "cloud" else t["where"][0]
             pick = {"to": to, "label": t["label"], "where": where, "reach": t["reach"], "score": 0, "because": "you named it"}
-            if kind == "review-request" and node_author(node) and t["vendor"] == node_author(node):
+            if second_actor_conflict(kind, node, to):
                 pick["because"] = "you named it, but it is the author's own kind (second-actor rule)"
         else:
             pick = {**pick, "because": "you named it" + (f"; {pick['because']}" if pick["because"] else "")}

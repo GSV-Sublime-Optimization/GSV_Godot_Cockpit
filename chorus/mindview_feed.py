@@ -250,8 +250,12 @@ SPEAKERS = {"claude": "claude (msi seat)", "mind": "mind", "all": "all"}
 
 # Who may speak through CHORUS. The page itself always speaks as Keath; an agent that posts
 # through /say must name its own seat, so nothing an agent writes is ever signed as Keath.
+# gpt-6, codex and muse are cloud seats: they may be addressed (and may sign their own lines if they
+# ever post through CHORUS), but they do not read xanadu's channel, so send() mirrors every channel
+# line to them onto GitHub (router.TARGETS[...]["mirror"]).
 SEATS = {"keath": "keath (chorus)", "claude (msi seat)": "claude (msi seat)",
-         "claude (i3 seat)": "claude (i3 seat)", "i3-mind": "i3-mind"}
+         "claude (i3 seat)": "claude (i3 seat)", "i3-mind": "i3-mind",
+         "gpt-6": "gpt-6", "codex": "codex", "muse": "muse"}
 
 
 def say(text: str, to: str, sender: str = "keath") -> dict:
@@ -428,7 +432,7 @@ def send(body: dict, sender: str = "keath") -> dict:
     import router
     if sender not in SEATS:
         raise ValueError(f"unknown seat {sender!r}; use one of {sorted(SEATS)}")
-    kind, to = str(body.get("kind", "")), str(body.get("to", ""))
+    kind, to = str(body.get("kind", "")), router.target_id(body.get("to")) or str(body.get("to", ""))
     if kind not in router.KINDS:
         raise ValueError(f"unknown kind {kind!r}; use one of {', '.join(router.KINDS)}")
     t = router.TARGETS.get(to)
@@ -442,6 +446,10 @@ def send(body: dict, sender: str = "keath") -> dict:
         raise ValueError("empty message")
     why, due, when = _clean(body.get("why"), 240), _clean(body.get("due"), 40), _clean(body.get("when"), 40) or "now"
     node = body.get("node") if isinstance(body.get("node"), dict) else {}
+    if router.second_actor_conflict(kind, node, to):
+        raise ValueError(f"{t['label']} is the PR author's own kind: a review must come from a different actor")
+    if t.get("mirror") and kind == "action-order":
+        raise ValueError(f"{t['label']} cannot run cockpit actions (it is not on a colony rig); send an order instead")
     about = router.node_label(node) if node else ""
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     base = {"at": now, "from": SEATS[sender], "to": to, "intent": kind, "via": "chorus"}
@@ -457,7 +465,14 @@ def send(body: dict, sender: str = "keath") -> dict:
         else:
             msg = {**base, "text": text}
             _append(msg)
-        return {"delivered": True, "message": msg, "summary": f"sent to {t['label']} on the channel"}
+        if not t.get("mirror"):
+            return {"delivered": True, "message": msg, "summary": f"sent to {t['label']} on the channel"}
+        # a cloud seat never reads the channel: the line above is the ledger, the mirror is the delivery
+        url = _clean(node.get("url"), 200)
+        mirror = _gh_comment(t, kind, sender, about, text, why, when, url if GH_URL.match(url) else REVIEW_QUEUE_URL,
+                             {**base, "where": "github" if GH_URL.match(url) else "review-queue"}, ref=msg.get("id", ""))
+        return {"delivered": mirror["delivered"], "message": msg, "mirror": mirror,
+                "summary": f"on the channel (which {t['label']} does not read), and {mirror['summary']}"}
 
     if where == "local":
         answer, err = local_ask(t, text, why)
@@ -477,22 +492,8 @@ def send(body: dict, sender: str = "keath") -> dict:
         url = REVIEW_QUEUE_URL if where == "review-queue" else _clean(node.get("url"), 200)
         if not GH_URL.match(url):
             raise ValueError("no colony GitHub PR or issue on this node; send it to the review queue instead")
-        comment = (f"**{router.KIND_WORDS.get(kind, kind)} for {t['label']}** (via CHORUS, from {SEATS[sender]})"
-                   f"{(' about ' + about) if about else ''}\n\n{text}" + (f"\n\nWhy: {why}" if why else "")
-                   + (f"\nWhen: {when}" if when != "now" else "")).replace("@", "(at)")   # never ping anyone
-        cmd = ["gh", "pr" if "/pull/" in url else "issue", "comment", url, "--body", comment]
-        delivered, prepared = False, {"command": shlex.join(cmd), "body": comment, "url": url}
-        if os.environ.get("CHORUS_ALLOW_GH_COMMENT") == "1":     # opt-in: the feeder may comment as the shared account
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
-            if r.returncode:
-                raise RuntimeError(f"gh comment failed: {(r.stderr or r.stdout).strip()[:200]}")
-            delivered, prepared = True, None
-        line = {**base, "kind": "sent", "where": where, "link": url, "delivered": delivered,
-                "text": f"{'commented' if delivered else 'prepared a comment'} for {t['label']} on "
-                        f"{url.split('github.com/')[-1]}: {text[:200]}"}
-        _append(line)
-        return {"delivered": delivered, "prepared": prepared, "message": line,
-                "summary": f"commented on {url}" if delivered else "prepared: paste the command (the feeder does not comment on GitHub unless CHORUS_ALLOW_GH_COMMENT=1)"}
+        res = _gh_comment(t, kind, sender, about, text, why, when, url, {**base, "where": where})
+        return {"delivered": res["delivered"], "prepared": res["prepared"], "message": res["line"], "summary": res["summary"]}
 
     if where == "studio":       # Studio missions wait for Keath's approve; CHORUS never posts around it
         prepared = {"method": "POST", "url": STUDIO_API, "note": "post it from Studio (or mission_post); it then waits for your approve",
@@ -505,6 +506,33 @@ def send(body: dict, sender: str = "keath") -> dict:
             "text": f"prepared for {t['label']} (Keath sends it): {text[:200]}"}
     _append(line)
     return {"delivered": False, "prepared": prepared, "message": line, "summary": f"prepared for {t['label']}"}
+
+
+def _gh_comment(t: dict, kind: str, sender: str, about: str, text: str, why: str, when: str, url: str,
+                base: dict, ref: str = "") -> dict:
+    """Comment `text` for target `t` on a colony PR/issue: prepared as a `gh` command, run only when
+    CHORUS_ALLOW_GH_COMMENT=1. Always leaves one ledger line on the channel."""
+    import router
+    comment = (f"**{router.KIND_WORDS.get(kind, kind)} for {t['label']}** (via CHORUS, from {SEATS[sender]})"
+               f"{(' about ' + about) if about else ''}{(' - channel ' + ref) if ref else ''}\n\n{text}"
+               + (f"\n\nWhy: {why}" if why else "")
+               + (f"\nWhen: {when}" if when != "now" else "")).replace("@", "(at)")   # never ping anyone
+    cmd = ["gh", "pr" if "/pull/" in url else "issue", "comment", url, "--body", comment]
+    delivered, prepared = False, {"command": shlex.join(cmd), "body": comment, "url": url}
+    if os.environ.get("CHORUS_ALLOW_GH_COMMENT") == "1":     # opt-in: the feeder may comment as the shared account
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
+        if r.returncode:
+            raise RuntimeError(f"gh comment failed: {(r.stderr or r.stdout).strip()[:200]}")
+        delivered, prepared = True, None
+    line = {**base, "kind": "sent", "where": base.get("where") or "github", "link": url, "delivered": delivered,
+            "text": f"{'commented' if delivered else 'prepared a comment'} for {t['label']} on "
+                    f"{url.split('github.com/')[-1]}: {text[:200]}"}
+    if ref:
+        line["mirror_of"] = ref
+    _append(line)
+    return {"delivered": delivered, "prepared": prepared, "line": line,
+            "summary": f"commented on {url}" if delivered else
+            "prepared: paste the command (the feeder does not comment on GitHub unless CHORUS_ALLOW_GH_COMMENT=1)"}
 
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]"}

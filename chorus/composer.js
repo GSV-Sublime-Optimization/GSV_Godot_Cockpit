@@ -108,7 +108,8 @@
   function whereOptions() {
     const c = st.cands.find((x) => x.to === st.to);
     if (!c) return [st.where];
-    if (['gpt6', 'codex', 'muse'].includes(st.to)) return (st.node && st.node.url) ? ['github', 'review-queue'] : ['review-queue'];
+    // cloud seats: GitHub is where they look; 'channel' posts the line AND mirrors it to GitHub
+    if (['gpt-6', 'gpt6', 'codex', 'muse'].includes(st.to)) return (st.node && st.node.url) ? ['github', 'review-queue', 'channel'] : ['review-queue', 'channel'];
     return [c.where];
   }
   function current() { return st.cands.find((c) => c.to === st.to) || { label: st.to, reach: 'live' }; }

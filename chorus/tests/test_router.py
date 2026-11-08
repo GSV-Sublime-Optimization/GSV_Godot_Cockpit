@@ -95,3 +95,43 @@ def test_route_is_pure():
     before = repr(feed)
     r("what is up?", {"kind": "rig", "id": "i3"}, feed)
     assert repr(feed) == before
+
+
+# ------------------------------------------------------------------ cloud seats (gpt-6, codex, muse)
+CLAUDE_PR = {"kind": "pr", "repo": "dev", "number": 428, "waiting": True, "branch": "claude/fork-atlas",
+             "url": "https://github.com/GSV-Sublime-Optimization/dev/pull/428"}
+
+
+def test_cloud_seats_are_registered_targets_that_need_a_mirror():
+    for seat in ("gpt-6", "codex", "muse"):
+        t = router.TARGETS[seat]
+        assert t["mirror"] and t["reach"] == "prepared" and "channel" in t["where"]
+        assert t["where"][0] in ("github", "review-queue")          # where they actually look comes first
+    assert "gpt6" not in router.TARGETS and router.target_id("gpt6") == "gpt-6"
+    assert router.target_id("nobody") is None
+
+
+def test_claude_authored_pr_review_goes_to_a_cloud_seat_never_a_claude_seat():
+    out = r("", CLAUDE_PR)
+    assert out["to"] in router.CLOUD_SEATS
+    picked = [out["to"]] + [a["to"] for a in out["alternatives"]]
+    assert not {"claude (msi seat)", "claude (i3 seat)"} & set(picked)
+    assert set(router.CLOUD_SEATS) <= set(picked)
+
+
+def test_naming_a_claude_seat_for_a_claude_pr_is_flagged():
+    out = r("", CLAUDE_PR, to="claude (i3 seat)")
+    assert out["to"] == "claude (i3 seat)" and "second-actor" in out["reasons"]
+    assert router.second_actor_conflict("review-request", CLAUDE_PR, "claude (i3 seat)")
+    assert not router.second_actor_conflict("review-request", CLAUDE_PR, "codex")
+
+
+def test_legacy_gpt6_id_still_routes():
+    out = r("", CLAUDE_PR, to="gpt6")
+    assert out["to"] == "gpt-6" and out["where"] == "github"
+
+
+def test_review_queue_when_the_node_has_no_url():
+    node = {k: v for k, v in CLAUDE_PR.items() if k != "url"}
+    out = r("", node, to="muse")
+    assert out["where"] == "review-queue"
