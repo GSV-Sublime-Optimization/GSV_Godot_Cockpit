@@ -28,7 +28,9 @@
 
 $ErrorActionPreference = "Stop"
 
+# GSV_FLEET_TELEMETRY_PATH moves the snapshot (the cockpit readers honour the same variable).
 $SnapshotPath = "C:\GSV\state\fleet-telemetry.json"
+if ($env:GSV_FLEET_TELEMETRY_PATH) { $SnapshotPath = $env:GSV_FLEET_TELEMETRY_PATH }
 $GitSsh = "C:\Program Files\Git\usr\bin\ssh.exe"
 $SshTimeoutMs = 8000
 

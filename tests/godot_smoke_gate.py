@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -22,6 +23,7 @@ CASES = (
     ("portable", "res://tests/portable_offline_test.gd", "[portable-test] PASS"),
     ("holo", "res://tests/holo_coordinate_stack_test.gd", "[holo-test] PASS"),
     ("atlas", "res://tests/capability_atlas_test.gd", "[atlas-test] PASS"),
+    ("fleet-env", "res://tests/fleet_telemetry_env_test.gd", "[fleet-env-test] PASS"),
 )
 
 
@@ -57,7 +59,7 @@ def run_case(binary: str, project: Path, test: str, expected: str, timeout: int)
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--godot", default="godot")
+    parser.add_argument("--godot", default=os.environ.get("GODOT", "godot"))
     parser.add_argument("--project", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--timeout", type=int, default=240)
     parser.add_argument("--receipt", type=Path)

@@ -18,11 +18,18 @@ signal telemetry_changed(telemetry: Dictionary)
 
 const PROJECTION = preload("res://scripts/holo/FleetTelemetryProjection.gd")
 const DEFAULT_SNAPSHOT_PATH := "C:/GSV/state/fleet-telemetry.json"
+## Off the MSI (or off Windows) the snapshot lives elsewhere: this env var
+## overrides the default, the same way GSV_KILOCORE_REPORTS_DIR does.
+const SNAPSHOT_PATH_ENV := "GSV_FLEET_TELEMETRY_PATH"
 const MAX_BYTES := 65536
 const STALE_AFTER_MSEC := 300000.0
 const POLL_SECONDS := 30.0
 
-var snapshot_path: String = DEFAULT_SNAPSHOT_PATH
+var snapshot_path: String = default_snapshot_path()
+
+static func default_snapshot_path() -> String:
+	var override := OS.get_environment(SNAPSHOT_PATH_ENV).strip_edges()
+	return override if not override.is_empty() else DEFAULT_SNAPSHOT_PATH
 
 var _last_good: Dictionary = {}
 var _failure: String = "not_observed"

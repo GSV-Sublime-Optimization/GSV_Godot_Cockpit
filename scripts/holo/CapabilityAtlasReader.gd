@@ -29,6 +29,7 @@ signal atlas_changed(atlas: Dictionary)
 
 const ATLAS_PROJECTION = preload("res://scripts/holo/CapabilityAtlasProjection.gd")
 const TELEMETRY_PROJECTION = preload("res://scripts/holo/FleetTelemetryProjection.gd")
+const FLEET_TELEMETRY_READER = preload("res://scripts/holo/FleetTelemetryReader.gd")
 const DEFAULT_ATLAS_PATH := "res://data/capability_atlas.json"
 const DEFAULT_TELEMETRY_PATH := "C:/GSV/state/fleet-telemetry.json"
 const MAX_ATLAS_BYTES := 131072
@@ -37,7 +38,8 @@ const STALE_AFTER_MSEC := 300000.0
 const POLL_SECONDS := 60.0
 
 var atlas_path: String = DEFAULT_ATLAS_PATH
-var telemetry_path: String = DEFAULT_TELEMETRY_PATH
+## GSV_FLEET_TELEMETRY_PATH overrides the MSI default (see FleetTelemetryReader).
+var telemetry_path: String = FLEET_TELEMETRY_READER.default_snapshot_path()
 
 var _last_good: Dictionary = {}
 var _telemetry: Dictionary = {}
