@@ -31,6 +31,17 @@ Beyond the rigs, it also lists:
 
 When nothing needs you, it says so.
 
+## A cockpit, not just a view
+CHORUS is also where you talk to the colony, and where the MSI Claude shows its own mind.
+- **Conversation** (inside *What needs you*): the shared cockpit channel on xanadu (`~/steward/cockpit/channel.jsonl`), the same one the i3's HOLOMIND uses. You see the MSI Claude, the i3 Claude and the i3 Mind in their rig colours; a Mind's words are set in italic so they never pass for a person's.
+- **Write to a seat:** pick *MSI Claude*, *the Minds* or *everyone*, type, press Send. The MSI Claude sees your message at the top of your next prompt in the CLI (the `chorus_inbox.py` hook), so the CLI and the cockpit are one conversation.
+- **Ask Claude** on any *What needs you* item starts that message for you ("About 'Docker can't start on the i3': ").
+- **MSI Claude's mind:** a bright satellite orbits MSI and glows harder the more steps it took in the last two minutes. Top right, a ticker shows its last three steps (tool and a short label).
+- **The spine:** one small moon per colony service orbits MSI, read from Dev-Mentor's live spine (`/api/spine/services`, cached 60 s). Teal is up, red is down, dim grey is down but expected (trueform-forge, rimapi, desktop-ollama). Unexpected downs become a *What needs you* item with the next move.
+
+### Privacy of the mind stream
+`hooks/claude_activity.py` (a PostToolUse hook) records only the tool name and a short label: a command's *description*, a file's name, a search's first 40 characters, an agent's description. It never records command text, file contents or output, stays on MSI (`%LOCALAPPDATA%/KiloCore/chorus/`), and rotates at 512 KB. Any hook error exits 0: the cockpit can never block the work it watches.
+
 ## What you see
 - **Each star breathes** with its heartbeat. A ring of arcs around it shows its health checks: thin teal when a check is ok, thick red when it fails. A rig whose heartbeat is older than 15 minutes dims, its thread to xanadu goes dashed, and its label says *silent N min*.
 - **Threads** carry heartbeats from every rig to xanadu, which keeps the record. A small pulse travels each thread.
@@ -56,13 +67,14 @@ When nothing needs you, it says so.
 ## Run it
 - **Snapshot (no network to the fleet):** open `chorus/index.html` in any browser. It uses the shared bakeoff fixture, frozen 2026-11-08 06:48 UTC (`tests/fixtures/mindview-20261108/`).
 - **Live:** `python chorus/mindview_feed.py`, then open http://127.0.0.1:8767/.
-  - Every 15 s the feeder makes **one read-only SSH call** to xanadu (`~/steward/events/*.jsonl` and `~/steward/heartbeats/*.json`) and serves `feed.json` on loopback only.
-  - It never writes to xanadu.
+  - Every 15 s the feeder makes **one read-only SSH call** to xanadu (events, heartbeats, backup and mirror receipts, Steward cards, the channel) and serves `feed.json` on loopback only.
+  - Its only write is a message you send: one line appended to `~/steward/cockpit/channel.jsonl` (600 characters at most; empty messages are refused).
+- **Hooks (so the MSI Claude reacts):** copy `hooks/*.py` to `%LOCALAPPDATA%/KiloCore/bin/` and add a PostToolUse hook for `claude_activity.py` and a UserPromptSubmit hook for `chorus_inbox.py` in Claude Code settings.
 - **Keys:** **F** fullscreen, **Esc** leaves fullscreen and stops a rehearsal. The browser's own close always works.
 
 ## Bakeoff hard rules
 - **Windowed:** an ordinary browser tab. It is never topmost and never takes the screen; fullscreen is opt-in.
-- **Read-only:** zero actuators, and no writes anywhere.
+- **No actuators:** it starts, stops and changes nothing. The single write is your own message to the shared channel.
 - **Never on the i3 screen or rotation** without Keath's OK.
 - **Budget:** a single static page (no framework, Google Fonts only) drawing at most 30 fps on a 2D canvas, paused by the browser when hidden. The feeder is the Python standard library plus one SSH call per 15 s. Per-process RAM and CPU in a real browser are still to be measured on MSI.
 

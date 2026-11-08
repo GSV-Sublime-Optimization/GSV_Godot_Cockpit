@@ -52,9 +52,56 @@ cards = []
 for f in sorted(glob.glob(os.path.join(home, "outbox", "*.md"))):
     head = next((l.strip("# \n") for l in open(f, encoding="utf-8", errors="replace") if l.startswith("#")), os.path.basename(f))
     cards.append({"file": os.path.basename(f), "title": head[:140], "age_d": round((now - os.path.getmtime(f)) / 86400, 1)})
+channel = []
+cf = os.path.join(home, "cockpit", "channel.jsonl")
+if os.path.exists(cf):
+    for line in open(cf, encoding="utf-8", errors="replace").read().splitlines()[-60:]:
+        try: channel.append(json.loads(line))
+        except ValueError: pass
 print(json.dumps({"events": [e for e in events if not e.get("simulated")][-200:], "heartbeats": beats,
-                  "backup": backup, "mirror": mirror, "steward_cards": cards, "served_at": now}))
+                  "backup": backup, "mirror": mirror, "steward_cards": cards, "channel": channel, "served_at": now}))
 PY"""
+
+LOCAL = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "KiloCore" / "chorus"
+
+
+def claude_activity(limit: int = 60) -> list[dict]:
+    """MSI Claude's own recent steps (written by hooks/claude_activity.py; tool + short label only)."""
+    f = LOCAL / "claude_events.jsonl"
+    if not f.exists():
+        return []
+    out = []
+    for line in f.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
+    return out
+
+
+_spine = {"at": 0.0, "data": None}
+
+
+def spine() -> dict | None:
+    """Dev-Mentor's live spine (the colony's service registry) on this machine, cached 60 s:
+    it probes ~18 services live and takes about 6 s (measured 2026-11-08)."""
+    if time.time() - _spine["at"] < 60:
+        return _spine["data"]
+    _spine["at"] = time.time()
+    _spine["data"] = _spine_fetch() or _spine["data"]
+    return _spine["data"]
+
+
+def _spine_fetch() -> dict | None:
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:7337/api/spine/services", timeout=12) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+        return {"up": d.get("services_up"), "total": d.get("services_total"),
+                "services": [{"name": s.get("name"), "tier": s.get("tier"), "up": s.get("up"), "ms": s.get("ms")}
+                             for s in d.get("services", [])]}
+    except (OSError, ValueError):
+        return None
 
 PRS_EVERY = 300          # GitHub is asked at most every 5 minutes
 _prs = {"at": 0.0, "items": []}
@@ -85,7 +132,52 @@ def fetch() -> dict:
         data["prs_waiting"] = waiting_prs()
     except (subprocess.SubprocessError, ValueError, OSError):
         data["prs_waiting"] = _prs["items"]
+    data["claude_activity"] = claude_activity()
+    data["spine"] = spine()
+    # cache the shared channel locally so the Claude prompt hook can read it without a network call
+    LOCAL.mkdir(parents=True, exist_ok=True)
+    (LOCAL / "channel.cache.jsonl").write_text("\n".join(json.dumps(m) for m in data.get("channel", [])), encoding="utf-8")
     return data
+
+
+SPEAKERS = {"claude": "claude (msi seat)", "mind": "mind", "all": "all"}
+
+
+def say(text: str, to: str) -> dict:
+    """Append Keath's words from CHORUS to the shared cockpit channel on xanadu (the one write CHORUS makes)."""
+    text = " ".join(str(text).split())[:600]
+    if not text:
+        raise ValueError("empty message")
+    msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": "keath (chorus)",
+           "to": SPEAKERS.get(to, "claude (msi seat)"), "text": text}
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
+                        "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
+                       input=json.dumps(msg) + "\n", capture_output=True, text=True, timeout=30)
+    if r.returncode:
+        raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
+    return msg
+
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_POST(self) -> None:  # noqa: N802 - http.server naming
+        if self.path != "/say":
+            self.send_error(404, "only /say accepts POST")
+            return
+        try:
+            n = min(int(self.headers.get("Content-Length", 0)), 4096)
+            body = json.loads(self.rfile.read(n) or b"{}")
+            msg = say(body.get("text", ""), body.get("to", "claude"))
+            out, code = json.dumps({"ok": True, "message": msg}).encode(), 200
+        except (ValueError, RuntimeError, subprocess.SubprocessError, OSError) as e:
+            out, code = json.dumps({"ok": False, "error": str(e)}).encode(), 400
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def log_message(self, *args) -> None:  # keep the console quiet
+        pass
 
 
 def write_feed(data: dict) -> None:
@@ -114,7 +206,7 @@ def main() -> int:
         return 0
     stop = threading.Event()
     threading.Thread(target=loop, args=(stop,), daemon=True).start()
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(HERE))
+    handler = functools.partial(Handler, directory=str(HERE))
     with http.server.ThreadingHTTPServer(("127.0.0.1", a.port), handler) as srv:
         print(f"[chorus] open http://127.0.0.1:{a.port}/   (Ctrl+C to stop)")
         try:

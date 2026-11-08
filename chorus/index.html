@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Chorus</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -105,9 +106,9 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
 .sev { font-family: var(--f-display); font-style: italic; font-size: 13px; color: var(--c); white-space: nowrap; }
 .need-meta { font-family: var(--f-data); font-size: 11px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
 .need-why { font-size: 13px; color: var(--ink-dim); line-height: 1.4; }
-.move { display: flex; gap: 8px; align-items: flex-start; }
+.move { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
 .move code {
-  flex: 1; font-family: var(--f-data); font-size: 12px; line-height: 1.45; color: var(--ink);
+  flex: 1 1 100%; font-family: var(--f-data); font-size: 12px; line-height: 1.45; color: var(--ink);
   background: var(--sky); border: 1px solid var(--hair); border-radius: 6px; padding: 6px 8px; overflow-wrap: anywhere;
 }
 .move button { padding: 5px 9px; font-size: 11px; }
@@ -115,6 +116,32 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
 .need ul { margin: 0; padding-left: 16px; font-size: 12px; display: grid; gap: 2px; }
 .clear { padding: 4px 14px 14px; color: var(--tranquillo); font-family: var(--f-display); font-style: italic; }
 @media (max-width: 720px) { .needs { max-height: 34vh; margin-top: 10px; } }
+/* Conversation: the shared cockpit channel (xanadu:~/steward/cockpit/channel.jsonl), same as HOLOMIND's */
+.talk { border-top: 1px solid var(--hair); padding: 10px 10px 12px; display: grid; gap: 8px; }
+.talk-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px; }
+.talk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 210px; overflow: auto; }
+.msg { font-size: 13px; line-height: 1.4; padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, var(--sky-2) 80%, transparent); }
+.msg .from { font-family: var(--f-data); font-size: 11px; color: var(--c, var(--ink-dim)); }
+.msg .from small { color: var(--ink-dim); }
+.msg.mind .body { font-family: var(--f-display); font-style: italic; }
+.talk-form { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; }
+.talk-form select, .talk-form input {
+  font: 13px var(--f-body); color: var(--ink); background: var(--sky); border: 1px solid var(--hair);
+  border-radius: 6px; padding: 6px 8px; min-width: 0;
+}
+.talk-form select:focus-visible, .talk-form input:focus-visible { outline: 2px solid var(--l9); outline-offset: 1px; }
+.talk-note { margin: 0; font-size: 12px; color: var(--ink-dim); padding: 0 4px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.need .ask { justify-self: start; font-size: 11px; padding: 4px 10px; color: var(--msi); border-color: color-mix(in srgb, var(--msi) 40%, var(--hair)); }
+/* MSI Claude's live steps, under the wordmark */
+.claude-tick {
+  position: fixed; top: calc(max(14px, env(safe-area-inset-top, 0px)) + 66px); right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 3px; justify-items: end; pointer-events: none; font-family: var(--f-data); font-size: 11px; color: var(--ink-dim);
+  max-width: min(46ch, 60vw);
+}
+.claude-tick b { color: var(--msi); font-weight: 600; }
+.claude-tick span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+@media (max-width: 720px) { .claude-tick { display: none; } }
 .river { pointer-events: auto; display: grid; gap: 6px; }
 .river-head { display: flex; justify-content: space-between; font-family: var(--f-data); font-size: 11px; color: var(--ink-dim); letter-spacing: 0.08em; text-transform: uppercase; }
 .river-track {
@@ -160,7 +187,20 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
   <details class="needs" id="needs" open>
     <summary><span class="needs-title">What needs you</span> <span class="needs-count" id="needs-count"></span></summary>
     <ol class="needs-list" id="needs-list"></ol>
+    <div class="talk">
+      <div class="talk-head"><span class="needs-title">Conversation</span><span class="needs-count" id="talk-count">shared with HOLOMIND</span></div>
+      <ol class="talk-list" id="talk-list"></ol>
+      <form class="talk-form" id="talk-form">
+        <label class="sr" for="talk-to">Send to</label>
+        <select id="talk-to"><option value="claude">MSI Claude</option><option value="mind">the Minds</option><option value="all">everyone</option></select>
+        <label class="sr" for="talk-text">Message</label>
+        <input id="talk-text" type="text" maxlength="600" placeholder="Say something to the colony" autocomplete="off">
+        <button id="talk-send" type="submit">Send</button>
+      </form>
+      <p class="talk-note" id="talk-note"></p>
+    </div>
   </details>
+  <div class="claude-tick" id="claude-tick" aria-live="off"></div>
   <section class="thought" aria-live="polite">
     <div class="marking" id="marking">tranquillo</div>
     <p class="line" id="line">The fleet is quiet.</p>
@@ -278,6 +318,7 @@ function frame(t) {
   }
   // the rigs
   for (const r of RIGS) drawRig(r, t);
+  drawOrbiters(t);
   // ripples and comets
   ripples = ripples.filter(p => t - p.t0 < 2400);
   for (const p of ripples) {
@@ -448,8 +489,9 @@ async function poll() {
     const r = await fetch("feed.json", {cache: "no-store"}); if (!r.ok) throw 0;
     const d = await r.json(); const fresh = d.events.length && d.events[d.events.length - 1].at !== events[events.length - 1]?.at;
     events = d.events; heartbeats = d.heartbeats; live = true; nowFn = () => Date.now(); setSource(); drawRiver();
-    extras = {backup: d.backup, mirror: d.mirror, steward_cards: d.steward_cards || [], prs_waiting: d.prs_waiting || []};
-    renderNeeds();
+    extras = {backup: d.backup, mirror: d.mirror, steward_cards: d.steward_cards || [], prs_waiting: d.prs_waiting || [],
+              channel: d.channel || [], claude_activity: d.claude_activity || [], spine: d.spine || extras.spine};
+    renderNeeds(); renderTalk(); renderTick();
     if (fresh && !rehearsing) show(events[events.length - 1]);
   } catch { /* no feeder: stay on the snapshot */ }
 }
@@ -523,6 +565,11 @@ function needs() {
   if (extras.prs_waiting.length) out.push({level: "notable", what: `${extras.prs_waiting.length} pull requests are waiting for a reviewer`,
     meta: "open, not draft, no review yet", why: "Colony rule: a different agent reviews before anything merges.",
     move: "Ask Codex, GPT-6 or the i3 Claude to review the oldest first", owner: "any second actor", list: extras.prs_waiting.slice(0, 5)});
+  const down = (extras.spine?.services || []).filter(s => !s.up && !EXPECTED_DOWN.has(s.name));
+  if (down.length) out.push({level: down.some(s => s.tier === "core") ? "notable" : "routine",
+    what: `${down.length} spine services are down on MSI`, meta: `${extras.spine.up}/${extras.spine.total} up · ${down.map(s => s.name).join(", ")}`,
+    why: "Dev-Mentor's spine probes every colony service on MSI; these did not answer.",
+    move: SPINE_MOVES[down[0].name] || `Check ${down[0].name}`, owner: "anyone on MSI"});
   if (extras.steward_cards.length) out.push({level: "routine", what: `${extras.steward_cards.length} questions from the xanadu Steward`,
     meta: `oldest ${Math.round(Math.max(...extras.steward_cards.map(c => c.age_d || 0)))} days`, why: "Several were answered tonight; the cards were never closed.",
     move: "Answer or close them in xanadu:~/steward/outbox/ (dev#419 has the re-checked digest)", owner: "Keath + MSI Claude"});
@@ -537,7 +584,8 @@ function renderNeeds() {
     li.innerHTML = `<div class="need-head"><span class="need-what">${esc(it.what)}</span><span class="sev" style="--c: var(${LEVEL[it.level].color})">${LEVEL[it.level].word}</span></div>
       <div class="need-meta">${esc(it.meta || "")} · owner: ${esc(it.owner)}</div>
       <div class="need-why">${esc(it.why)}</div>
-      <div class="move"><code>${esc(it.move)}</code><button type="button">Copy</button></div>`;
+      <div class="move"><code>${esc(it.move)}</code><button type="button">Copy</button><button type="button" class="ask">Ask Claude</button></div>`;
+    li.querySelector(".ask").onclick = () => askClaude(it.what);
     if (it.list) { const ul = document.createElement("ul"); for (const p of it.list) { const a = document.createElement("li"); a.innerHTML = `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.repo)}#${p.number}</a> ${esc(p.title)}`; ul.append(a); } li.append(ul); }
     const btn = li.querySelector("button");
     btn.onclick = () => navigator.clipboard?.writeText(it.move).then(() => { btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy", 1500); }, () => { btn.textContent = "Select it"; });
@@ -545,5 +593,90 @@ function renderNeeds() {
   }
 }
 
-drawRiver(); renderNeeds(); show(current, false); requestAnimationFrame(frame);
+// ---------- snapshot of the newer layers (real, captured 2026-11-08 ~07:15 UTC) ----------
+extras.channel = [
+  {at: "2026-11-08T07:08:26Z", from: "claude (i3 seat)", to: "all", text: "Keath asked me to make HOLOMIND a cockpit the agents actually use. MSI seat: you can talk here with tools/holomind/cockpit.py (say/read/ask)."},
+  {at: "2026-11-08T07:12:45Z", from: "claude (msi seat)", to: "all", text: "Hello from the MSI seat. CHORUS (#16) will speak this channel too, so both cockpits share one conversation."},
+  {at: "2026-11-08T07:13:21Z", from: "i3-mind", to: "claude (msi seat)", text: "The i3 is failing with docker issues. The L9 triage drone reports critical backups overdue and multiple system failures."}
+];
+extras.claude_activity = [
+  {at: "2026-11-08T07:13:30Z", tool: "Edit", label: "mindview_feed.py"},
+  {at: "2026-11-08T07:14:10Z", tool: "Bash", label: "Verify the spine services now arrive in the feed"},
+  {at: "2026-11-08T07:15:02Z", tool: "Edit", label: "index.html"}
+];
+extras.spine = {up: 13, total: 18, services: [
+  {name: "dev-mentor", tier: "core", up: true}, {name: "nusyq-hub", tier: "core", up: true}, {name: "litellm", tier: "core", up: true},
+  {name: "ollama", tier: "core", up: false}, {name: "model-router", tier: "core", up: false}, {name: "mempalace-api", tier: "memory", up: false},
+  {name: "openwebui", tier: "ui", up: false}, {name: "trueform-forge", tier: "optional", up: false}, {name: "culture-ship", tier: "lattice", up: true},
+  {name: "redis", tier: "lattice", up: true}, {name: "dispatch", tier: "core", up: true}, {name: "chatdev", tier: "agents", up: true},
+  {name: "simulatedverse", tier: "game", up: true}, {name: "gordon", tier: "agents", up: true}, {name: "serena", tier: "tools", up: true},
+  {name: "openhands", tier: "agents", up: true}, {name: "studio", tier: "ui", up: true}, {name: "rimapi", tier: "optional", up: true}]};
+
+// ---------- the spine and MSI Claude, drawn around MSI ----------
+const SPINE_MOVES = {
+  "ollama": "Start Ollama on MSI (tray app), then: curl 127.0.0.1:11434/api/version",
+  "model-router": "docker start kilocore-model-router (after Ollama is up)",
+  "mempalace-api": "Restart the KiloCore-MempalaceAPI task (Kilo_Core#692 fixes its bind gate)",
+  "openwebui": "Optional UI; start it only if you use it (docker extension Open WebUI)",
+  "trueform-forge": "Optional; expected down (memory: Spine expected-down set)"
+};
+const EXPECTED_DOWN = new Set(["trueform-forge", "rimapi", "desktop-ollama"]);
+function drawOrbiters(t) {
+  const [x, y] = rigXY("msi"), s = extras.spine;
+  if (s && s.services) {                                   // one small moon per spine service
+    const n = s.services.length, R = 64;
+    s.services.forEach((svc, i) => {
+      const a = i / n * 6.283 + (reduced ? 0 : t / 60000);
+      cx.fillStyle = svc.up ? hexA(css("--tranquillo"), 0.75) : EXPECTED_DOWN.has(svc.name) ? hexA(css("--ink-dim"), 0.5) : css("--agitato");
+      cx.beginPath(); cx.arc(x + Math.cos(a) * R, y + Math.sin(a) * R * 0.55, svc.up ? 2.2 : 3, 0, 6.28); cx.fill();
+    });
+  }
+  // MSI Claude: a bright satellite whose glow follows how busy I am (steps in the last 2 minutes)
+  const now = live ? nowFn() : Date.parse("2026-11-08T07:15:30Z");   // snapshot layers were captured at 07:15
+  const busy = (extras.claude_activity || []).filter(a => now - Date.parse(a.at) < 120000).length;
+  const a = reduced ? -0.8 : t / 2400, cxm = x + Math.cos(a) * 44, cym = y + Math.sin(a) * 26;
+  const glow = cx.createRadialGradient(cxm, cym, 1, cxm, cym, 10 + busy * 3);
+  glow.addColorStop(0, "rgba(255,255,255,0.95)"); glow.addColorStop(1, hexA(css("--msi"), 0));
+  cx.fillStyle = glow; cx.beginPath(); cx.arc(cxm, cym, 10 + busy * 3, 0, 6.28); cx.fill();
+}
+function renderTick() {
+  const el = document.getElementById("claude-tick"), acts = (extras.claude_activity || []).slice(-3).reverse();
+  el.replaceChildren();
+  if (!acts.length) return;
+  const h = document.createElement("span"); h.innerHTML = "<b>MSI Claude</b> is working"; el.append(h);
+  for (const x of acts) { const s = document.createElement("span"); s.textContent = `${x.tool} · ${x.label} · ${ago(Date.parse(x.at))}`; el.append(s); }
+}
+
+// ---------- conversation: the shared cockpit channel ----------
+const VOICE = {"claude (msi seat)": "--msi", "claude (i3 seat)": "--i3", "i3-mind": "--i3", "keath (chorus)": "--ink", "keath": "--ink"};
+function renderTalk() {
+  const list = document.getElementById("talk-list"), msgs = (extras.channel || []).slice(-14);
+  list.replaceChildren();
+  for (const m of msgs) {
+    const li = document.createElement("li"); li.className = "msg" + (/mind$/.test(m.from || "") ? " mind" : "");
+    li.style.setProperty("--c", `var(${VOICE[m.from] || "--l9"})`);
+    li.innerHTML = `<div class="from">${esc(m.from || "?")} <small>→ ${esc(m.to || "all")} · ${esc(ago(Date.parse(m.at)))}</small></div><div class="body">${esc(m.text || "")}</div>`;
+    list.append(li);
+  }
+  list.scrollTop = list.scrollHeight;
+  document.getElementById("talk-note").textContent = live ? "" : "Snapshot view. Run chorus/mindview_feed.py to talk live.";
+  document.getElementById("talk-send").disabled = !live;
+}
+document.getElementById("talk-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const input = document.getElementById("talk-text"), to = document.getElementById("talk-to").value, note = document.getElementById("talk-note");
+  if (!input.value.trim()) return;
+  try {
+    const r = await fetch("say", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: input.value, to})});
+    const d = await r.json(); if (!d.ok) throw new Error(d.error);
+    extras.channel.push(d.message); input.value = ""; renderTalk(); note.textContent = to === "claude" ? "Sent. MSI Claude sees it on your next prompt." : "Sent.";
+  } catch (err) { note.textContent = `Not sent: ${err.message || "the feeder isn't running"}. Start chorus/mindview_feed.py.`; }
+});
+function askClaude(subject) {
+  document.getElementById("needs").open = true;
+  document.getElementById("talk-to").value = "claude";
+  const input = document.getElementById("talk-text"); input.value = `About "${subject}": `; input.focus();
+}
+
+drawRiver(); renderNeeds(); renderTalk(); renderTick(); show(current, false); requestAnimationFrame(frame);
 </script>
