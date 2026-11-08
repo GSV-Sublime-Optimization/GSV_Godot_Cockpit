@@ -21,6 +21,7 @@ var _container: SubViewportContainer
 var _viewport: SubViewport
 var _ledger: RichTextLabel
 var _slice_btn: Button
+var _atlas_btn: Button
 var _density_btn: Button
 var _pull_btn: Button
 var _simulated: bool = false
@@ -41,6 +42,11 @@ func _ready() -> void:
 	_slice_btn.text = "Slice: time"
 	_slice_btn.pressed.connect(_on_slice_pressed)
 	bar.add_child(_slice_btn)
+
+	_atlas_btn = Button.new()
+	_atlas_btn.text = "Atlas: all"
+	_atlas_btn.pressed.connect(_on_atlas_pressed)
+	bar.add_child(_atlas_btn)
 
 	_density_btn = Button.new()
 	_density_btn.text = "Density: live"
@@ -82,6 +88,13 @@ func _ready() -> void:
 func _on_slice_pressed() -> void:
 	var axis := _room.cycle_slice_axis()
 	_slice_btn.text = "Slice: " + axis
+
+
+func _on_atlas_pressed() -> void:
+	# Slices the Capability Atlas shelf (machine / cost class / grade);
+	# the shelf itself expands when its header is pulled up.
+	var view := _room.cycle_atlas_slice()
+	_atlas_btn.text = "Atlas: " + view
 
 
 func _on_density_pressed() -> void:
