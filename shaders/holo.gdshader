@@ -1,14 +1,14 @@
 shader_type spatial;
 // HOLOMIND hologram material: light in the air, not a surface.
-// Additive, unshaded, two-sided; a fresnel rim, slow scanlines and a faint flicker.
+// Additive, unshaded, two-sided; a fresnel rim and fixed scanlines. Nothing animates by itself.
 render_mode unshaded, blend_add, cull_disabled, depth_draw_never;
 
 uniform vec4 tint : source_color = vec4(0.35, 0.75, 1.0, 1.0);
 uniform float strength = 0.6;
 uniform float rim_power = 2.2;
 uniform float scan_density = 90.0;
-uniform float scan_speed = 0.6;
-uniform float flicker = 0.04;
+uniform float scan_speed = 0.0;   // static: motion on screen must mean something
+uniform float flicker = 0.0;      // no theatrical flicker
 
 varying vec3 world_pos;
 

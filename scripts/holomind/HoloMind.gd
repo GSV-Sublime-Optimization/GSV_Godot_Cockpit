@@ -40,7 +40,10 @@ var _t: float = 0.0
 var _poll: float = 0.0
 var _bodies: Dictionary = {}          # id -> {node, mat, label}
 var _layer_roots: Array[Node3D] = []
-var _packets: Array[Dictionary] = []  # {mesh, from, to, u, speed}
+var _flights: Array[Dictionary] = []   # real events in flight: {node, from, to, t}
+var _hb_age: Dictionary = {}             # last seen heartbeat age per rig, to spot a NEW heartbeat
+var _order_state: Dictionary = {}        # order id -> last seen status, to spot new orders and receipts
+var _flights_primed: bool = false        # the first feed only records state: nothing flies for old news
 var _stars: Node3D
 var _memory: Node3D
 var _mind: Node3D
@@ -261,12 +264,6 @@ func _build_layers() -> void:
 			beam.surface_add_vertex(Vector3.ZERO)
 			beam.surface_end()
 			_mesh(beam, _holo(C_HOLO, 0.7), Vector3.ZERO, ship)
-			for k in 3:
-				var dot := SphereMesh.new()
-				dot.radius = 0.07
-				dot.height = 0.14
-				var pk := _mesh(dot, _holo(Color(0.7, 0.95, 1.0), 1.6), p, ship)
-				_packets.append({"mesh": pk, "from": p, "to": Vector3.ZERO, "u": k / 3.0, "id": id})
 	_stars = Node3D.new()
 	_layer_roots[1].add_child(_stars)
 	_memory = Node3D.new()
@@ -716,6 +713,7 @@ func _apply_feed() -> void:
 	_rebuild_agents()
 	_rebuild_actions()
 	_apply_activity()
+	_detect_flights()
 	_rebuild_bench()
 	_apply_channel()
 	_count_waiting()
@@ -818,34 +816,22 @@ func _process(delta: float) -> void:
 	if _poll <= 0.0 and shot_path == "":
 		_poll = 3.0
 		_read_feed()
-	# Camera orbit (slow drift unless the person is dragging).
-	if not _drag:
-		_yaw += delta * 0.05
+	# The camera moves only when you drag it (no idle drift: motion on screen must mean something).
 	_cam.position = Vector3(cos(_yaw) * cos(_pitch), sin(_pitch), sin(_yaw) * cos(_pitch)) * _dist + Vector3(0, 1.6, 0)
 	_cam.look_at(Vector3(0, 1.8, 0), Vector3.UP)
-	# Bodies breathe; the library turns.
-	for id: String in _bodies:
-		var n: MeshInstance3D = (_bodies[id] as Dictionary)["node"]
-		n.rotation.y += delta * (0.4 if id == "xanadu" else 0.2)
-	# Heartbeat packets flow to the library while their rig reports.
-	var bodies: Dictionary = feed.get("bodies", {})
-	for pk: Dictionary in _packets:
-		var st := String((bodies.get(pk["id"], {}) as Dictionary).get("status", "unknown"))
-		var m: MeshInstance3D = pk["mesh"]
-		m.visible = st == "green" or st == "red"
-		pk["u"] = fmod(float(pk["u"]) + delta * 0.22, 1.0)
-		m.position = (pk["from"] as Vector3).lerp(pk["to"] as Vector3, float(pk["u"]))
-	# The Mind glides to its attention, rings turning; its card rises beside it.
-	_mind.position = _mind.position.lerp(_mind_target + Vector3(0, 0.12 * sin(_t * 1.7), 0), clampf(delta * 1.6, 0.0, 1.0))
-	for c in _mind.get_children():
-		if String(c.name).begins_with("ring"):
-			(c as Node3D).rotate_object_local(Vector3(1, 0, 0) if String(c.name) == "ring100" else Vector3(0, 0, 1), delta * 0.9)
+	# Real events in flight (a new heartbeat, an order, a receipt). Nothing else travels.
+	_update_flights(delta)
+	# The Mind moves only when its attention changes; its rings turn only while it is actually thinking.
+	_mind.position = _mind.position.lerp(_mind_target, clampf(delta * 1.6, 0.0, 1.0))
+	if int(feed.get("mind_thinking", 0)) > 0:
+		for c in _mind.get_children():
+			if String(c.name).begins_with("ring"):
+				(c as Node3D).rotate_object_local(Vector3(1, 0, 0) if String(c.name) == "ring100" else Vector3(0, 0, 1), delta * 0.9)
 	_card.position = _mind.position + Vector3(0, 1.6, 0)
 	if _cam.position.distance_to(_card.position) > 0.01:
 		_card.look_at(_cam.position, Vector3.UP)
 		_card.rotate_object_local(Vector3.UP, PI)
 	_card.scale = _card.scale.lerp(Vector3.ONE, clampf(delta * 2.2, 0.0, 1.0))
-	_memory.rotation.y += delta * 0.03
 	# The terminal rises beside the Mind's attention, facing you, and folds away when attention moves.
 	if _term_focus != "":
 		_term_shown = minf(1.0, _term_shown + delta * 0.8)
@@ -860,7 +846,6 @@ func _process(delta: float) -> void:
 	# Layer focus: the chosen layer bright, others dim.
 	for i in _layer_roots.size():
 		_layer_roots[i].visible = focus_layer < 0 or focus_layer == i or i == 0
-	_far.rotation.y += delta * 0.004
 	# You stand at the front edge, nearest the camera; agents breathe and flare on new activity.
 	var front := Vector3(_cam.position.x, 0, _cam.position.z).normalized() * 6.8
 	_you.position = front + Vector3(0, 0.9, 0)
@@ -872,7 +857,7 @@ func _process(delta: float) -> void:
 		var rec: Dictionary = _agent_nodes[name]
 		rec["pulse"] = maxf(0.0, float(rec["pulse"]) - delta * 0.25)
 		var node: Node3D = rec["node"]
-		node.scale = Vector3.ONE * (1.0 + 0.5 * float(rec["pulse"]) + 0.04 * sin(_t * 2.0 + float(node.get_index())))
+		node.scale = Vector3.ONE * (1.0 + 0.5 * float(rec["pulse"]))   # flares only on real new activity
 	_hud_clock -= delta
 	if _hud_clock <= 0.0:   # the header changes at most once a second
 		_hud_clock = 1.0
@@ -930,7 +915,7 @@ backup %s h old%s · mirror %s h, %s failures · MSI spine %s/%s up%s" % [str(b.
 
 
 func _update_hud() -> void:
-	_hud.text = "HOLOMIND · the colony workstation (i3 Claude) · acts through orders you assign · %s · WORK WAITING: %s\n%s · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · F11: fullscreen · Esc: quit" % [
+	_hud.text = "HOLOMIND · the colony workstation (i3 Claude) · acts through orders you assign · %s · WORK WAITING: %s\n%s · motion = real events only (heartbeat → xanadu · order → seat · receipt → you) · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · F11: fullscreen · Esc: quit" % [
 		feed_note, _waiting_text, ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"] + _colony_text
 
 
@@ -1276,6 +1261,63 @@ func _run_palette(i: int) -> void:
 		"full":
 			var w := get_window()
 			w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
+
+
+## EVENT FLIGHTS: something travels across the table only when the feed shows it actually happened.
+## - heartbeat: a rig's heartbeat age dropped since the last feed, so a NEW heartbeat landed on xanadu
+## - order: a work order appeared in the shared channel, so it flies from whoever posted it to the seat
+## - receipt: an order's status changed (taken/working/done/declined), so it flies from the seat back to you
+## The first feed only records state, so old news never animates.
+func _detect_flights() -> void:
+	var ship: Node3D = _layer_roots[0]
+	var bodies: Dictionary = feed.get("bodies", {})
+	for id: String in bodies:
+		var b: Dictionary = bodies[id]
+		if id == "xanadu" or b.get("age_s") == null:
+			continue
+		var age := int(b.get("age_s"))
+		if _flights_primed and _hb_age.has(id) and age < int(_hb_age[id]) and String(b.get("status", "")) != "silent":
+			var col: Color = C_ALARM if String(b.get("status", "")) == "red" else C_CALM
+			_fly(ship.to_global(BODY_PLACES[id] as Vector3), ship.to_global(BODY_PLACES["xanadu"] as Vector3), col,
+				"heartbeat · %s · %s" % [id, String(b.get("status", ""))])
+		_hb_age[id] = age
+	for x: Variant in feed.get("orders", []):
+		var o: Dictionary = x
+		var oid := String(o.get("id", ""))
+		var st := String(o.get("status", "posted"))
+		var seat_node := _speaker_node(String(o.get("by")) if o.get("by") != null and String(o.get("by")) != "" else String(o.get("to", "")))
+		var seat_pos: Vector3 = seat_node.global_position if seat_node != null else Vector3(0, 1.4, 0)
+		if _flights_primed and not _order_state.has(oid):
+			_fly(_you.global_position, seat_pos, Color(1.0, 0.82, 0.48), "order → %s" % String(o.get("to", "")))
+		elif _flights_primed and String(_order_state.get(oid, "")) != st:
+			_fly(seat_pos, _you.global_position, Color(0.27, 0.83, 0.54) if st == "done" else Color(0.96, 0.69, 0.25), "%s · %s" % [st, String(o.get("text", "")).left(40)])
+		_order_state[oid] = st
+	_flights_primed = true
+
+
+func _fly(from: Vector3, to: Vector3, col: Color, text: String) -> void:
+	var holder := Node3D.new()
+	add_child(holder)
+	var s := SphereMesh.new()
+	s.radius = 0.12
+	s.height = 0.24
+	_mesh(s, _holo(col, 2.2), Vector3.ZERO, holder)
+	_label(text, 30, col.lightened(0.3), Vector3(0, 0.35, 0), holder)
+	holder.global_position = from
+	_flights.append({"node": holder, "from": from, "to": to, "t": 0.0})
+
+
+func _update_flights(delta: float) -> void:
+	for i in range(_flights.size() - 1, -1, -1):
+		var f: Dictionary = _flights[i]
+		f["t"] = float(f["t"]) + delta / 2.5
+		var n: Node3D = f["node"]
+		var u := clampf(float(f["t"]), 0.0, 1.0)
+		var arc := Vector3(0, 1.2 * sin(u * PI), 0)   # a visible arc so you can follow it, nothing more
+		n.global_position = (f["from"] as Vector3).lerp(f["to"] as Vector3, u) + arc
+		if float(f["t"]) >= 1.0:
+			n.queue_free()
+			_flights.remove_at(i)
 
 
 func _shoot() -> void:

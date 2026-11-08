@@ -1,5 +1,5 @@
 shader_type sky;
-// HOLOMIND's outer space: a deep starfield in three depths, twinkling, over faint nebula clouds.
+// HOLOMIND's outer space: a still, deep starfield in three depths over faint nebula clouds. A backdrop, not data.
 // Everything is computed from the view direction, so it costs one pass and no textures.
 
 uniform vec3 deep = vec3(0.004, 0.006, 0.018);
@@ -42,13 +42,13 @@ float stars(vec3 dir, float scale, float threshold) {
 	}
 	vec3 centre = (cell + vec3(hash(cell + 1.3), hash(cell + 2.7), hash(cell + 4.1))) / scale;
 	float d = length(dir - normalize(centre)) * scale;
-	float twinkle = 0.75 + 0.25 * sin(TIME * (1.0 + h * 3.0) + h * 40.0);
+	float twinkle = 0.75 + 0.25 * fract(h * 7.0);   // fixed brightness per star: the sky does not pretend to be alive
 	return smoothstep(0.42, 0.0, d) * (h - threshold) / (1.0 - threshold) * twinkle;
 }
 
 void sky() {
 	vec3 d = normalize(EYEDIR);
-	float n = fbm(d * 2.2 + vec3(0.0, 0.0, TIME * 0.004));
+	float n = fbm(d * 2.2);
 	float m = fbm(d * 4.1 - vec3(1.7, 0.3, 0.0));
 	vec3 col = deep;
 	col += nebula_a * smoothstep(0.45, 0.85, n) * 0.9;
