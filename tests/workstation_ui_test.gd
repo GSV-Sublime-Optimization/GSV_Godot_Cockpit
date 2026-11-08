@@ -70,6 +70,29 @@ func _run() -> void:
 	_check(not ui._inspector_panel.visible and not ui._activity_panel.visible, "focus layout")
 	ui._apply_layout(0)
 	_check(ui._inspector_panel.visible and ui._activity_panel.visible, "colony layout")
+	ui._open_resource({"kind": "hyperspace", "id": "hyperspace", "name": "Hyperspace"})
+	await process_frame
+	_check(ui._pages.has("hyperspace:hyperspace"), "3D graph is a real workstation tab")
+	var hyper: Node = ui._pages["hyperspace:hyperspace"].get_child(0)
+	_check(hyper._viewport != null and hyper._camera != null, "embedded 3D viewport and camera initialize")
+	hyper.set_snapshot({
+		"body_feed_state": "unknown", "bodies": [],
+		"project_feed_state": "observed",
+		"projects": [{"name": "Fixture repo", "path": "C:/dev/active/fixture", "branch": "main"}],
+		"mission_feed_state": "unknown", "missions": [],
+		"service_feed_state": "unknown", "services": []
+	})
+	_check(hyper.select_key("project:C:/dev/active/fixture"), "embedded graph sees source project")
+	hyper._open_selected()
+	_check(ui._pages.has("project:C:/dev/active/fixture"), "graph deep-link opens project resource")
+	ui._compose_from_space({"path": "C:/dev/active/fixture", "title": "Inspect fixture",
+		"objective": "Review this fixture source and report checks without editing files.",
+		"acceptance": "Report source evidence", "risk": "R0"})
+	_check(ui._pages.has("factory:factory"), "graph action opens owner-backed mission composer")
+	var factory: Node = ui._pages["factory:factory"].get_child(0)
+	_check(factory._title.text == "Inspect fixture", "factory receives exact project context")
+	_check(factory._pending_project == "C:/dev/active/fixture", "context hint preserved for fresh Studio validation")
+	_check(factory._submit.disabled, "context alone cannot authorize mission POST")
 	ui.queue_free()
 	await process_frame
 	await process_frame
