@@ -1091,7 +1091,11 @@ func _rebuild_bench() -> void:
 				col = Color(0.6, 0.6, 0.66)
 			var by := String(d.get("by")) if d.get("by") != null else ""
 			var row := VBoxContainer.new()
-			row.add_child(_bench_label("%s → %s · %s%s" % [st.to_upper(), String(d.get("to", "any")), String(d.get("text", "")).left(140),
+			var proof := ""
+			if st == "done":
+				var v: Variant = d.get("verified")
+				proof = " ✓ verified" if v is bool and bool(v) else (" ✗ NOT confirmed by the owner record" if v is bool else " (reported, unverified)")
+			row.add_child(_bench_label("%s%s → %s · %s%s" % [st.to_upper(), proof, String(d.get("to", "any")), String(d.get("text", "")).left(140),
 				("  · " + by) if by != "" else ""], 13, col))
 			if String(d.get("note", "")) != "":
 				row.add_child(_bench_label("“" + String(d.get("note")) + "”", 12, Color(0.8, 0.86, 1.0)))

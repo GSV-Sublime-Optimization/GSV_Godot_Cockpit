@@ -427,6 +427,22 @@ def tick(state):
         state['colony'] = fresh or state.get('colony')
     feed['colony'] = state.get('colony')
     feed['actions'] = actions(bodies, state.get('awaiting', []), remote.get('cards', []), channel, dict(feed['colony'] or {}, _pipeline=state.get('pipeline', [])))
+    # A seat saying 'done' is a REPORT. Reconcile it against the owning record where we can (GPT-6, #14):
+    # a review order is verified only if a gsv review exists on that PR's current head; a merge order only if the
+    # PR is no longer open; anything else stays 'reported'.
+    open_prs = {p['url']: p for p in state.get('pipeline', [])}
+    for o in orders:
+        if o['status'] != 'done':
+            continue
+        url = o.get('url') or ''
+        ref = str(o.get('ref') or '')
+        if ref.startswith('review:') or 'review' in str(o.get('station')) or o.get('station') == 'pegs':
+            p = open_prs.get(url)
+            o['verified'] = (None if p is None else bool(p.get('reviewers')))
+        elif ref.startswith('merge:') or str(o.get('text', '')).startswith('MERGE'):
+            o['verified'] = url not in open_prs if url else None
+        else:
+            o['verified'] = None
     feed['orders'] = orders[-30:]
     feed['activity'] = seat_activity()
     feed['pipeline'] = state.get('pipeline', [])
