@@ -706,6 +706,9 @@ function show(ev, animate = true) {
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 function ago(ms) {
   const m = Math.round((nowFn() - ms) / 60000);
+  // A record newer than "now" (snapshot extras captured after the frozen fixture, or clock skew)
+  // must not read as "just now": say how far after the snapshot it was taken.
+  if (m < -1) return -m < 60 ? `${-m} min after this snapshot` : `${Math.round(-m / 60)} h after this snapshot`;
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
 }
 
