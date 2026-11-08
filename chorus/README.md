@@ -73,13 +73,14 @@ Every mark in the sky is data; nothing is there for decoration.
 - **Snapshot (no network to the fleet):** open `chorus/index.html` in any browser. It uses the shared bakeoff fixture, frozen 2026-11-08 06:48 UTC (`tests/fixtures/mindview-20261108/`).
 - **Live:** `python chorus/mindview_feed.py`, then open http://127.0.0.1:8767/.
   - Every 15 s the feeder makes **one read-only SSH call** to xanadu (events, heartbeats, backup and mirror receipts, Steward cards, the channel) and serves `feed.json` on loopback only.
-  - Its only write is a message you send: one line appended to `~/steward/cockpit/channel.jsonl` (600 characters at most; empty messages are refused).
+  - It appends to `~/steward/cockpit/channel.jsonl` on xanadu (600 characters at most; empty messages are refused) when you send a message (`/say`), post a work order (`/order`) or confirm an action (`/act` receipt), and on its own each cycle to post the MSI Claude's read receipts (`flush_acks`).
+  - Locally it writes `feed.json`, `%LOCALAPPDATA%/KiloCore/chorus/channel.cache.jsonl`, and `C:/dev/active/Dev-Mentor/state/fleet/feed.json` when that repo exists.
 - **Hooks (so the MSI Claude reacts):** copy `hooks/*.py` to `%LOCALAPPDATA%/KiloCore/bin/` and add a PostToolUse hook for `claude_activity.py` and a UserPromptSubmit hook for `chorus_inbox.py` in Claude Code settings.
 - **Keys:** **F** fullscreen, **Esc** leaves fullscreen and stops a rehearsal. The browser's own close always works.
 
 ## Bakeoff hard rules
 - **Windowed:** an ordinary browser tab. It is never topmost and never takes the screen; fullscreen is opt-in.
-- **No actuators:** it starts, stops and changes nothing. The single write is your own message to the shared channel.
+- **Actuators (since 1efe665; this breaks hard rule 2 as written):** `POST /act` runs, after a second confirm within 60 s, `schtasks /run` on four colony tasks (including the off-box backup, which writes to xanadu), `docker restart` on nine colony containers, the doctor, or a `git push` of unpushed commits to a new `claude/preserve-*` branch. The page has no button for it yet; it is reachable over HTTP on loopback. The doctor also SSHes to the i3 and runs a read-only PowerShell query there every 5 minutes while something fails.
 - **Never on the i3 screen or rotation** without Keath's OK.
 - **Budget:** a single static page (no framework, Google Fonts only) drawing at most 30 fps on a 2D canvas, skipped while the tab is hidden, one still frame a second with reduced motion. The backdrop (sky, band, far stars, vignette) is its own canvas, painted only on resize, DPR change or a new mood, and moved for parallax by a compositor transform; every glow is a pre-rendered sprite. `index.html?perf` draws 300 rasterised frames and puts the average and p95 frame cost in the title and console: about 2.5 ms at 1x and 6.7 ms at 2x in headless Edge (software raster), down from 5.1 ms and 23 ms (p95 49 ms) before. The feeder is the Python standard library plus one SSH call per 15 s. Per-process RAM and CPU in a real browser are still to be measured on MSI.
 
