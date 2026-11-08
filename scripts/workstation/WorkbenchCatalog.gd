@@ -74,8 +74,8 @@ static func parse_mission_list(text: String) -> Dictionary:
 		if typeof(title) != TYPE_STRING or title.strip_edges().is_empty():
 			return {"ok": false, "reason": "mission_title_missing"}
 		if typeof(state) != TYPE_STRING or not [
-			"queued", "awaiting_approval", "running", "succeeded", "failed",
-			"cancelled", "blocked", "pending", "ready", "timed_out"
+			"proposed", "awaiting_approval", "approved", "queued", "running",
+			"succeeded", "failed", "cancelled", "rejected"
 		].has(state):
 			return {"ok": false, "reason": "mission_state_unrecognized"}
 		if typeof(risk) != TYPE_STRING or not ["R0", "R1", "R2", "R3"].has(risk):
