@@ -53,8 +53,17 @@ print(open(p, encoding="utf-8").read() if os.path.exists(p) else "")
             m = json.loads(l)
         except Exception:
             continue
+        if m.get('kind') == 'read':
+            continue
         if who is None or str(m.get('to', 'all')).lower() in (who.lower(), 'all') or who.lower().startswith(str(m.get('to', '')).lower()):
             lines.append(m)
+    if who:
+        # Leave a read receipt, so senders see "read by <seat>" in the cockpit.
+        mark = {'kind': 'read', 'from': who, 'at': dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}
+        remote(f'''
+import os, sys
+open(os.path.expanduser("{CH}"), "a", encoding="utf-8").write(sys.stdin.read() + "\\n")
+''', json.dumps(mark))
     return lines[-last:]
 
 
@@ -62,7 +71,8 @@ def main():
     a = argparse.ArgumentParser(description='Talk in the colony cockpit channel.')
     sub = a.add_subparsers(dest='cmd', required=True)
     s = sub.add_parser('say'); s.add_argument('text'); s.add_argument('--as', dest='who', required=True); s.add_argument('--to', default='all')
-    r = sub.add_parser('read'); r.add_argument('--last', type=int, default=20); r.add_argument('--for', dest='who')
+    r = sub.add_parser('read', help='read the channel; with --for SEAT also leave a read receipt as that seat')
+    r.add_argument('--last', type=int, default=20); r.add_argument('--for', dest='who')
     q = sub.add_parser('ask'); q.add_argument('text'); q.add_argument('--as', dest='who', required=True)
     b = sub.add_parser('brief', help='the colony in one screen: rigs, agents at work, the work queue, the last messages')
     b.add_argument('--json', action='store_true')

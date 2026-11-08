@@ -230,7 +230,21 @@ def tick(state):
     for e in events:
         text = (' '.join(e.get('reasons', [])) + ' ' + e.get('line', '')).lower()
         e['focus'] = e.get('focus') or next((b for b in ('i3', 'msi', 'l9', 'xanadu') if b in text), 'xanadu')
-    channel = remote.get('channel', [])
+    raw_channel = remote.get('channel', [])
+    # Read receipts: {"kind": "read", "from": seat, "at": t} lines say "seat has read everything up to t".
+    reads = {}
+    for m in raw_channel:
+        if m.get('kind') == 'read':
+            reads[str(m.get('from'))] = max(reads.get(str(m.get('from')), ''), str(m.get('at', '')))
+    channel = [m for m in raw_channel if m.get('kind') != 'read']
+    for i, m in enumerate(channel):
+        who = str(m.get('from', ''))
+        rb = sorted(s for s, t in reads.items() if t >= str(m.get('at', '')) and s.lower() != who.lower())
+        # Anyone who replied to this sender afterwards has evidently read it.
+        for n in channel[i + 1:]:
+            if str(n.get('to', '')).lower() == who.lower() and str(n.get('from')) not in rb and str(n.get('from')).lower() != who.lower():
+                rb.append(str(n.get('from')))
+        m['read_by'] = rb
     feed = {'schema': 'colony.mindview-feed/v0', 'at': iso(), 'source_ok': True, 'bodies': bodies, 'events': events[-40:],
             'attention': (events[-1] if events else {}).get('focus', 'xanadu'), 'screen': screen,
             'agents': state.get('agents', []), 'channel': channel[-40:]}

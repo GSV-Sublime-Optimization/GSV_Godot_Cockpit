@@ -66,6 +66,9 @@ var _you_bubble: Label3D
 var _chat: RichTextLabel
 var _typebox: LineEdit
 var _speaker: String = "keath"
+var _far: Node3D
+var _hud_clock: float = 0.0
+var _sent_local: Array[Dictionary] = []   # what you typed this session, to show sent > delivered > read
 var _actions_root: Node3D
 const KIND_COLOURS := {"rig": Color(1.0, 0.4, 0.4), "review": Color(0.5, 0.75, 1.0), "decision": Color(1.0, 0.78, 0.35), "reply": Color(0.95, 0.95, 1.0)}
 var _seen_channel: int = 0
@@ -92,6 +95,8 @@ func _ready() -> void:
 	_build_mind()
 	_build_cockpit()
 	_build_hud()
+	_layout_ui()
+	get_viewport().size_changed.connect(_layout_ui)
 	_read_feed()
 
 
@@ -131,16 +136,45 @@ func _label(text: String, size: int, color: Color, at: Vector3, parent: Node3D) 
 func _build_room() -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.015, 0.02, 0.045)
+	# Outer space: a procedural starfield and nebula sky (shaders/space.gdshader), deep and slowly twinkling.
+	var sky := Sky.new()
+	var sky_mat := ShaderMaterial.new()
+	sky_mat.shader = preload("res://shaders/space.gdshader")
+	sky.sky_material = sky_mat
+	sky.radiance_size = Sky.RADIANCE_SIZE_32
+	sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	e.background_mode = Environment.BG_SKY
+	e.sky = sky
+	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	e.ambient_light_color = Color(0.05, 0.06, 0.1)
 	e.glow_enabled = true
-	e.glow_intensity = 1.1
-	e.glow_bloom = 0.25
+	e.glow_intensity = 1.3
+	e.glow_strength = 1.1
+	e.glow_bloom = 0.35
+	e.glow_hdr_threshold = 0.7
 	env.environment = e
 	add_child(env)
 	_cam = Camera3D.new()
 	_cam.fov = 50
+	_cam.far = 900.0
 	add_child(_cam)
+	# Distant worlds for scale: far beyond the table, slowly turning.
+	_far = Node3D.new()
+	add_child(_far)
+	var worlds := [[Vector3(-160, 40, -260), 34.0, Color(0.55, 0.35, 0.85)], [Vector3(220, -30, -180), 18.0, Color(0.3, 0.75, 0.95)],
+		[Vector3(90, 95, 300), 9.0, Color(0.95, 0.6, 0.35)]]
+	for w: Array in worlds:
+		var s := SphereMesh.new()
+		s.radius = float(w[1])
+		s.height = float(w[1]) * 2.0
+		s.radial_segments = 48
+		s.rings = 24
+		_mesh(s, _holo(w[2] as Color, 0.55), w[0] as Vector3, _far)
+		var halo := TorusMesh.new()
+		halo.inner_radius = float(w[1]) * 1.5
+		halo.outer_radius = float(w[1]) * 1.53
+		var hm := _mesh(halo, _holo((w[2] as Color).lightened(0.3), 0.6), w[0] as Vector3, _far)
+		hm.rotation = Vector3(0.4, 0.0, 0.25)
 	# The holotable: a base disc, rings and a radial grid.
 	var table := Node3D.new()
 	add_child(table)
@@ -177,6 +211,19 @@ func _build_layers() -> void:
 			s.radius = 0.85
 			s.height = 1.7
 			mesh = s
+			# The library is the system's sun: a warm core and a soft corona the heartbeats orbit into.
+			var corona := SphereMesh.new()
+			corona.radius = 1.5
+			corona.height = 3.0
+			var cm := _holo(Color(1.0, 0.8, 0.45), 0.35)
+			cm.set_shader_parameter("rim_power", 1.2)
+			_mesh(corona, cm, p, ship)
+			var sun := OmniLight3D.new()
+			sun.light_color = Color(1.0, 0.85, 0.6)
+			sun.light_energy = 1.5
+			sun.omni_range = 9.0
+			sun.position = p
+			ship.add_child(sun)
 		else:
 			var prism := PrismMesh.new()
 			prism.size = Vector3(1.3, 1.2, 1.3)
@@ -427,14 +474,27 @@ func _speaker_node(who: String) -> Node3D:
 func _apply_channel() -> void:
 	var channel: Array = feed.get("channel", [])
 	var b := PackedStringArray()
-	b.append("[color=#7d8aa8]COCKPIT CHANNEL · shared with every agent · @mind (default), @claude, @msi...[/color]")
+	b.append("[color=#7d8aa8]COCKPIT CHANNEL · shared with every agent · select text to copy · C copies the whole brief[/color]")
+	var delivered_texts := {}
 	for m: Variant in channel.slice(-14):
 		var d: Dictionary = m
 		var who := String(d.get("from", "?"))
-		var col := "ffd27a" if who.to_lower() == _speaker.to_lower() else ("9fd8ff" if who.ends_with("mind") else "ffb07a")
+		var mine := who.to_lower() == _speaker.to_lower()
+		var col := "ffd27a" if mine else ("9fd8ff" if who.ends_with("mind") else "ffb07a")
 		var model: Variant = d.get("model")
-		b.append("[color=#%s]%s[/color]%s [color=#7d8aa8]→ %s[/color]\n%s" % [col, _esc(who), ("" if model == null else " [color=#7d8aa8](" + _esc(model) + ")[/color]"),
-			_esc(d.get("to", "all")), _esc(d.get("text", ""))])
+		var status := ""
+		if mine:
+			delivered_texts[String(d.get("text", ""))] = true
+			var rb: Array = d.get("read_by", [])
+			# Delivery you can see: delivered (it's in the shared channel), then read by whichever seats have read it.
+			status = "  [color=#46d38a]✓ delivered[/color]" + ("  [color=#9fd8ff]✓ read by %s[/color]" % _esc(", ".join(PackedStringArray(rb))) if not rb.is_empty() else "  [color=#7d8aa8]· not read yet[/color]")
+		b.append("[color=#%s]%s[/color]%s [color=#7d8aa8]→ %s[/color]%s\n%s" % [col, _esc(who), ("" if model == null else " [color=#7d8aa8](" + _esc(model) + ")[/color]"),
+			_esc(d.get("to", "all")), status, _esc(d.get("text", ""))])
+	# What you typed that hasn't reached the shared channel yet.
+	for s: Dictionary in _sent_local:
+		if not delivered_texts.has(String(s.get("text", ""))):
+			b.append("[color=#ffd27a]%s[/color] [color=#7d8aa8]→ %s[/color]  [color=#f5b041]… sent, waiting for the channel (≤10 s)[/color]\n%s" % [
+				_esc(_speaker), _esc(s.get("to", "")), _esc(s.get("text", ""))])
 	_chat.text = "\n".join(b)
 	# Speech in space: each speaker's latest words appear by their avatar.
 	var latest := {}
@@ -478,8 +538,68 @@ func _send(text: String) -> void:
 	f.seek_end()
 	f.store_line(JSON.stringify(line))
 	f.close()
+	_sent_local.append(line)
 	_you_bubble.text = t
-	_subtitle.text = "you → %s: “%s”  (sent; the channel syncs every 10 s)" % [to, t]
+	_subtitle.text = "you → %s: “%s”  · sent; it shows ✓ delivered when it reaches the shared channel" % [to, t]
+	_apply_channel()
+
+
+## Everything the cockpit shows, as one text you can paste anywhere: fleet, agents, work queue, conversation, next steps.
+func _brief_text() -> String:
+	var L := PackedStringArray()
+	L.append("COLONY COCKPIT BRIEF (HOLOMIND, i3) · feed %s · i3 screen: %s" % [String(feed.get("at", "?")), String(feed.get("screen", ""))])
+	L.append("")
+	L.append("FLEET")
+	var bodies: Dictionary = feed.get("bodies", {})
+	for id: String in bodies:
+		var b: Dictionary = bodies[id]
+		var failing: Array = b.get("failing", [])
+		L.append("- %s (%s): %s%s. %s" % [String(b.get("label", id)), String(b.get("role", "")), String(b.get("status", "?")),
+			(" (failing: " + ", ".join(PackedStringArray(failing)) + ")") if not failing.is_empty() else "", String(b.get("detail", ""))])
+	L.append("")
+	L.append("AGENTS AT WORK")
+	for a: Variant in feed.get("agents", []):
+		var g: Dictionary = a
+		var r: Array = g.get("recent", [])
+		if not r.is_empty():
+			var top: Dictionary = r[0]
+			L.append("- %s: %s #%s %s" % [String(g.get("agent", "")), String(top.get("repo", "")), str(top.get("number", "")), String(top.get("title", ""))])
+	L.append("")
+	var acts: Array = feed.get("actions", [])
+	L.append("WORK WAITING (%d)" % acts.size())
+	for x: Variant in acts:
+		var d: Dictionary = x
+		L.append("- [%s] %s: %s%s" % [String(d.get("kind", "")), String(d.get("where", "")), String(d.get("title", "")), ("  " + String(d.get("url"))) if d.has("url") else ""])
+	L.append("")
+	L.append("RECENT THOUGHTS")
+	var events: Array = feed.get("events", [])
+	for e: Variant in events.slice(-5):
+		L.append("- %s: %s" % [String((e as Dictionary).get("mind", "?")), String((e as Dictionary).get("line", ""))])
+	L.append("")
+	L.append("CONVERSATION (latest)")
+	var channel: Array = feed.get("channel", [])
+	for m: Variant in channel.slice(-10):
+		var d: Dictionary = m
+		var rb: Array = d.get("read_by", [])
+		L.append("- %s → %s: %s%s" % [String(d.get("from", "?")), String(d.get("to", "all")), String(d.get("text", "")), ("  [read by " + ", ".join(PackedStringArray(rb)) + "]") if not rb.is_empty() else ""])
+	L.append("")
+	L.append("SUGGESTED NEXT STEPS")
+	var n := 0
+	for x: Variant in acts:
+		var d: Dictionary = x
+		var k := String(d.get("kind", ""))
+		var step := ""
+		match k:
+			"rig": step = "Bring %s back to green: %s" % [String(d.get("where", "")), String(d.get("title", ""))]
+			"review": step = "Second-review %s" % String(d.get("title", "")).get_slice(" awaits", 0)
+			"decision": step = "Keath to decide: %s" % String(d.get("title", ""))
+			"reply": step = "Answer: %s" % String(d.get("title", ""))
+		if step != "":
+			n += 1
+			L.append("%d. %s" % [n, step])
+		if n >= 8:
+			break
+	return "\n".join(L)
 
 
 func _build_hud() -> void:
@@ -492,6 +612,9 @@ func _build_hud() -> void:
 	_chat = RichTextLabel.new()
 	_chat.bbcode_enabled = true
 	_chat.scroll_following = true
+	_chat.selection_enabled = true        # select with the mouse, Ctrl+C to copy
+	_chat.context_menu_enabled = true     # right-click: Copy / Select All
+	_chat.mouse_filter = Control.MOUSE_FILTER_STOP
 	_chat.add_theme_font_size_override("normal_font_size", 15)
 	_chat.add_theme_color_override("default_color", Color(0.85, 0.9, 1.0))
 	layer.add_child(_chat)
@@ -571,6 +694,7 @@ func _apply_feed() -> void:
 	_rebuild_agents()
 	_rebuild_actions()
 	_apply_channel()
+	_count_waiting()
 	var events: Array = feed.get("events", [])
 	if not events.is_empty():
 		var last: Dictionary = events[-1]
@@ -658,9 +782,15 @@ func _raise_card(e: Dictionary) -> void:
 func _process(delta: float) -> void:
 	_t += delta
 	_frames += 1
-	# Budget: 30 fps while someone is looking at it, 10 fps in the background (brief: <=5% of one core idle).
-	Engine.max_fps = 30 if ((get_window().has_focus() and not background) or shot_path != "") else 10
+	# Budget: 30 fps while someone is looking at it, 10 fps in the background, ~2 fps minimized (nothing to draw).
+	var minimized := get_window().mode == Window.MODE_MINIMIZED
+	Engine.max_fps = 2 if minimized else (30 if ((get_window().has_focus() and not background) or shot_path != "") else 10)
 	_poll -= delta
+	if minimized:
+		if _poll <= 0.0:
+			_poll = 10.0
+			_read_feed()
+		return
 	if _poll <= 0.0 and shot_path == "":
 		_poll = 3.0
 		_read_feed()
@@ -706,19 +836,7 @@ func _process(delta: float) -> void:
 	# Layer focus: the chosen layer bright, others dim.
 	for i in _layer_roots.size():
 		_layer_roots[i].visible = focus_layer < 0 or focus_layer == i or i == 0
-	for c in _stars.get_children():
-		if c is Label3D and c.has_meta("detail"):
-			(c as Label3D).text = String(c.get_meta("detail")) if focus_layer == 1 else "vitals"
-	var vp := get_viewport().get_visible_rect().size
-	_subtitle.position = Vector2(vp.x * 0.04, vp.y - 120)
-	_subtitle.size = Vector2(vp.x * 0.66, 60)
-	_chat.position = Vector2(vp.x * 0.72, 80)
-	_chat.size = Vector2(vp.x * 0.27, vp.y - 170)
-	var backing := _chat.get_parent().get_node("chat_backing") as ColorRect
-	backing.position = _chat.position - Vector2(10, 8)
-	backing.size = _chat.size + Vector2(20, 16)
-	_typebox.position = Vector2(vp.x * 0.04, vp.y - 54)
-	_typebox.size = Vector2(vp.x * 0.92, 38)
+	_far.rotation.y += delta * 0.004
 	# You stand at the front edge, nearest the camera; agents breathe and flare on new activity.
 	var front := Vector3(_cam.position.x, 0, _cam.position.z).normalized() * 6.8
 	_you.position = front + Vector3(0, 0.9, 0)
@@ -731,6 +849,18 @@ func _process(delta: float) -> void:
 		rec["pulse"] = maxf(0.0, float(rec["pulse"]) - delta * 0.25)
 		var node: Node3D = rec["node"]
 		node.scale = Vector3.ONE * (1.0 + 0.5 * float(rec["pulse"]) + 0.04 * sin(_t * 2.0 + float(node.get_index())))
+	_hud_clock -= delta
+	if _hud_clock <= 0.0:   # the header changes at most once a second
+		_hud_clock = 1.0
+		_update_hud()
+	if shot_path != "" and _t > 4.0:
+		_shoot()
+
+
+var _waiting_text: String = "none"
+
+
+func _count_waiting() -> void:
 	var counts := {}
 	for a: Variant in feed.get("actions", []):
 		var k := String((a as Dictionary).get("kind", ""))
@@ -738,10 +868,33 @@ func _process(delta: float) -> void:
 	var waiting := PackedStringArray()
 	for k: String in counts:
 		waiting.append("%d %s" % [int(counts[k]), k])
-	_hud.text = "HOLOMIND · the colony cockpit (i3 Claude) · talks, never acts · %s · WORK WAITING: %s\n%s · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · F11: fullscreen · Esc: quit" % [
-		feed_note, (", ".join(waiting) if not waiting.is_empty() else "none"), ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"]
-	if shot_path != "" and _t > 4.0:
-		_shoot()
+	_waiting_text = ", ".join(waiting) if not waiting.is_empty() else "none"
+
+
+func _update_hud() -> void:
+	_hud.text = "HOLOMIND · the colony cockpit (i3 Claude) · talks, never acts · %s · WORK WAITING: %s\n%s · drag: orbit · wheel: zoom · 1/2/3: layer · 0: all · C: copy brief · F11: fullscreen · Esc: quit" % [
+		feed_note, _waiting_text, ("layer " + LAYER_NAMES[focus_layer]) if focus_layer >= 0 else "all layers"]
+
+
+func _layout_ui() -> void:
+	var vp := get_viewport().get_visible_rect().size
+	_subtitle.position = Vector2(vp.x * 0.04, vp.y - 120)
+	_subtitle.size = Vector2(vp.x * 0.66, 60)
+	_chat.position = Vector2(vp.x * 0.72, 80)
+	_chat.size = Vector2(vp.x * 0.27, vp.y - 170)
+	var backing := _chat.get_parent().get_node("chat_backing") as ColorRect
+	backing.position = _chat.position - Vector2(10, 8)
+	backing.size = _chat.size + Vector2(20, 16)
+	_typebox.position = Vector2(vp.x * 0.04, vp.y - 54)
+	_typebox.size = Vector2(vp.x * 0.92, 38)
+
+
+func _set_layer(l: int) -> void:
+	focus_layer = l
+	for c in _stars.get_children():
+		if c is Label3D and c.has_meta("detail"):
+			(c as Label3D).text = String(c.get_meta("detail")) if focus_layer == 1 else "vitals"
+	_update_hud()
 
 
 func _shoot() -> void:
@@ -766,7 +919,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			var w := get_window()
 			w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
 		elif k >= KEY_0 and k <= KEY_3:
-			focus_layer = (k - KEY_1) if k != KEY_0 else -1
+			_set_layer((k - KEY_1) if k != KEY_0 else -1)
+		elif k == KEY_C and not (event as InputEventKey).ctrl_pressed:
+			DisplayServer.clipboard_set(_brief_text())
+			_subtitle.text = "Copied the whole cockpit brief to the clipboard: fleet, agents, work waiting, conversation, next steps."
 	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
