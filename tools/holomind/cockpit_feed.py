@@ -104,7 +104,7 @@ def github_activity():
     acts = []
     since = now() - dt.timedelta(hours=24)
     for repo in REPOS:
-        r = subprocess.run(['gh', 'pr', 'list', '-R', repo, '--state', 'open', '--limit', '40', '--json', 'number,title,headRefName,updatedAt,isDraft'],
+        r = subprocess.run(['gh', 'pr', 'list', '-R', repo, '--state', 'open', '--limit', '40', '--json', 'number,title,headRefName,updatedAt,isDraft'], stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=0x08000000)
         try:
             prs = json.loads(r.stdout or '[]')
