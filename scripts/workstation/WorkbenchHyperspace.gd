@@ -331,7 +331,6 @@ func _render() -> void:
 				_edge_meshes.append({"node": wire, "from": a, "to": b})
 	_apply_visibility()
 	_refresh_inspector()
-	set_process(not _pulse_nodes.is_empty())
 	_request_redraw()
 
 func _make_edge(a: Vector3, b: Vector3) -> MeshInstance3D:
@@ -394,6 +393,7 @@ func _apply_visibility() -> void:
 			active += 1
 	_pulse_caption.text = ("%d VERIFIED RUNNING MISSION(S): MOTION TRACKS SOURCE STATE" % active) if active > 0 else (
 		"QUIET: NO SOURCE-VERIFIED RUNNING MISSION. STATIC DOES NOT MEAN DEAD.")
+	set_process(active > 0)
 	_rebuild_directory()
 	_request_redraw()
 
