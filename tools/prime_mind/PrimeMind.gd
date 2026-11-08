@@ -43,6 +43,8 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_font = ThemeDB.fallback_font
 	Engine.max_fps = 24
+	# Only render frames when the canvas asks for it (#14 idle budget: <=5% of one core).
+	OS.low_processor_usage_mode = true
 	get_window().mode = Window.MODE_WINDOWED
 	get_window().always_on_top = false
 	_parse_args()

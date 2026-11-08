@@ -18,6 +18,8 @@ func _run() -> void:
 		_finish()
 		return
 	_check(view._feed.get("ok", false), "actual pinned fixture loaded")
+	_check(OS.low_processor_usage_mode,
+		"idle redraws only on demand (#14: <=5% of one core; was ~12.6% on i3)")
 	_check(view._feed.get("events", []).size() == 13, "timeline loads real snapshot")
 	_check(view._selected >= 0, "latest real model thought selected")
 	_check(view._selected_event().get("identity") == "model_summary",
