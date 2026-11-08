@@ -34,8 +34,10 @@ class StudioStub(BaseHTTPRequestHandler):
             self._reply(200, {
                 "id": "msn_012345abcdef", "status": "succeeded", "risk": "R2",
                 "review": True, "mergeable": False,
+                "validator_admission": {"state": "BLOCKED", "reason": "missing validator execution receipt"},
                 "result": {"receipt_id": "rcpt_fixture_ack_0001",
                            "validator": {"exit_code": 0, "timed_out": False},
+                           "acceptance_audit": {"status": "incomplete"},
                            "report": {"raw_ok": True, "acceptance": [
                                {"criterion": "Fixture transport only", "met": True}]},
                            "commits": [], "changed_paths": []}})
@@ -69,6 +71,7 @@ class StudioStub(BaseHTTPRequestHandler):
                 or data.get("base_branch") != "main"
                 or data.get("risk") != "R2"
                 or data.get("posted_by") != "godot-workstation"
+                or data.get("validator") != "python -m pytest tests/test_feature.py -q"
                 or len(data.get("acceptance", [])) != 2):
             self._reply(400, {"error": "invalid mission envelope"})
             return
