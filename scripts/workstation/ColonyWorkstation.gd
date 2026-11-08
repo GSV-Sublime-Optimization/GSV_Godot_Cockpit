@@ -12,6 +12,8 @@ const HYPERSPACE = preload("res://scripts/workstation/WorkbenchHyperspace.gd")
 const REVIEW_DESK = preload("res://scripts/workstation/WorkbenchReviewDesk.gd")
 const SKIN = preload("res://scripts/workstation/WorkbenchTheme.gd")
 
+signal quit_requested
+
 @export var auto_refresh: bool = true
 
 var _client: Node
@@ -44,6 +46,10 @@ var _selected_meta: Dictionary = {}
 var _view_ready := false
 
 func _ready() -> void:
+	## Redraw only when something changed. Without this the idle 3D theatre
+	## re-renders every vsync frame (~8.8% of one core on the i3, over the
+	## bakeoff's 5% idle budget); with it idle measured ~0.3%.
+	OS.low_processor_usage_mode = true
 	theme = SKIN.make_theme()
 	_client = STUDIO_CLIENT.new()
 	add_child(_client)
@@ -894,6 +900,26 @@ func _choose_palette(index: int) -> void:
 			_inspector_panel.visible = not _inspector_panel.visible
 		"activity":
 			_activity_panel.visible = not _activity_panel.visible
+
+## Bakeoff rule: Esc always exits. `_input` runs before GUI focus handling, so
+## this still fires while the library search or another text field has focus.
+## An open command palette is closed first; the next Esc quits. Only the
+## running scene root quits, so an embedded instance never closes its host.
+func _input(event: InputEvent) -> void:
+	var key: InputEventKey = event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode != KEY_ESCAPE and key.physical_keycode != KEY_ESCAPE:
+		return
+	if _palette != null and _palette.visible:
+		_palette.hide()
+		get_viewport().set_input_as_handled()
+		return
+	if get_tree().current_scene != self:
+		return
+	get_viewport().set_input_as_handled()
+	quit_requested.emit()
+	get_tree().quit()
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey

@@ -43,6 +43,9 @@ commands:
     - name: Workstation UI scene smoke
       run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_ui_test.gd
       requires: [godot]
+    - name: Esc closes the palette, then quits the workstation even with a focused field
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_escape_quit_test.gd
+      requires: [godot]
     - name: Spatial capability Atlas and agent capsule no-false-admission gate
       run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_atlas_capsule_test.gd
       requires: [godot]
