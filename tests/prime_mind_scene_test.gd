@@ -36,6 +36,27 @@ func _run() -> void:
 	view.queue_redraw()
 	await process_frame
 	_check(view._lens == 2, "vitals lens selectable")
+	var vitals: PackedStringArray = view._vitals_lines()
+	_check(vitals.size() == 4, "vitals lens lists all four rigs")
+	_check(vitals.size() == 4 and vitals[1].contains("RED") and vitals[1].contains("failing: docker"),
+		"vitals lens shows i3's reported failing check, not just a caption")
+	# Filters must not leave the inspector on an event the tape hides.
+	view._selected = 0  # model-summary alarm
+	view._mind_filter = "observer"
+	view._select_within_filter()
+	_check(view._filtered_indices().has(view._selected),
+		"observer filter moves selection onto a visible observer event")
+	view._mind_filter = "all"
+	# '?' is Shift+Slash on US layouts; KEY_QUESTION alone never arrives.
+	var q := InputEventKey.new()
+	q.keycode = KEY_SLASH
+	q.unicode = 0x3F
+	q.shift_pressed = true
+	q.pressed = true
+	view._unhandled_key_input(q)
+	_check(view._show_help, "'?' (Shift+Slash) opens the help guide")
+	view._unhandled_key_input(q)
+	_check(not view._show_help, "'?' closes the help guide again")
 	_check(view._error.is_empty(), "no data-load errors")
 	_check(view._effective_rig_status("i3") == "red",
 		"historical fixture retains its source-reported i3 failure")
