@@ -48,6 +48,10 @@ var _mind_target: Vector3 = Vector3(0, 1.2, 0)
 var _card: Node3D
 var _card_label: Label3D
 var _last_event_key: String = ""
+var _term: Node3D
+var _term_label: Label3D
+var _term_focus: String = ""
+var _term_shown: float = 0.0   # 0 = put away, 1 = fully raised
 var _hud: Label
 var _subtitle: Label
 var _frames: int = 0
@@ -218,6 +222,42 @@ func _build_mind() -> void:
 	_card_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED   # the raised thought always faces you
 	_card.add_child(_card_label)
 	_card.scale = Vector3.ONE * 0.01
+	# The terminal the Mind brings up beside whatever it's attending to: that rig's live status, as a console.
+	_term = Node3D.new()
+	add_child(_term)
+	var tq := QuadMesh.new()
+	tq.size = Vector2(3.6, 2.2)
+	_mesh(tq, _holo(Color(0.3, 1.0, 0.7), 0.22), Vector3.ZERO, _term)
+	_term_label = Label3D.new()
+	_term_label.font_size = 26
+	_term_label.pixel_size = 0.0052
+	_term_label.width = 640
+	_term_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_term_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_term_label.modulate = Color(0.55, 1.0, 0.75)
+	_term_label.position = Vector3(0, 0, 0.02)
+	_term_label.no_depth_test = true
+	_term_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED   # console text always reads flat to the viewer
+	_term.add_child(_term_label)
+	_term.scale = Vector3.ONE * 0.01
+
+
+func _term_text(id: String) -> String:
+	var b: Dictionary = (feed.get("bodies", {}) as Dictionary).get(id, {})
+	var lines := PackedStringArray()
+	lines.append("$ heartbeat %s   # %s" % [id, String(BODY_TITLES.get(id, ""))])
+	lines.append("status   %s" % String(b.get("status", "unknown")).to_upper())
+	var failing: Array = b.get("failing", [])
+	for n: Variant in failing:
+		lines.append("check    %-14s FAIL" % String(n))
+	if failing.is_empty():
+		lines.append("checks   all passing")
+	if b.get("age_s") != null:
+		lines.append("last     %d s ago" % int(b.get("age_s")))
+	for part in String(b.get("detail", "")).split("; ", false):
+		lines.append("vitals   " + part)
+	lines.append("$ _")
+	return "\n".join(lines)
 
 
 func _build_hud() -> void:
@@ -349,14 +389,18 @@ func _rebuild_memory() -> void:
 		card.size = Vector2(2.4, 0.42)
 		var mi := _mesh(card, _holo(_level_color(_level(e.get("level", ""))), 0.28 * fade), at, _memory)
 		mi.look_at_from_position(at, Vector3(0, at.y, 0), Vector3.UP)
-		var lbl := _label(String(e.get("line", "")).left(46), 18, Color(0.8, 0.9, 1.0, 0.25 + 0.6 * fade), at, _memory)
+		var lbl := _label(String(e.get("line", "")).left(40), 30, Color(0.8, 0.9, 1.0, 0.35 + 0.6 * fade), at, _memory)
 		lbl.no_depth_test = false
 
 
 func _raise_card(e: Dictionary) -> void:
 	var focus := String(e.get("focus", feed.get("attention", "xanadu")))
 	var host: Vector3 = BODY_PLACES.get(focus, Vector3.ZERO)
-	_mind_target = host + Vector3(0, 1.7, 0)
+	_mind_target = host + Vector3(0, 2.6, 0)   # lifted clear of the rig it's watching
+	if focus != _term_focus:
+		_term_focus = focus
+		_term_shown = 0.0   # the old terminal is put away; the new one rises
+	_term_label.text = _term_text(focus)
 	var level := _level(e.get("level", ""))
 	var who := String(e.get("mind", "?"))
 	var model: Variant = e.get("model")
@@ -401,12 +445,21 @@ func _process(delta: float) -> void:
 		if String(c.name).begins_with("ring"):
 			(c as Node3D).rotate_object_local(Vector3(1, 0, 0) if String(c.name) == "ring100" else Vector3(0, 0, 1), delta * 0.9)
 	_card.position = _mind.position + Vector3(0, 1.6, 0)
-	var flat := Vector3(_cam.position.x, _card.position.y, _cam.position.z)
-	if flat.distance_to(_card.position) > 0.01:
-		_card.look_at(flat, Vector3.UP)
+	if _cam.position.distance_to(_card.position) > 0.01:
+		_card.look_at(_cam.position, Vector3.UP)
 		_card.rotate_object_local(Vector3.UP, PI)
 	_card.scale = _card.scale.lerp(Vector3.ONE, clampf(delta * 2.2, 0.0, 1.0))
 	_memory.rotation.y += delta * 0.03
+	# The terminal rises beside the Mind's attention, facing you, and folds away when attention moves.
+	if _term_focus != "":
+		_term_shown = minf(1.0, _term_shown + delta * 0.8)
+		var host: Vector3 = BODY_PLACES.get(_term_focus, Vector3.ZERO)
+		var side := (_cam.position - host).cross(Vector3.UP).normalized()
+		_term.position = host + side * 3.3 + Vector3(0, 1.0 + 1.2 * _term_shown, 0)
+		if _cam.position.distance_to(_term.position) > 0.01:
+			_term.look_at(_cam.position, Vector3.UP)   # squarely facing the viewer
+			_term.rotate_object_local(Vector3.UP, PI)
+		_term.scale = Vector3(1.0, maxf(0.01, _term_shown), 1.0)
 	# Layer focus: the chosen layer bright, others dim.
 	for i in _layer_roots.size():
 		_layer_roots[i].visible = focus_layer < 0 or focus_layer == i or i == 0

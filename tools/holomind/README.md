@@ -7,7 +7,7 @@ A holographic table you look into. Every layer is real colony data, read-only.
 | **0 · Ship** | the fleet as districts: MSI workshop, i3 engine room, L9 hangar, xanadu library (the hub). Coloured by heartbeat; light packets travel along beams to the library while a rig reports. |
 | **1 · Constellation** | every rig's services as stars above it. Failing checks are red stars with their names; calm "vitals" stars show full detail when you focus the layer (key 2). |
 | **2 · Memory** | past thoughts as cards on a slowly turning spiral, older ones higher and fainter |
-| **The Mind** | a glyph that glides to what it's attending to, **raises a card** with its newest thought (Mind, model, level, line), speaks it as a subtitle, and the card passes into memory when the next thought comes |
+| **The Mind** | a glyph that glides to what it's attending to, **raises a card** with its newest thought (Mind, model, level, line), speaks it as a subtitle, and the card passes into memory when the next thought comes. It also **brings up a holographic terminal** beside the rig it's watching (status, failing checks, last heartbeat, vitals), which folds away when its attention moves on. |
 
 **Controls:** drag to orbit · wheel to zoom · 1/2/3 focus a layer · 0 all layers · F11 fullscreen · **Esc quits**.
 
