@@ -73,7 +73,7 @@ func _build_ui() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	_lens = OptionButton.new()
-	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES"]:
+	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "LOCAL TOOLS"]:
 		_lens.add_item(name)
 	_lens.tooltip_text = "Change the resource domain, not the underlying state."
 	_lens.item_selected.connect(func(_index): _apply_visibility())
@@ -116,7 +116,7 @@ func _build_ui() -> void:
 	_status.text = "OBSERVATION NOT RECEIVED. Grey is unknown, not offline."
 	left.add_child(_status)
 	var shapes := Label.new()
-	shapes.text = "SHAPES   ▣ RIG / COMPUTE     ⬡ PROJECT / CODE     ◆ MISSION / WORK     △ SERVICE / INFRA"
+	shapes.text = "SHAPES   ▣ RIG     ⬡ PROJECT     ◆ MISSION     △ SERVICE     ◇ TOOL (LOCAL PRESENCE ONLY)"
 	shapes.add_theme_font_size_override("font_size", 11)
 	shapes.add_theme_color_override("font_color", Color("#91b8ca"))
 	left.add_child(shapes)
@@ -270,6 +270,13 @@ func _render() -> void:
 				repository.height = 0.42
 				repository.radial_segments = 6
 				shape = repository
+			"tool":
+				var module := CylinderMesh.new()
+				module.top_radius = radius * 0.7
+				module.bottom_radius = radius * 0.7
+				module.height = 0.63
+				module.radial_segments = 8
+				shape = module
 			"mission":
 				var task := SphereMesh.new()
 				task.radius = radius
@@ -382,7 +389,7 @@ func _make_activity_flow(a: Vector3, b: Vector3, wire: MeshInstance3D) -> void:
 func _apply_visibility() -> void:
 	if _lens == null or _time == null:
 		return
-	var selected_domain: String = ["all", "rig", "project", "mission", "service"][_lens.selected]
+	var selected_domain: String = ["all", "rig", "project", "mission", "service", "tool"][_lens.selected]
 	for id in _meshes:
 		var item: Dictionary = _meshes[id]
 		var entry: Dictionary = item["entry"]
@@ -413,7 +420,7 @@ func _apply_visibility() -> void:
 		feeds.get("project_feed_state", "unknown"),
 		feeds.get("mission_feed_state", "unknown"),
 		feeds.get("service_feed_state", "unknown")
-	]
+	] + "    |    LOCAL TOOL ATLAS " + String(feeds.get("tool_atlas_state", "not_configured"))
 	var active := 0
 	for item in _pulse_nodes:
 		if item["root"].visible:
@@ -612,6 +619,8 @@ func _refresh_inspector() -> void:
 		_info.text += "\n\nNUDGE: Observation is not current. Refresh source; do not assume online/offline."
 	elif entry["kind"] == "project":
 		_info.text += "\n\nNUDGE: Verified repository. Compose a scoped Studio mission; revalidation required."
+	elif entry["kind"] == "tool":
+		_info.text += "\n\nNUDGE: Filesystem presence is not proof of a running service, an authenticated connector, or executable capability. Qualify through its owning provider."
 	var kind := String(entry["kind"])
 	_open_button.disabled = not ["rig", "project", "mission"].has(kind)
 	_compose_button.disabled = not (kind == "project" and entry.get("observed", false)) and not (
