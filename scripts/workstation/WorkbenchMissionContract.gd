@@ -56,7 +56,7 @@ static func _safe_branch(branch: String) -> bool:
 	return true
 
 static func make_spec(project: Dictionary, title: String, objective: String,
-		acceptance_text: String, risk: String) -> Dictionary:
+		acceptance_text: String, risk: String, validator_command: String = "") -> Dictionary:
 	var repo: Variant = project.get("path")
 	var branch: Variant = project.get("branch")
 	if typeof(repo) != TYPE_STRING or not _safe_path(repo):
@@ -81,15 +81,49 @@ static func make_spec(project: Dictionary, title: String, objective: String,
 		criteria.append(criterion)
 	if criteria.is_empty():
 		return {"ok": false, "reason": "acceptance_required"}
-	return {"ok": true, "body": {
+	var validator := validator_command.strip_edges()
+	if risk == "R2":
+		if validator.is_empty():
+			return {"ok": false, "reason": "r2_predeclared_validator_required"}
+		if validator.length() > 400 or validator.contains("\n") or validator.contains("\r"):
+			return {"ok": false, "reason": "validator_invalid_or_over_400_chars"}
+	elif not validator.is_empty():
+		return {"ok": false, "reason": "validator_only_allowed_for_r2"}
+	var request := {
 		"title": clean_title, "objective": clean_objective, "acceptance": criteria,
 		"repo": repo, "base_branch": branch, "risk": risk,
 		"posted_by": "godot-workstation"
-	}}
+	}
+	if risk == "R2":
+		request["validator"] = validator
+	return {"ok": true, "body": request}
+
+static func _same_repo_path(actual: Variant, expected: String) -> bool:
+	# Compare path formatting only, not different filesystem targets or symlinks.
+	if typeof(actual) != TYPE_STRING or not _safe_path(String(actual)) or not _safe_path(expected):
+		return false
+	var left := String(actual).replace("\\", "/")
+	var right := expected.replace("\\", "/")
+	while left.length() > 3 and left.ends_with("/"):
+		left = left.substr(0, left.length() - 1)
+	while right.length() > 3 and right.ends_with("/"):
+		right = right.substr(0, right.length() - 1)
+	if left.length() > 1 and right.length() > 1 and left.substr(1, 1) == ":" and right.substr(1, 1) == ":":
+		return left.to_lower() == right.to_lower()
+	return left == right
 
 static func parse_post_result(status: int, text: String, expected_repo: String,
 		expected_risk: String) -> Dictionary:
-	if status != 201 or text.length() > 65536:
+	if text.length() > 65536:
+		return {"ok": false, "reason": "response_oversized"}
+	if status == 400:
+		var rejection := JSON.new()
+		if rejection.parse(text) == OK and typeof(rejection.data) == TYPE_DICTIONARY:
+			var detail: Variant = rejection.data.get("error")
+			if typeof(detail) == TYPE_STRING and not detail.is_empty():
+				return {"ok": false, "reason": "studio_rejected: " + String(detail).replace("\n", " ").replace("\r", " ").substr(0, 180)}
+		return {"ok": false, "reason": "studio_rejected_invalid_mission"}
+	if status != 201:
 		return {"ok": false, "reason": "no_201_acknowledgement"}
 	var json := JSON.new()
 	if json.parse(text) != OK or typeof(json.data) != TYPE_DICTIONARY:
@@ -101,7 +135,7 @@ static func parse_post_result(status: int, text: String, expected_repo: String,
 		return {"ok": false, "reason": "invalid_mission_id"}
 	if typeof(state) != TYPE_STRING or not MISSION_STATES.has(state):
 		return {"ok": false, "reason": "invalid_mission_state"}
-	if raw.get("repo") != expected_repo or raw.get("risk") != expected_risk:
+	if not _same_repo_path(raw.get("repo"), expected_repo) or raw.get("risk") != expected_risk:
 		return {"ok": false, "reason": "mission_identity_mismatch"}
 	return {"ok": true, "id": mission_id, "status": state,
 		"needs_approval": state == "awaiting_approval"}
