@@ -100,10 +100,12 @@ static func make_spec(project: Dictionary, title: String, objective: String,
 
 static func _same_repo_path(actual: Variant, expected: String) -> bool:
 	# Compare path formatting only, not different filesystem targets or symlinks.
-	if typeof(actual) != TYPE_STRING or not _safe_path(String(actual)) or not _safe_path(expected):
+	if typeof(actual) != TYPE_STRING:
 		return false
 	var left := String(actual).replace("\\", "/")
 	var right := expected.replace("\\", "/")
+	if not _safe_path(left) or not _safe_path(right):
+		return false
 	while left.length() > 3 and left.ends_with("/"):
 		left = left.substr(0, left.length() - 1)
 	while right.length() > 3 and right.ends_with("/"):
