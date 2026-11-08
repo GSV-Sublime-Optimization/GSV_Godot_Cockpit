@@ -163,6 +163,7 @@ kbd { font: 700 10px var(--f-body); border: 1px solid var(--hair-2); border-bott
 .rivals h3 { margin: 0 0 3px; font-size: 14px; }
 .rivals p { margin: 3px 0; font-size: 12.5px; color: #cfe2ea; }
 .rivals img { width: 100%; border-radius: 8px; border: 1px solid var(--hair-2); margin-top: 6px; }
+@media (max-width: 1820px) { .mark p { display: none; } }
 @media (max-width: 1100px) { .did, .key { display: none; } .hint { left: 16px; right: 16px; bottom: 96px; } }
 @media (max-width: 720px) {
   .panel { left: 16px; right: 16px; width: auto; top: auto; bottom: 96px; max-height: 50%; }
@@ -691,10 +692,10 @@ function model() {
     if (past && past[r.id]) for (const c of checks) c.ok = !past[r.id].has(c.name);
     else if (past) for (const c of checks) if (r.id !== 'xanadu') c.ok = true;
     const at = r.id === 'xanadu' ? (live ? lastOk : ts(f.served_at)) : ts(hb?.at);
-    const age = at ? (T - at) / 60000 : null;
+    const age = at ? (Math.max(T, replay && at > T ? now() : T) - at) / 60000 : null;   // in a replay a later heartbeat is all we have: show its now-age, marked ≈
     const doc = (f.doctor || []);
     rigs[r.id] = { ...r, hb, checks, failing: checks.filter((c) => !c.ok).map((c) => ({ ...c, doc: doc.find((d) => d.key === `${r.id}:${c.name}`) })),
-      ram: hb?.ram_avail_mb ?? null, disks: hb?.disks || null, age: replay && age != null && age < 0 ? null : age, silent: age == null || age > 15, approx: replay };
+      ram: hb?.ram_avail_mb ?? null, disks: hb?.disks || null, age, silent: age == null || age > 15, approx: replay };
   }
   const spine = f.spine && Array.isArray(f.spine.services) ? f.spine : null;
   const services = (spine?.services || []).map((s) => ({ ...s, expected: EXPECTED_DOWN.has(s.name), rig: SVC_RIG[s.name] || 'msi', act: restartFor(s.name) }));
@@ -1300,7 +1301,7 @@ function renderHud() {
   const age = (Date.now() - lastOk) / 1000;
   if (!live) { fr.className = 'chip snap'; fr.textContent = 'frozen ' + new Date(ts(feed.served_at)).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'; }
   else { fr.className = 'chip ' + (age > 180 ? 'stale' : age > 60 ? 'snap' : 'live'); fr.textContent = age > 180 ? `STALE ${Math.round(age / 60)} min` : `feed ${Math.round(age)} s old`; }
-  const rp = $('#replay'); rp.hidden = !m.replay; if (m.replay) rp.textContent = `≈ replay ${hhmm(m.T)} · ${agoAt(m.T, now())}`;
+  const rp = $('#replay'); rp.hidden = !m.replay; if (m.replay) rp.textContent = `≈ replay ${hhmm(m.T)}`;
   const fail = RIGS.flatMap((r) => m.rigs[r.id].failing.map((c) => ({ rig: r.id, c })));
   const silent = RIGS.filter((r) => r.id !== 'xanadu' && m.rigs[r.id].silent);
   const down = m.services.filter((s) => !s.up && !s.expected);
