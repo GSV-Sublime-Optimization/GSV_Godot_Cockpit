@@ -36,6 +36,7 @@ var _directory_search: LineEdit
 var _directory_keys: Array[String] = []
 var _edge_meshes: Array[Dictionary] = []
 var _pulse_nodes: Array[Dictionary] = []
+var _flow_markers: Array[Dictionary] = []
 var _camera_target := Vector3(0, 0.5, 0)
 var _pulse_clock := 0.0
 var _pulse_accum := 0.0
@@ -243,6 +244,7 @@ func _render() -> void:
 	_meshes.clear()
 	_edge_meshes.clear()
 	_pulse_nodes.clear()
+	_flow_markers.clear()
 	_graph = PROJECTION.project(_snapshot)
 	var nodes: Array = _graph.get("nodes", [])
 	var lookup: Dictionary = {}
@@ -329,6 +331,8 @@ func _render() -> void:
 			var wire := _make_edge(lookup[a]["position"], lookup[b]["position"])
 			if wire != null:
 				_edge_meshes.append({"node": wire, "from": a, "to": b})
+				if lookup[b]["kind"] == "mission" and lookup[b]["status"] == "running":
+					_make_activity_flow(lookup[a]["position"], lookup[b]["position"], wire)
 	_apply_visibility()
 	_refresh_inspector()
 	_request_redraw()
@@ -354,6 +358,27 @@ func _make_edge(a: Vector3, b: Vector3) -> MeshInstance3D:
 	_scene.add_child(line)
 	return line
 
+func _make_activity_flow(a: Vector3, b: Vector3, wire: MeshInstance3D) -> void:
+	# A luminous packet moves ONLY along a Studio-confirmed project -> running mission edge.
+	var bead := MeshInstance3D.new()
+	bead.name = "VerifiedMissionWorkPacket"
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.11
+	sphere.height = 0.22
+	sphere.radial_segments = 10
+	sphere.rings = 6
+	bead.mesh = sphere
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color("#d4f7ff")
+	mat.emission_enabled = true
+	mat.emission = Color("#6acaff")
+	mat.emission_energy_multiplier = 2.3
+	bead.material_override = mat
+	bead.position = a
+	_scene.add_child(bead)
+	_flow_markers.append({"node": bead, "a": a, "b": b, "wire": wire})
+
 func _apply_visibility() -> void:
 	if _lens == null or _time == null:
 		return
@@ -374,6 +399,8 @@ func _apply_visibility() -> void:
 		item["root"].visible = domain_ok and time_ok
 	for edge in _edge_meshes:
 		edge["node"].visible = _meshes[edge["from"]]["root"].visible and _meshes[edge["to"]]["root"].visible
+	for flow in _flow_markers:
+		flow["node"].visible = flow["wire"].visible
 	if _meshes.has(_selected) and not _meshes[_selected]["root"].visible:
 		_select("")
 	var feeds: Dictionary = _graph.get("feeds", {})
@@ -542,6 +569,9 @@ func _process(delta: float) -> void:
 		visible_activity = true
 		item["material"].emission_energy_multiplier = 1.75 + 0.5 * sin(_pulse_clock * 3.1)
 		item["body"].position.y = 0.065 * sin(_pulse_clock * 3.1)
+	for flow in _flow_markers:
+		if flow["node"].visible:
+			flow["node"].position = flow["a"].lerp(flow["b"], fposmod(_pulse_clock * 0.42, 1.0))
 	if visible_activity:
 		_request_redraw()
 
@@ -559,6 +589,29 @@ func _refresh_inspector() -> void:
 		String(entry["source"]), String(entry["id"])]
 	if entry.has("updated_at") and not String(entry["updated_at"]).is_empty():
 		_info.text += "\n\nSOURCE UPDATED\n" + String(entry["updated_at"])
+	var linked: Array[String] = []
+	for edge in _graph.get("edges", []):
+		var other := ""
+		if edge["from"] == _selected:
+			other = String(edge["to"])
+		elif edge["to"] == _selected:
+			other = String(edge["from"])
+		if not other.is_empty() and _meshes.has(other):
+			var target: Dictionary = _meshes[other]["entry"]
+			linked.append("%s: %s" % [String(target["kind"]).to_upper(), String(target["title"])])
+	_info.text += "\n\nPROVEN RELATIONSHIPS\n"
+	_info.text += "\n".join(linked) if not linked.is_empty() else "None observed. No link inferred."
+	var status := String(entry["status"])
+	if status == "running":
+		_info.text += "\n\nNUDGE: Mission running. Inspect Studio log and receipt before changing anything."
+	elif status == "awaiting_approval":
+		_info.text += "\n\nNUDGE: Awaiting Studio-owned approval. This is NOT execution."
+	elif status == "failed":
+		_info.text += "\n\nNUDGE: Open evidence and compose an R0 diagnostic. Failure is not a completed build."
+	elif status in ["unknown", "stale", "unavailable"]:
+		_info.text += "\n\nNUDGE: Observation is not current. Refresh source; do not assume online/offline."
+	elif entry["kind"] == "project":
+		_info.text += "\n\nNUDGE: Verified repository. Compose a scoped Studio mission; revalidation required."
 	var kind := String(entry["kind"])
 	_open_button.disabled = not ["rig", "project", "mission"].has(kind)
 	_compose_button.disabled = not (kind == "project" and entry.get("observed", false)) and not (
