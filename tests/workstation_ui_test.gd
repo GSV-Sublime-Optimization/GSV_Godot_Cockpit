@@ -14,8 +14,14 @@ func _run() -> void:
 	await process_frame
 	_check(ui._view_ready, "first-frame interface ready")
 	_check(Time.get_ticks_msec() - begin < 1500, "no blocking startup subprocess")
-	_check(ui._tabs.get_tab_count() == 1, "fleet opens as first tab")
-	_check(ui._rig_labels.size() == 4, "all four rig cards")
+	_check(ui._tabs.get_tab_count() == 1 and ui._pages.has("hyperspace:hyperspace"),
+		"3D holographic theatre opens as first tab, not legacy fleet menus")
+	_check(not ui._library_panel.visible and not ui._inspector_panel.visible,
+		"first-paint is immersive instead of a cluttered dock dashboard")
+	ui._close_tab(ui._tabs.current_tab)
+	await process_frame
+	_check(ui._pages.has("fleet:fleet"), "closing theatre opens working legacy fleet surface")
+	_check(ui._rig_labels.size() == 4, "all four rig cards remain available")
 	_check(ui._palette_commands.size() >= 8, "command palette actions registered")
 	_check(ui._palette != null and ui._palette_results != null, "command palette constructed")
 	if ui._palette_results != null:

@@ -7,10 +7,17 @@ extends PanelContainer
 
 signal resource_activated(meta: Dictionary)
 signal compose_requested(context: Dictionary)
+signal refresh_requested
 
 const PROJECTION = preload("res://scripts/workstation/WorkbenchSpatialProjection.gd")
+const ARCH = preload("res://scripts/workstation/WorkbenchHoloArchitecture.gd")
+const ATLAS = preload("res://scripts/workstation/WorkbenchAtlasBridge.gd")
+const CAPSULE = preload("res://scripts/workstation/WorkbenchAgentCapsule.gd")
 
 var _snapshot: Dictionary = {}
+var _capabilities: Array[Dictionary] = []
+var _atlas_source := "not_connected"
+var _export_button: Button
 var _graph: Dictionary = {}
 var _display: SubViewportContainer
 var _viewport: SubViewport
@@ -23,31 +30,37 @@ var _time: OptionButton
 var _open_button: Button
 var _compose_button: Button
 var _meshes: Dictionary = {}
+var _links: Array[Dictionary] = []
+var _flow_markers: Array[Dictionary] = []
+var _directory: ItemList
+var _directory_search: LineEdit
+var _directory_keys: Array[String] = []
+var _animation_accum := 0.0
+var _verified_running := 0
+var _architecture: Dictionary = {}
+var _focus_button: Button
+var _refresh_button: Button
+var _time_slider: HSlider
+var _time_check: CheckButton
+var _time_label: Label
+var _cinematic := false
+var _focus_target := Vector3(0, 0.5, 0)
+var _camera_focus := Vector3(0, 0.5, 0)
+var _clock := 0.0
 var _selected := ""
 var _yaw := 0.0
-var _pitch := 0.38
-var _distance := 26.5
+var _pitch := 0.72
+var _distance := 18.0
 var _down := Vector2.ZERO
 var _dragged := false
 var _mouse_held := false
 var _orbiting := false
-var _directory: ItemList
-var _directory_search: LineEdit
-var _directory_keys: Array[String] = []
-var _edge_meshes: Array[Dictionary] = []
-var _pulse_nodes: Array[Dictionary] = []
-var _flow_markers: Array[Dictionary] = []
-var _camera_target := Vector3(0, 0.5, 0)
-var _pulse_clock := 0.0
-var _pulse_accum := 0.0
-var _pulse_caption: Label
 
 func _ready() -> void:
 	_build_ui()
 	_build_world()
-	_render()
+	_load_atlas()
 	_update_camera()
-	set_process(false)
 
 func set_snapshot(snapshot: Dictionary) -> void:
 	_snapshot = snapshot.duplicate(true)
@@ -67,13 +80,13 @@ func _build_ui() -> void:
 	var header := HBoxContainer.new()
 	left.add_child(header)
 	var title := Label.new()
-	title.text = "HYPERSPACE    /    SPATIAL WORK GRAPH"
+	title.text = "Ξ  HYPERSPACE   /   COLONY HOLOGRAPHIC THEATRE"
 	title.add_theme_font_size_override("font_size", 17)
 	title.add_theme_color_override("font_color", Color("#7cddf6"))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	_lens = OptionButton.new()
-	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "LOCAL TOOLS"]:
+	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "GAMES", "CAPABILITY ATLAS", "LOCAL TOOLS"]:
 		_lens.add_item(name)
 	_lens.tooltip_text = "Change the resource domain, not the underlying state."
 	_lens.item_selected.connect(func(_index): _apply_visibility())
@@ -84,15 +97,31 @@ func _build_ui() -> void:
 	_time.tooltip_text = "Filter only missions with a real source timestamp. Never manufactures historical snapshots."
 	_time.item_selected.connect(func(_index): _apply_visibility())
 	header.add_child(_time)
+	var atlas_reload := Button.new()
+	atlas_reload.text = "LOAD ATLAS"
+	atlas_reload.tooltip_text = "Schema-pinned local snapshot; not authenticated tool admission"
+	atlas_reload.pressed.connect(_load_atlas)
+	header.add_child(atlas_reload)
 	var reset := Button.new()
-	reset.text = "RESET CAMERA"
+	reset.text = "RECALL ORBIT"
 	reset.pressed.connect(func():
 		_yaw = 0.0
-		_pitch = 0.38
-		_distance = 26.5
-		_camera_target = Vector3(0, 0.5, 0)
+		_pitch = 0.72
+		_distance = 18.0
+		_focus_target = Vector3(0, 0.5, 0)
 		_update_camera())
 	header.add_child(reset)
+	var orbit := Button.new()
+	orbit.text = "CINEMATIC ORBIT"
+	orbit.tooltip_text = "Toggle slow presentation-only camera rotation; not a source of agent activity."
+	orbit.pressed.connect(func(): _cinematic = not _cinematic)
+	header.add_child(orbit)
+	var observe := Button.new()
+	_refresh_button = observe
+	observe.text = "↻  RE-OBSERVE"
+	observe.tooltip_text = "Request a fresh bounded read of the owning Studio API. Never starts a job."
+	observe.pressed.connect(func(): refresh_requested.emit())
+	header.add_child(observe)
 	_display = SubViewportContainer.new()
 	_display.name = "HyperspaceViewport"
 	_display.stretch = true
@@ -113,13 +142,28 @@ func _build_ui() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.add_theme_font_size_override("font_size", 11)
 	_status.add_theme_color_override("font_color", Color("#93a9bb"))
-	_status.text = "OBSERVATION NOT RECEIVED. Grey is unknown, not offline."
+	_status.text = "AWAITING STUDIO. Grey structures are UNKNOWN, not offline."
 	left.add_child(_status)
-	var shapes := Label.new()
-	shapes.text = "SHAPES   ▣ RIG     ⬡ PROJECT     ◆ MISSION     △ SERVICE     ◇ TOOL (LOCAL PRESENCE ONLY)"
-	shapes.add_theme_font_size_override("font_size", 11)
-	shapes.add_theme_color_override("font_color", Color("#91b8ca"))
-	left.add_child(shapes)
+	var temporal := HBoxContainer.new()
+	temporal.add_theme_constant_override("separation", 10)
+	left.add_child(temporal)
+	_time_check = CheckButton.new()
+	_time_check.text = "4D  /  SOURCE-TIME SHEAR"
+	_time_check.tooltip_text = "Slice recorded mission update timestamps only, never reconstructed past states."
+	_time_check.toggled.connect(func(_active): _apply_visibility())
+	temporal.add_child(_time_check)
+	_time_slider = HSlider.new()
+	_time_slider.min_value = 1.0
+	_time_slider.max_value = 168.0
+	_time_slider.step = 1.0
+	_time_slider.value = 168.0
+	_time_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_time_slider.value_changed.connect(func(_value): _apply_visibility())
+	temporal.add_child(_time_slider)
+	_time_label = Label.new()
+	_time_label.text = "ALL / 168h"
+	_time_label.custom_minimum_size.x = 132
+	temporal.add_child(_time_label)
 
 	var side := PanelContainer.new()
 	side.custom_minimum_size.x = 250
@@ -128,47 +172,35 @@ func _build_ui() -> void:
 	inspector.add_theme_constant_override("separation", 10)
 	side.add_child(inspector)
 	var subheading := Label.new()
-	subheading.text = "SELECTED OBJECT / ACTIONS"
+	subheading.text = "SOURCE SIGNAL  /  OPERATIONS"
 	subheading.add_theme_font_size_override("font_size", 12)
 	subheading.add_theme_color_override("font_color", Color("#ffcf72"))
 	inspector.add_child(subheading)
 	var finder_title := Label.new()
-	finder_title.text = "OBJECT FINDER  /  CLICK ANY NODE"
-	finder_title.add_theme_color_override("font_color", Color("#7cddf6"))
+	finder_title.text = "SOURCE FINDER / ANY NODE"
 	finder_title.add_theme_font_size_override("font_size", 11)
+	finder_title.add_theme_color_override("font_color", Color("#7cddf6"))
 	inspector.add_child(finder_title)
 	_directory_search = LineEdit.new()
-	_directory_search.placeholder_text = "Search bodies, code, missions..."
-	_directory_search.tooltip_text = "Filters this directory only; does not change observations."
-	_directory_search.text_changed.connect(func(_query: String): _rebuild_directory())
+	_directory_search.placeholder_text = "Search rigs, code, missions, tools..."
+	_directory_search.text_changed.connect(func(_value: String): _rebuild_directory())
 	inspector.add_child(_directory_search)
 	_directory = ItemList.new()
 	_directory.name = "SourceObjectFinder"
-	_directory.custom_minimum_size = Vector2(0, 164)
-	_directory.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_directory.custom_minimum_size.y = 142
 	_directory.allow_reselect = true
 	_directory.item_selected.connect(_on_directory_selected)
 	inspector.add_child(_directory)
-	var selector_tools := HBoxContainer.new()
-	inspector.add_child(selector_tools)
+	var finder_actions := HBoxContainer.new()
+	inspector.add_child(finder_actions)
 	var previous := Button.new()
 	previous.text = "◀ PREV"
 	previous.pressed.connect(func(): _cycle_visible(-1))
-	selector_tools.add_child(previous)
-	var next_button := Button.new()
-	next_button.text = "NEXT ▶"
-	next_button.pressed.connect(func(): _cycle_visible(1))
-	selector_tools.add_child(next_button)
-	var focus_button := Button.new()
-	focus_button.text = "FOCUS"
-	focus_button.tooltip_text = "Move the camera target to the selected source object."
-	focus_button.pressed.connect(_focus_selected)
-	selector_tools.add_child(focus_button)
-	_pulse_caption = Label.new()
-	_pulse_caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_pulse_caption.add_theme_font_size_override("font_size", 11)
-	_pulse_caption.add_theme_color_override("font_color", Color("#93a9bb"))
-	inspector.add_child(_pulse_caption)
+	finder_actions.add_child(previous)
+	var forward := Button.new()
+	forward.text = "NEXT ▶"
+	forward.pressed.connect(func(): _cycle_visible(1))
+	finder_actions.add_child(forward)
 	_info = RichTextLabel.new()
 	_info.bbcode_enabled = false
 	_info.scroll_active = true
@@ -177,18 +209,33 @@ func _build_ui() -> void:
 	_info.text = "Select an object in the 3D graph to inspect its owning source and available actions."
 	inspector.add_child(_info)
 	_open_button = Button.new()
-	_open_button.text = "OPEN VERIFIED RESOURCE"
+	_open_button.text = "OPEN SOURCE / EVIDENCE"
 	_open_button.disabled = true
 	_open_button.pressed.connect(_open_selected)
 	inspector.add_child(_open_button)
 	_compose_button = Button.new()
-	_compose_button.text = "COMPOSE STUDIO MISSION"
+	_compose_button.text = "PREPARE STUDIO DIAGNOSIS"
 	_compose_button.disabled = true
 	_compose_button.pressed.connect(_compose_selected)
 	inspector.add_child(_compose_button)
+	_focus_button = Button.new()
+	_focus_button.text = "DIVE INTO SELECTED SIGNAL"
+	_focus_button.disabled = true
+	_focus_button.pressed.connect(_focus_selected)
+	inspector.add_child(_focus_button)
+	var next_signal := Button.new()
+	next_signal.text = "NEXT SOURCE SIGNAL   TAB"
+	next_signal.pressed.connect(_focus_next)
+	inspector.add_child(next_signal)
+	_export_button = Button.new()
+	_export_button.text = "EXPORT AGENT HANDOFF"
+	_export_button.disabled = true
+	_export_button.tooltip_text = "Copy and locally save versioned, bounded source context for any authorized agent"
+	_export_button.pressed.connect(_export_handoff)
+	inspector.add_child(_export_button)
 	var instructions := Label.new()
 	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	instructions.text = "Finder / Prev / Next chooses ANY node; Focus re-centres. Drag to orbit, wheel to zoom, click to inspect.\nHeight = domain; shape = role; colour = status. Blue link = verified repo, amber link = exact local path match.\nOnly source-reported RUNNING work moves. Unknown does not pulse."
+	instructions.text = "DRAG orbit / WHEEL dive / CLICK select / F focus / TAB cycle\nSearch finder or PREV / NEXT selects any visible node. 1-8 decks / R refresh.\nBlue wire = source-verified repo. Amber wire = exact local path match.\nSource RUNNING = animated packet; ambient stage lighting is illustrative."
 	instructions.add_theme_font_size_override("font_size", 11)
 	instructions.add_theme_color_override("font_color", Color("#93a9bb"))
 	inspector.add_child(instructions)
@@ -211,10 +258,8 @@ func _build_world() -> void:
 	env.ambient_light_energy = 0.55
 	world.environment = env
 	_viewport.add_child(world)
-	_make_orbit(7.5, 4.0, Color("#235978"))
-	_make_orbit(4.7, 0.6, Color("#2b5575"))
-	_make_orbit(9.5, -3.0, Color("#31415f"))
-	_make_orbit(10.2, -0.1, Color("#31425a"))
+	_architecture = ARCH.stage(_viewport)
+	_make_orbit(13.0, -4.2, Color("#57416b"))
 	var lamp := OmniLight3D.new()
 	lamp.position = Vector3(0, 7, 6)
 	lamp.light_energy = 2.0
@@ -237,178 +282,87 @@ func _make_orbit(radius: float, y: float, color: Color) -> void:
 	item.mesh = mesh
 	_viewport.add_child(item)
 
+func _load_atlas() -> void:
+	var result: Dictionary = ATLAS.read_optional()
+	_capabilities.clear()
+	if result.get("ok", false):
+		for item in result["entries"]:
+			_capabilities.append(item.duplicate(true))
+		_atlas_source = String(result.get("source", "snapshot"))
+	else:
+		_atlas_source = "NOT CONNECTED / " + String(result.get("reason", "unknown"))
+	if _scene != null:
+		_render()
+
 func _render() -> void:
 	for child in _scene.get_children():
 		_scene.remove_child(child)
 		child.queue_free()
 	_meshes.clear()
-	_edge_meshes.clear()
-	_pulse_nodes.clear()
+	_links.clear()
 	_flow_markers.clear()
-	_graph = PROJECTION.project(_snapshot)
-	var nodes: Array = _graph.get("nodes", [])
+	_verified_running = 0
+	_graph = PROJECTION.project(_snapshot, _capabilities, _atlas_source)
 	var lookup: Dictionary = {}
-	for entry in nodes:
+	for entry in _graph.get("nodes", []):
 		var id: String = entry["key"]
 		lookup[id] = entry
-		var anchor := Node3D.new()
-		anchor.name = "Object" + str(_meshes.size())
-		anchor.position = entry["position"]
-		_scene.add_child(anchor)
-		var radius := 0.50 if entry["kind"] == "rig" else 0.37 if entry["kind"] == "mission" else 0.29
-		# Geometry encodes actual domain, not a row of indistinguishable status spheres.
-		var shape: Mesh
-		match String(entry["kind"]):
-			"rig":
-				var chassis := BoxMesh.new()
-				chassis.size = Vector3(0.95, 1.10, 0.67)
-				shape = chassis
-			"project":
-				var repository := CylinderMesh.new()
-				repository.top_radius = radius
-				repository.bottom_radius = radius
-				repository.height = 0.42
-				repository.radial_segments = 6
-				shape = repository
-			"tool":
-				var module := CylinderMesh.new()
-				module.top_radius = radius * 0.7
-				module.bottom_radius = radius * 0.7
-				module.height = 0.63
-				module.radial_segments = 8
-				shape = module
-			"mission":
-				var task := SphereMesh.new()
-				task.radius = radius
-				task.height = radius * 2.0
-				task.radial_segments = 4
-				task.rings = 2
-				shape = task
-			_:
-				var antenna := CylinderMesh.new()
-				antenna.top_radius = 0.06
-				antenna.bottom_radius = radius
-				antenna.height = 0.85
-				antenna.radial_segments = 5
-				shape = antenna
-		var material := StandardMaterial3D.new()
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		material.albedo_color = PROJECTION.color_for(entry["status"])
-		material.emission_enabled = true
-		material.emission = material.albedo_color
-		material.emission_energy_multiplier = 1.8
-		var ball := MeshInstance3D.new()
-		ball.mesh = shape
-		ball.material_override = material
-		anchor.add_child(ball)
-		var name3d := Label3D.new()
-		name3d.text = "%s  /  %s\n%s" % [
-			String(entry["kind"]).to_upper(), String(entry["title"]).substr(0, 20),
-			String(entry["status"]).to_upper().replace("_", " ")]
-		name3d.font_size = 26
-		name3d.pixel_size = 0.008
-		name3d.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		name3d.no_depth_test = true
-		name3d.modulate = Color("#d9edfa")
-		name3d.position = Vector3(0, radius + 0.50, 0)
-		name3d.visible = entry["kind"] == "rig" or id == _selected
-		anchor.add_child(name3d)
-		var halo := TorusMesh.new()
-		halo.inner_radius = radius * 1.5
-		halo.outer_radius = radius * 1.65
-		halo.rings = 16
-		halo.ring_segments = 32
-		var mesh_halo := MeshInstance3D.new()
-		mesh_halo.mesh = halo
-		var halo_mat := StandardMaterial3D.new()
-		halo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		halo_mat.albedo_color = Color("#fff0ae")
-		mesh_halo.material_override = halo_mat
-		mesh_halo.visible = id == _selected
-		anchor.add_child(mesh_halo)
-		_meshes[id] = {
-			"root": anchor, "halo": mesh_halo, "label": name3d,
-			"entry": entry, "body": ball, "material": material}
-		if entry["kind"] == "mission" and entry["status"] == "running" and entry.get("observed", false):
-			_pulse_nodes.append(_meshes[id])
+		_meshes[id] = ARCH.object(_scene, entry, PROJECTION.color_for(entry["status"]))
 	for link in _graph.get("edges", []):
 		var a: String = link["from"]
 		var b: String = link["to"]
 		if lookup.has(a) and lookup.has(b):
-			var wire := _make_edge(lookup[a]["position"], lookup[b]["position"], String(link.get("kind", "")))
-			if wire != null:
-				_edge_meshes.append({"node": wire, "from": a, "to": b})
-				if lookup[b]["kind"] == "mission" and lookup[b]["status"] == "running":
-					_make_activity_flow(lookup[a]["position"], lookup[b]["position"], wire)
+			var kind := String(link.get("kind", "verified_repo"))
+			var relation: Node3D = ARCH.evidence_link(
+				_scene, lookup[a]["position"], lookup[b]["position"], kind)
+			_links.append({"root": relation, "from": a, "to": b, "kind": kind})
+			if kind == "verified_repo" and lookup[b]["kind"] == "mission" and lookup[b]["status"] == "running":
+				var shape := SphereMesh.new()
+				shape.radius = 0.11
+				shape.height = 0.22
+				shape.radial_segments = 10
+				var packet: MeshInstance3D = ARCH.mesh(
+					relation, shape, Color("#d1f7ff"), 2.2, 1.0, "VerifiedRunningWorkPacket")
+				packet.position = lookup[a]["position"]
+				_flow_markers.append({
+					"node": packet, "a": lookup[a]["position"],
+					"b": lookup[b]["position"], "edge": relation
+				})
+				_verified_running += 1
 	_apply_visibility()
 	_refresh_inspector()
 	_request_redraw()
 
-func _make_edge(a: Vector3, b: Vector3, relation_kind: String) -> MeshInstance3D:
-	var difference := b - a
-	if difference.length() < 0.01:
-		return null
-	var tube := CylinderMesh.new()
-	tube.top_radius = 0.019
-	tube.bottom_radius = 0.019
-	tube.height = difference.length()
-	tube.radial_segments = 5
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color("#d39a64") if relation_kind == "local_path_match" else Color("#4c708e")
-	var line := MeshInstance3D.new()
-	line.name = "SourceVerifiedEdge"
-	line.mesh = tube
-	line.material_override = mat
-	line.position = (a + b) * 0.5
-	line.basis = Basis(Quaternion(Vector3.UP, difference.normalized()))
-	_scene.add_child(line)
-	return line
-
-func _make_activity_flow(a: Vector3, b: Vector3, wire: MeshInstance3D) -> void:
-	# A luminous packet moves ONLY along a Studio-confirmed project -> running mission edge.
-	var bead := MeshInstance3D.new()
-	bead.name = "VerifiedMissionWorkPacket"
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.11
-	sphere.height = 0.22
-	sphere.radial_segments = 10
-	sphere.rings = 6
-	bead.mesh = sphere
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color("#d4f7ff")
-	mat.emission_enabled = true
-	mat.emission = Color("#6acaff")
-	mat.emission_energy_multiplier = 2.3
-	bead.material_override = mat
-	bead.position = a
-	_scene.add_child(bead)
-	_flow_markers.append({"node": bead, "a": a, "b": b, "wire": wire})
-
 func _apply_visibility() -> void:
 	if _lens == null or _time == null:
 		return
-	var selected_domain: String = ["all", "rig", "project", "mission", "service", "tool"][_lens.selected]
+	var selected_domain: String = ["all", "rig", "project", "mission", "service", "game", "capability", "tool"][_lens.selected]
 	for id in _meshes:
 		var item: Dictionary = _meshes[id]
 		var entry: Dictionary = item["entry"]
-		var domain_ok: bool = selected_domain == "all" or entry["kind"] == selected_domain
+		var domain_ok: bool = (selected_domain == "all" or entry["kind"] == selected_domain
+			or (selected_domain == "game" and entry.get("game", false)))
 		var time_ok := true
-		if entry["kind"] == "mission" and _time.selected > 0:
+		if entry["kind"] == "mission" and (_time.selected > 0 or (_time_check != null and _time_check.button_pressed)):
 			var stamp := String(entry.get("updated_at", ""))
 			if stamp.length() < 20 or not stamp.ends_with("Z"):
 				time_ok = false
 			else:
 				var age := Time.get_unix_time_from_system() - Time.get_unix_time_from_datetime_string(stamp)
-				var maximum := 86400.0 if _time.selected == 1 else 3600.0
+				var maximum := 86400.0 if _time.selected == 1 else 3600.0 if _time.selected == 2 else 604800.0
+				if _time_check != null and _time_check.button_pressed:
+					maximum = minf(maximum, _time_slider.value * 3600.0)
 				time_ok = age >= 0.0 and age <= maximum
 		item["root"].visible = domain_ok and time_ok
-	for edge in _edge_meshes:
-		edge["node"].visible = _meshes[edge["from"]]["root"].visible and _meshes[edge["to"]]["root"].visible
-	for flow in _flow_markers:
-		flow["node"].visible = flow["wire"].visible
-	if _meshes.has(_selected) and not _meshes[_selected]["root"].visible:
+	for link in _links:
+		link["root"].visible = (_meshes.has(link["from"]) and _meshes.has(link["to"])
+			and _meshes[link["from"]]["root"].visible and _meshes[link["to"]]["root"].visible)
+	for packet in _flow_markers:
+		packet["node"].visible = packet["edge"].visible
+	if _time_label != null:
+		_time_label.text = ("≤%dh / RECORDS" % int(_time_slider.value)
+			if _time_check.button_pressed else "ALL / 168h")
+	if not _selected.is_empty() and _meshes.has(_selected) and not _meshes[_selected]["root"].visible:
 		_select("")
 	var feeds: Dictionary = _graph.get("feeds", {})
 	var shown := 0
@@ -420,21 +374,36 @@ func _apply_visibility() -> void:
 		feeds.get("project_feed_state", "unknown"),
 		feeds.get("mission_feed_state", "unknown"),
 		feeds.get("service_feed_state", "unknown")
-	] + "    |    LOCAL TOOL ATLAS " + String(feeds.get("tool_atlas_state", "not_configured"))
-	var active := 0
-	for item in _pulse_nodes:
-		if item["root"].visible:
-			active += 1
-	_pulse_caption.text = ("%d VERIFIED RUNNING MISSION(S): MOTION TRACKS SOURCE STATE" % active) if active > 0 else (
-		"QUIET: NO SOURCE-VERIFIED RUNNING MISSION. STATIC DOES NOT MEAN DEAD.")
-	set_process(active > 0)
+	]
+	_status.text += "     |     ATLAS %d STATIC (%d hidden) / %s" % [
+		int(_graph.get("atlas_count", 0)), int(_graph.get("atlas_omitted", 0)), _atlas_source]
+	_status.text += "    |    LOCAL TOOLS " + String(feeds.get("tool_atlas_state", "not_configured"))
+	_update_label_lod()
 	_rebuild_directory()
 	_request_redraw()
+
+func _update_label_lod() -> void:
+	## Projection geometry is dense. Do not flood the theatre with billboards.
+	## Labels reappear in the relevant lens or near focus; full facts live in inspector.
+	for key in _meshes:
+		var row: Dictionary = _meshes[key]
+		var kind := String(row["entry"]["kind"])
+		var focused: bool = key == _selected
+		var context_zoom := _distance < 13.0
+		var domain_only: bool = (_lens.selected == 2 and kind == "project" or
+			_lens.selected == 3 and kind == "mission" or
+			_lens.selected == 4 and kind == "service" or
+			_lens.selected == 5 and row["entry"].get("game", false) or
+			_lens.selected == 6 and kind == "capability" or
+			_lens.selected == 7 and kind == "tool")
+		row["label"].visible = row["root"].visible and (focused or kind == "rig" or
+			(domain_only and context_zoom))
+		row["status_label"].visible = row["root"].visible and focused
 
 func _update_camera() -> void:
 	if _camera == null:
 		return
-	var center := _camera_target
+	var center := _camera_focus
 	_camera.position = center + Vector3(
 		sin(_yaw) * cos(_pitch), sin(_pitch), cos(_yaw) * cos(_pitch)) * _distance
 	_camera.look_at(center, Vector3.UP)
@@ -443,13 +412,15 @@ func _update_camera() -> void:
 func _on_view_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			_distance = maxf(9.0, _distance * 0.90)
+			_distance = maxf(5.5, _distance * 0.90)
 			_update_camera()
+			_update_label_lod()
 			_display.accept_event()
 			return
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			_distance = minf(65.0, _distance * 1.11)
+			_distance = minf(52.0, _distance * 1.11)
 			_update_camera()
+			_update_label_lod()
 			_display.accept_event()
 			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -464,6 +435,20 @@ func _on_view_input(event: InputEvent) -> void:
 				_mouse_held = false
 				_dragged = false
 			_display.accept_event()
+	elif event is InputEventKey and event.pressed and not event.echo:
+		var code: int = event.keycode
+		if code == KEY_F:
+			_focus_selected()
+		elif code == KEY_TAB:
+			_focus_next()
+		elif code == KEY_R:
+			refresh_requested.emit()
+		elif code >= KEY_1 and code <= KEY_8:
+			_lens.select(code - KEY_1)
+			_apply_visibility()
+		else:
+			return
+		_display.accept_event()
 	elif event is InputEventMouseMotion and _mouse_held:
 		if event.position.distance_to(_down) > 5.0:
 			_dragged = true
@@ -495,7 +480,7 @@ func _pick(pointer: Vector2) -> void:
 	_select(chosen)
 
 func select_key(key: String) -> bool:
-	if not _meshes.has(key):
+	if not _meshes.has(key) or not _meshes[key]["root"].visible:
 		return false
 	_select(key)
 	return true
@@ -504,8 +489,8 @@ func _select(key: String) -> void:
 	_selected = key
 	for id in _meshes:
 		_meshes[id]["halo"].visible = id == key
-		_meshes[id]["label"].visible = (_meshes[id]["entry"]["kind"] == "rig" or id == key)
 	_refresh_inspector()
+	_update_label_lod()
 	_sync_directory_selection()
 	_request_redraw()
 
@@ -516,22 +501,21 @@ func _on_directory_selected(index: int) -> void:
 func _rebuild_directory() -> void:
 	if _directory == null:
 		return
-	var query := _directory_search.text.strip_edges().to_lower() if _directory_search != null else ""
+	var search := _directory_search.text.to_lower().strip_edges() if _directory_search != null else ""
 	_directory.clear()
 	_directory_keys.clear()
-	for key in _meshes:
-		var item: Dictionary = _meshes[key]
-		if not item["root"].visible:
+	for node in _graph.get("nodes", []):
+		var key := String(node["key"])
+		if not _meshes.has(key) or not _meshes[key]["root"].visible:
 			continue
-		var entry: Dictionary = item["entry"]
-		var label := "%s  %s  ·  %s" % [
-			String(entry["kind"]).to_upper(), String(entry["title"]),
-			String(entry["status"]).replace("_", " ").to_upper()]
-		if not query.is_empty() and not label.to_lower().contains(query):
+		var line := "%s  %s  ·  %s" % [
+			String(node["kind"]).to_upper(), String(node["title"]),
+			String(node["status"]).to_upper()]
+		if not search.is_empty() and not line.to_lower().contains(search):
 			continue
 		_directory_keys.append(key)
-		var index := _directory.add_item(label)
-		_directory.set_item_custom_fg_color(index, PROJECTION.color_for(String(entry["status"])))
+		var index := _directory.add_item(line)
+		_directory.set_item_custom_fg_color(index, PROJECTION.color_for(String(node["status"])))
 	_sync_directory_selection()
 
 func _sync_directory_selection() -> void:
@@ -547,40 +531,12 @@ func _sync_directory_selection() -> void:
 func _cycle_visible(direction: int) -> void:
 	if _directory_keys.is_empty():
 		return
-	var current := _directory_keys.find(_selected)
-	var next_index := posmod(current + direction, _directory_keys.size())
-	_select(_directory_keys[next_index])
-
-func _focus_selected() -> void:
-	if not _meshes.has(_selected):
-		return
-	_camera_target = _meshes[_selected]["root"].position
-	_distance = clampf(_distance, 8.0, 35.0)
-	_update_camera()
+	var index := _directory_keys.find(_selected)
+	_select(_directory_keys[posmod(index + direction, _directory_keys.size())])
 
 func _request_redraw() -> void:
 	if _viewport != null:
 		_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
-
-func _process(delta: float) -> void:
-	# Only an observed RUNNING mission is animated; no synthetic "busy" decoration.
-	_pulse_clock += delta
-	_pulse_accum += delta
-	if _pulse_accum < 0.09:
-		return
-	_pulse_accum = 0.0
-	var visible_activity := false
-	for item in _pulse_nodes:
-		if not item["root"].visible:
-			continue
-		visible_activity = true
-		item["material"].emission_energy_multiplier = 1.75 + 0.5 * sin(_pulse_clock * 3.1)
-		item["body"].position.y = 0.065 * sin(_pulse_clock * 3.1)
-	for flow in _flow_markers:
-		if flow["node"].visible:
-			flow["node"].position = flow["a"].lerp(flow["b"], fposmod(_pulse_clock * 0.42, 1.0))
-	if visible_activity:
-		_request_redraw()
 
 func _refresh_inspector() -> void:
 	if _info == null:
@@ -589,50 +545,149 @@ func _refresh_inspector() -> void:
 		_info.text = "SELECT A SOURCE OBJECT\n\nRigs occupy the lower deck, projects the upper plane, missions the middle and services the outer ring.\n\nA grey rig means UNKNOWN, not OFFLINE.\n\nMission/project clicks open actual Studio-backed tabs. No agent process is attached by a visual marker."
 		_open_button.disabled = true
 		_compose_button.disabled = true
+		_focus_button.disabled = true
+		_export_button.disabled = true
 		return
 	var entry: Dictionary = _meshes[_selected]["entry"]
 	_info.text = "%s\n\n%s\n\nSTATUS\n%s\n\nSOURCE\n%s\n\nIDENTITY\n%s" % [
 		String(entry["title"]), String(entry["detail"]), String(entry["status"]).to_upper(),
 		String(entry["source"]), String(entry["id"])]
+	if entry.get("kind", "") == "capability":
+		_info.text += "\n\nDECLARED MACHINE / GRADE / COST\n%s / %s / %s\n\nEVIDENCE\n%s\n\nNOT ADMITTED: REQUALIFY VIA OWNER" % [
+			String(entry.get("machine", "unknown")), String(entry.get("grade", "D")),
+			String(entry.get("cost_class", "unknown")), String(entry.get("evidence", ""))]
 	if entry.has("updated_at") and not String(entry["updated_at"]).is_empty():
 		_info.text += "\n\nSOURCE UPDATED\n" + String(entry["updated_at"])
-	var linked: Array[String] = []
+	var relations: Array[String] = []
 	for edge in _graph.get("edges", []):
 		var other := ""
 		if edge["from"] == _selected:
 			other = String(edge["to"])
 		elif edge["to"] == _selected:
 			other = String(edge["from"])
-		if not other.is_empty() and _meshes.has(other):
-			var target: Dictionary = _meshes[other]["entry"]
-			var relation := "LOCAL PATH MATCH" if edge.get("kind", "") == "local_path_match" else "VERIFIED REPO"
-			linked.append("%s -> %s: %s" % [relation, String(target["kind"]).to_upper(), String(target["title"])])
-	_info.text += "\n\nPROVEN RELATIONSHIPS\n"
-	_info.text += "\n".join(linked) if not linked.is_empty() else "None observed. No link inferred."
-	var status := String(entry["status"])
-	if status == "running":
-		_info.text += "\n\nNUDGE: Mission running. Inspect Studio log and receipt before changing anything."
-	elif status == "awaiting_approval":
-		_info.text += "\n\nNUDGE: Awaiting Studio-owned approval. This is NOT execution."
-	elif status == "failed":
-		_info.text += "\n\nNUDGE: Open evidence and compose an R0 diagnostic. Failure is not a completed build."
-	elif status in ["unknown", "stale", "unavailable"]:
-		_info.text += "\n\nNUDGE: Observation is not current. Refresh source; do not assume online/offline."
-	elif entry["kind"] == "project":
-		_info.text += "\n\nNUDGE: Verified repository. Compose a scoped Studio mission; revalidation required."
-	elif entry["kind"] == "tool":
-		if not String(entry.get("local_path", "")).is_empty():
-			_info.text += "\n\nOBSERVED LOCAL PATH\n" + String(entry["local_path"])
-		_info.text += "\n\nNUDGE: Filesystem presence is not proof of a running service, an authenticated connector, or executable capability. Qualify through its owning provider."
+		if _meshes.has(other):
+			var linked: Dictionary = _meshes[other]["entry"]
+			relations.append("%s -> %s" % [
+				"EXACT LOCAL PATH" if edge.get("kind", "") == "local_path_match" else "VERIFIED REPO",
+				String(linked["title"])])
+	_info.text += "\n\nPROVEN LINKS\n" + ("\n".join(relations) if not relations.is_empty() else "None observed; no relationship inferred.")
+	if entry.get("kind", "") == "tool":
+		_info.text += "\n\nLOCAL PATH\n" + String(entry.get("local_path", "unreported"))
+		_info.text += "\n\nNUDGE: Local presence does not establish a connected or admitted executor."
+	match String(entry.get("status", "")):
+		"running":
+			_info.text += "\n\nNUDGE: Inspect the Studio mission receipt before proposing a change."
+		"failed":
+			_info.text += "\n\nNUDGE: Diagnose failure from the owning receipt; avoid blind retries."
+		"awaiting_approval":
+			_info.text += "\n\nNUDGE: Waiting for Studio-owned approval, not running."
+		"unknown", "stale", "unavailable":
+			_info.text += "\n\nNUDGE: Refresh source evidence; unknown is not offline."
 	var kind := String(entry["kind"])
-	_open_button.disabled = not ["rig", "project", "mission"].has(kind)
+	_export_button.disabled = false
+	_open_button.disabled = not ["rig", "project", "mission", "service"].has(kind)
 	_compose_button.disabled = not (kind == "project" and entry.get("observed", false)) and not (
 		kind == "mission" and not String(entry.get("repo", "")).is_empty())
+	_focus_button.disabled = false
+	if kind == "rig":
+		_info.text += "\n\nPERMISSIONS\nREMOTE WORK NOT ADMITTED; identity not attested."
+		if entry.get("resources", {}) is Dictionary:
+			var values: Dictionary = entry.get("resources", {})
+			for field in ["memory_available_bytes", "system_volume_free_bytes"]:
+				var measure: Variant = values.get(field)
+				if typeof(measure) == TYPE_INT or typeof(measure) == TYPE_FLOAT:
+					_info.text += "\n%s  %.1f GiB (reported)" % [
+						"MEM AVAILABLE" if field == "memory_available_bytes" else "SYSTEM DISK FREE",
+						float(measure) / 1073741824.0]
+			if values.get("age_seconds") != null:
+				_info.text += "\nOBSERVATION AGE  %s seconds" % str(values["age_seconds"])
+	elif kind == "mission":
+		_info.text += "\n\nOWNING REPOSITORY\n" + String(entry.get("repo", "UNREPORTED"))
+		_info.text += "\n\nStudio controls approval, runner, receipt and promotion."
+	elif kind == "project":
+		_info.text += "\n\nREPOSITORY\n" + String(entry.get("repo", ""))
+		_info.text += "\n\nLaunchable game: UNVERIFIED / requires game-specific playtest evidence."
+	else:
+		_info.text += "\n\nThis service has a reported status; no shell or PTY is attached."
+
+func _focus_selected() -> void:
+	if not _meshes.has(_selected) or not _meshes[_selected]["root"].visible:
+		return
+	_focus_target = _meshes[_selected]["root"].position
+	_distance = 7.4 if _meshes[_selected]["entry"]["kind"] == "rig" else 6.6
+	_cinematic = false
+	_update_label_lod()
+
+func _focus_next() -> void:
+	_cycle_visible(1)
+	_focus_selected()
+
+func _process(delta: float) -> void:
+	if not is_visible_in_tree():
+		return
+	_clock += minf(delta, 0.1)
+	_animation_accum += delta
+	# Idle scene: 2.5 visual refreshes/s. Visible running work or optional
+	# cinematic camera: 10/s. Stop constant 60 FPS 3D redraws.
+	var visibly_running := false
+	for packet in _flow_markers:
+		if packet["node"].visible:
+			visibly_running = true
+			break
+	var interval := 0.10 if visibly_running or _cinematic else 0.40
+	if _animation_accum < interval:
+		return
+	var tick := _animation_accum
+	_animation_accum = 0.0
+	if _cinematic and not _mouse_held:
+		_yaw += tick * 0.07
+	var old_focus := _camera_focus
+	_camera_focus = _camera_focus.lerp(_focus_target, clampf(tick * 5.0, 0.0, 1.0))
+	if _cinematic or _camera_focus.distance_to(old_focus) > 0.001:
+		_update_camera()
+	# The slow orbital garnish is PRESENTATION ONLY, even while source state is
+	# unknown. Actual work particles require Studio "running" evidence.
+	for item in _architecture.get("animated", []):
+		if is_instance_valid(item):
+			item.rotate_y(tick * 0.10)
+	for record in _meshes.values():
+		var status := String(record["entry"]["status"])
+		if status == "running":
+			record["spin"].rotate_y(tick * 0.65)
+		if record["halo"].visible:
+			record["pulse"].scale = Vector3.ONE * (1.0 + 0.09 * sin(_clock * 2.0))
+	for packet in _flow_markers:
+		if packet["node"].visible:
+			packet["node"].position = packet["a"].lerp(
+				packet["b"], fposmod(_clock * 0.42, 1.0))
+	_request_redraw()
+
+func _export_handoff() -> void:
+	if not _meshes.has(_selected) or _export_button.disabled:
+		return
+	var item: Dictionary = _meshes[_selected]["entry"]
+	var result: Dictionary = CAPSULE.build(item, _graph, _snapshot)
+	if not result.get("ok", false):
+		_status.text = "HANDOFF REFUSED / " + String(result.get("reason", "unknown"))
+		return
+	var payload := String(result["json"])
+	DisplayServer.clipboard_set(payload)
+	var path := "user://hyperspace-agent-handoff.json"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		_status.text = "HANDOFF COPIED / local file unavailable"
+		return
+	file.store_string(payload)
+	file.close()
+	_status.text = "HANDOFF COPIED + SAVED LOCALLY / " + ProjectSettings.globalize_path(path)
 
 func _open_selected() -> void:
 	if not _meshes.has(_selected) or _open_button.disabled:
 		return
 	var item: Dictionary = _meshes[_selected]["entry"]
+	if item["kind"] == "service":
+		resource_activated.emit({"kind": "services", "id": "services", "name": "Observed Services"})
+		return
 	resource_activated.emit({
 		"kind": item["kind"], "id": item["id"], "name": item["title"],
 		"role": item["detail"], "source": item["source"],

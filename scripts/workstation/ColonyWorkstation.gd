@@ -19,6 +19,7 @@ var _nav: ItemList
 var _nav_search: LineEdit
 var _inspector: RichTextLabel
 var _inspector_panel: PanelContainer
+var _library_panel: PanelContainer
 var _activity: RichTextLabel
 var _activity_panel: PanelContainer
 var _status: Label
@@ -49,7 +50,7 @@ func _ready() -> void:
 	_build_ui()
 	_build_palette()
 	_refresh_navigation()
-	_open_resource({"kind": "fleet", "id": "fleet", "name": "Fleet"})
+	_open_resource({"kind": "hyperspace", "id": "hyperspace", "name": "Hyperspace"})
 	_view_ready = true
 	_note("Workstation opened. Source telemetry not observed yet.")
 	if auto_refresh:
@@ -59,6 +60,14 @@ func _ready() -> void:
 		timer.timeout.connect(_client.refresh)
 		add_child(timer)
 		call_deferred("_observe_after_paint")
+		call_deferred("_open_spatial_after_paint")
+
+func _open_spatial_after_paint() -> void:
+	## Real desktop opens in 3D after first frame. Headless tests using
+	## auto_refresh=false retain their fast fleet-first test baseline.
+	await get_tree().process_frame
+	if is_inside_tree():
+		_open_resource({"kind": "hyperspace", "id": "hyperspace", "name": "Hyperspace"})
 
 func _observe_after_paint() -> void:
 	for frame in 2:
@@ -160,7 +169,7 @@ func _build_ui() -> void:
 	var footer := HBoxContainer.new()
 	frame.add_child(footer)
 	var help := Label.new()
-	help.text = "Ctrl+K  palette    Ctrl+Tab  switch    Ctrl+W  close    F5  observe    F6  inspector    F7  events"
+	help.text = "HOLO DIVE  •  DRAG orbit  •  CLICK focus  •  TAB next  •  F dive  •  1–6 decks  •  R refresh  •  Ctrl+K tools"
 	help.add_theme_color_override("font_color", SKIN.MUTED)
 	help.add_theme_font_size_override("font_size", 11)
 	help.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -202,7 +211,7 @@ func _build_topbar(frame: VBoxContainer) -> void:
 	_status.add_theme_font_size_override("font_size", 11)
 	bar.add_child(_status)
 	_layout_picker = OptionButton.new()
-	for name in ["COLONY", "FOCUS", "PLAYTEST"]:
+	for name in ["PANELS", "HOLO DIVE", "PLAYTEST"]:
 		_layout_picker.add_item(name)
 	_layout_picker.tooltip_text = "Change dock visibility and emphasis, not agent permissions."
 	_layout_picker.item_selected.connect(_apply_layout)
@@ -229,6 +238,7 @@ func _build_topbar(frame: VBoxContainer) -> void:
 func _build_library(parent: HSplitContainer) -> void:
 	var panel := PanelContainer.new()
 	panel.name = "LibraryDock"
+	_library_panel = panel
 	panel.custom_minimum_size = Vector2(210, 0)
 	parent.add_child(panel)
 	var layout := VBoxContainer.new()
@@ -400,11 +410,23 @@ func _tab_changed(idx: int) -> void:
 	var key := String(panel.get_meta("workstation_key", ""))
 	if _page_meta.has(key):
 		_select_inspector(_page_meta[key])
+	_set_theatre_mode(key == "hyperspace:hyperspace")
+
+func _set_theatre_mode(immersive: bool) -> void:
+	if _library_panel != null:
+		_library_panel.visible = not immersive
+	if _inspector_panel != null:
+		_inspector_panel.visible = not immersive
+	if _activity_panel != null:
+		_activity_panel.visible = not immersive
+	if _layout_picker != null:
+		_layout_picker.select(1 if immersive else 0)
 
 func _make_hyperspace() -> Control:
 	var space: PanelContainer = HYPERSPACE.new()
 	space.resource_activated.connect(_open_resource)
 	space.compose_requested.connect(_compose_from_space)
+	space.refresh_requested.connect(_refresh_sources)
 	_client.snapshot_changed.connect(space.set_snapshot)
 	space.set_snapshot(_snapshot)
 	return space
@@ -775,19 +797,19 @@ func _note(message: String) -> void:
 func _apply_layout(index: int) -> void:
 	match index:
 		0:
-			_inspector_panel.visible = true
-			_activity_panel.visible = true
+			_set_theatre_mode(false)
 		1:
-			_inspector_panel.visible = false
-			_activity_panel.visible = false
+			_set_theatre_mode(true)
+			_open_resource({"kind": "hyperspace", "id": "hyperspace", "name": "Hyperspace"})
 		2:
+			_set_theatre_mode(false)
 			_inspector_panel.visible = false
-			_activity_panel.visible = true
 			_open_resource({"kind": "games", "id": "games", "name": "Game Lab"})
 	_note("Local workspace layout changed. Remote sessions were not altered.")
 
 func _build_palette() -> void:
 	_palette_commands = [
+		{"id": "hyperspace", "label": "Holo Dive / 3D spatial operations"},
 		{"id": "fleet", "label": "Fleet overview"},
 		{"id": "factory", "label": "Build software via Studio mission"},
 		{"id": "sessions", "label": "Observed mission sessions"},
@@ -850,7 +872,7 @@ func _choose_palette(index: int) -> void:
 	var action := String(_palette_results.get_item_metadata(index))
 	_palette.hide()
 	match action:
-		"factory", "fleet", "sessions", "services", "projects", "games", "legacy":
+		"factory", "fleet", "hyperspace", "sessions", "services", "projects", "games", "legacy":
 			var label := action.capitalize()
 			_open_resource({"kind": action, "id": action, "name": label})
 		"refresh":

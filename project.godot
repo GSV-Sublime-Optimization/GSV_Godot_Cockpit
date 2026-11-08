@@ -6,16 +6,16 @@ config_version=5
 
 [application]
 
-config/name="GSV Godot Cockpit"
-config/description="Visual membrane for GSV Sublime Optimization — agents, services, quests, receipts."
-run/main_scene="res://scenes/Main.tscn"
+config/name="ΞNuSyQ Colony Workstation / HOLO DIVE"
+config/description="Source-backed 3D colony software-factory workstation; legacy cockpit retained."
+run/main_scene="res://scenes/ColonyWorkstation.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [display]
 
-window/size/viewport_width=1280
-window/size/viewport_height=720
+window/size/viewport_width=1600
+window/size/viewport_height=900
 window/size/resizable=true
 
 [rendering]

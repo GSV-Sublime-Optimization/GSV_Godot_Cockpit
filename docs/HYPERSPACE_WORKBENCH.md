@@ -24,6 +24,10 @@ permission; only Studio-approved missions may be submitted through the Factory.
 ## Test gates
 The build manifest runs workstation_spatial_test.gd for negative controls (unknown bodies, stale projects, no speculative repo links, bounded inputs), and workstation_hyperspace_ui_test.gd for real 3D scene instantiation, source-backed selection, owner navigation and prefill. These tests are not proof of a live GPU framebuffer, full interactive manual playtest, production R2 execution or a working agent PTY.
 
+## Spatial Atlas and agent-handoff extension
+
+The fifth violet capability orbit and versioned handoff are described in [HYPERSPACE_CAPABILITY_HANDOFF.md](HYPERSPACE_CAPABILITY_HANDOFF.md). A static capability snapshot is not live and cannot grant a tool action; the actual Studio-backed project and mission behavior is unchanged.
+
 ## Next milestones
 1. Source-backed GSV build, screenshot and gameplay-autopilot receipt nodes.
 2. A qualified capability atlas that separates installed, callable, authenticated, qualified and admitted.

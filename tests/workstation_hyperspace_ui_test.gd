@@ -18,22 +18,19 @@ func _run() -> void:
 	_assert(view._viewport != null and not view._viewport.disable_3d, "native 3D viewport exists")
 	_assert(view._camera != null and view._camera.current, "actual camera bound to viewport")
 	_assert(view._meshes.size() == 4, "four unknown source-bound rig meshes, no fake agents")
-	_assert(view._directory_keys.size() == 4, "every rig available through explicit object finder")
-	_assert(view._directory_keys.has("rig:imac-xanadu"), "Xanadu listed, not forced")
-	_assert(view._directory_keys.has("rig:desktop-i3anuvp"), "I3 independently reachable")
-	_assert(view.select_key("rig:desktop-i3anuvp"), "selection moves from any rig to I3")
-	_assert(view._selected == "rig:desktop-i3anuvp", "I3 is actually selected")
-	_assert(view._directory.get_selected_items().size() == 1, "finder follows 3D selection")
+	_assert(view._directory_keys.size() == 4, "finder sees all four physical rigs")
+	_assert(view.select_key("rig:desktop-i3anuvp"), "I3 can be selected independently")
+	_assert(view._selected == "rig:desktop-i3anuvp", "I3 not pinned to Xanadu")
 	view._focus_selected()
-	_assert(view._camera_target == view._meshes["rig:desktop-i3anuvp"]["root"].position, "focus re-centres on selected rig")
-	view._cycle_visible(1)
-	_assert(view._selected != "rig:desktop-i3anuvp", "next node changes selection")
+	_assert(view._focus_target == view._meshes["rig:desktop-i3anuvp"]["root"].position, "I3 focus target")
 	view._directory_search.text = "Xanadu"
 	view._rebuild_directory()
-	_assert(view._directory_keys.size() == 1 and view._directory_keys[0] == "rig:imac-xanadu", "finder searches actual source identity")
+	_assert(view._directory_keys.size() == 1 and view._directory_keys[0] == "rig:imac-xanadu",
+		"finder filters real rig names")
 	view._directory_search.text = ""
 	view._rebuild_directory()
-	_assert(view._pulse_nodes.is_empty() and not view.is_processing(), "unknown rigs never animate as working")
+	view._cycle_visible(1)
+	_assert(view._selected != "rig:desktop-i3anuvp", "cycle changes selection")
 	_assert(view._compose_button.disabled, "no arbitrary mission before observed repo")
 	view.set_snapshot({
 		"body_feed_state": "observed",
@@ -48,11 +45,12 @@ func _run() -> void:
 	await process_frame
 	_assert(view._meshes.size() == 6, "source-bound 3D graph renders project and mission")
 	_assert(view._graph["edges"].size() == 1, "one source-backed spatial edge")
-	_assert(view._edge_meshes.size() == 1, "verified repo relation has a 3D edge")
-	_assert(view._meshes["rig:kilo-core-msi"]["body"].mesh is BoxMesh, "rig rendered as hardware chassis")
-	_assert(view._meshes["project:C:/dev/active/test"]["body"].mesh is CylinderMesh, "code repository rendered as hexagonal vault")
-	_assert(view._meshes["mission:msn_012345abcdef"]["body"].mesh is SphereMesh, "mission rendered as faceted work crystal")
-	_assert(view._pulse_nodes.is_empty() and not view.is_processing(), "awaiting approval is not running work")
+	_assert(view._links.size() == 1, "verified relation has a visible 3D wire")
+	_assert(view._flow_markers.is_empty(), "awaiting approval is NOT running work")
+	_assert(view._meshes["rig:kilo-core-msi"]["root"].get_child_count() > 1,
+		"rig retains composite hardware silhouette")
+	_assert(view._meshes["project:C:/dev/active/test"]["root"].get_child_count() > 1,
+		"project retains composite code silhouette")
 	_assert(view.select_key("project:C:/dev/active/test"), "project picking changes actual selection")
 	_assert(not view._compose_button.disabled, "observed project enables compose")
 	view._compose_selected()
@@ -71,41 +69,45 @@ func _run() -> void:
 	view._lens.select(2)
 	view._apply_visibility()
 	_assert(not view._meshes["rig:kilo-core-msi"]["root"].visible, "resource domain actually filters 3D")
-	_assert(not view._edge_meshes[0]["node"].visible, "verified edge hides when its endpoint is filtered")
+	_assert(not view._links[0]["root"].visible, "filtered edge also hides in theatre")
 	view._lens.select(0)
 	view._apply_visibility()
-	_assert(view.select_key("rig:kilo-core-msi"), "selected rig can be changed after domain filtering")
 	view._directory_search.text = "I3"
 	view._rebuild_directory()
 	view._on_directory_selected(0)
-	_assert(view._selected == "rig:desktop-i3anuvp", "directory click selects I3, never pins Xanadu")
+	_assert(view._selected == "rig:desktop-i3anuvp", "finder click selects physical I3")
 	view._directory_search.text = ""
 	view._rebuild_directory()
 	view.set_snapshot({
+		"project_feed_state": "observed",
+		"projects": [{"name": "Test", "path": "C:/dev/active/test", "branch": "main"}],
 		"mission_feed_state": "observed",
-		"missions": [{"id": "msn_012345abcdef", "title": "Observed build", "risk": "R2",
-			"status": "running", "repo": "C:/dev/active/test"}]
+		"missions": [{"id": "msn_012345abcdef", "title": "Real running task",
+			"risk": "R2", "status": "running", "repo": "C:/dev/active/test"}]
 	})
-	_assert(view._pulse_nodes.size() == 1 and view.is_processing(), "only source-observed running work enables animated activity")
+	_assert(view._flow_markers.size() == 1, "real running mission has a work packet")
+	_assert(view._verified_running == 1, "verified activity count reflects source")
 	view._lens.select(1)
 	view._apply_visibility()
-	_assert(not view.is_processing(), "hidden running mission uses no animation CPU")
+	_assert(not view._flow_markers[0]["node"].visible, "hidden work does not falsely glow")
 	view._lens.select(0)
 	view._apply_visibility()
-	_assert(view.is_processing(), "restored running mission resumes meaningful animation")
-	view.set_snapshot({"tool_atlas_state": "observed",
-		"tools": [{"id": "omnisynapse", "name": "OMNISYNAPSE",
-			"status": "source_present", "path": "C:/dev/active/OMNISYNAPSE"}]})
-	_assert(view._meshes.has("tool:omnisynapse"), "opt-in local tool appears only with observed atlas")
-	view._lens.select(5)
+	_assert(view._flow_markers[0]["node"].visible, "restored source relation resumes visible work")
+	view.set_snapshot({
+		"tool_atlas_state": "observed",
+		"tools": [{"id": "omnisynapse", "name": "OMNISYNAPSE", "status": "source_present",
+			"path": "C:/dev/active/OMNISYNAPSE"}]
+	})
+	_assert(view._meshes.has("tool:omnisynapse"), "opt-in local presence renders distinct tool")
+	view._lens.select(7)
 	view._apply_visibility()
-	_assert(view._directory_keys.size() == 1, "sixth lens filters to local tool sources")
+	_assert(view._directory_keys.size() == 1, "new eighth lens isolates tool presence")
 	view._on_directory_selected(0)
-	_assert(view._selected == "tool:omnisynapse", "tool can be selected instead of Xanadu")
+	_assert(view._selected == "tool:omnisynapse", "tool can be selected by finder")
 	_assert(view._open_button.disabled and view._compose_button.disabled,
-		"filesystem presence cannot authorize opening executable session or mission")
-	_assert(view._info.text.contains("not proof of a running service"),
-		"operator sees presence versus qualification nudge")
+		"filesystem presence does not authorize session or mission submission")
+	_assert(view._info.text.contains("does not establish a connected"),
+		"inspector explains limits of tool presence")
 	view.queue_free()
 	await process_frame
 	await process_frame

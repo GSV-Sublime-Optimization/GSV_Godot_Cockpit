@@ -9,19 +9,20 @@ const CATALOG = preload("res://scripts/workstation/WorkbenchCatalog.gd")
 const MAX_PROJECTS := 32
 const MAX_MISSIONS := 24
 const MAX_SERVICES := 24
+const MAX_CAPABILITIES := 24
 const BODY_POSITIONS := [
 	Vector3(-8.0, -3.0, -4.0), Vector3(8.0, -3.0, -4.0),
 	Vector3(-8.0, -3.0, 4.0), Vector3(8.0, -3.0, 4.0),
 ]
 
-static func project(snapshot: Dictionary) -> Dictionary:
+static func project(snapshot: Dictionary, capability_snapshot: Array = [], atlas_source: String = "not_connected") -> Dictionary:
 	var nodes: Array[Dictionary] = []
 	var edges: Array[Dictionary] = []
 	var by_key: Dictionary = {}
 	var state: Dictionary = {}
-	for key in ["body_feed_state", "project_feed_state", "mission_feed_state", "service_feed_state", "tool_atlas_state"]:
-		state[key] = _atlas_feed_state(String(snapshot.get(key, "not_configured"))) if key == "tool_atlas_state" else (
-			_feed_state(String(snapshot.get(key, "unknown"))))
+	for key in ["body_feed_state", "project_feed_state", "mission_feed_state", "service_feed_state"]:
+		state[key] = _feed_state(String(snapshot.get(key, "unknown")))
+	state["tool_atlas_state"] = _atlas_feed_state(String(snapshot.get("tool_atlas_state", "not_configured")))
 	var body_lookup: Dictionary = {}
 	var bodies: Variant = snapshot.get("bodies", [])
 	if typeof(bodies) == TYPE_ARRAY:
@@ -41,6 +42,7 @@ static func project(snapshot: Dictionary) -> Dictionary:
 			"key": "rig:" + id, "kind": "rig", "id": id, "title": rig["name"],
 			"detail": rig["role"], "status": live_state,
 			"source": "Studio /api/entity/bodies", "position": BODY_POSITIONS[i],
+			"resources": observed.get("observation", {}) if typeof(observed.get("observation", {})) == TYPE_DICTIONARY else {},
 			"observed": state["body_feed_state"] == "observed"
 		})
 	var projects: Variant = snapshot.get("projects", [])
@@ -55,8 +57,13 @@ static func project(snapshot: Dictionary) -> Dictionary:
 			var path: String = p["path"]
 			if not path.is_absolute_path() or path.contains("..") or path.length() > 500:
 				continue
+			var is_game := false
+			for candidate_game in CATALOG.GAMES:
+				if String(candidate_game["id"]).to_lower() == String(p.get("name", "")).to_lower() or (
+					String(candidate_game["id"]).to_lower() == path.get_file().to_lower()):
+					is_game = true
 			_push(nodes, by_key, {
-				"key": "project:" + path, "kind": "project",
+				"key": "project:" + path, "kind": "project", "game": is_game,
 				"id": path, "repo": path,
 				"title": String(p.get("name", "Project")).substr(0, 72),
 				"detail": String(p["branch"]).substr(0, 160),
@@ -107,36 +114,66 @@ static func project(snapshot: Dictionary) -> Dictionary:
 				"source": "Studio colony health", "position": _orbit(i, selected.size(), 10.2, -0.1, 0.6),
 				"observed": true
 			})
-	# This fifth lens is only opt-in, local filesystem presence. Never confuse
-	# "source_present" with authenticated, callable, qualified, or admitted.
-	var tools: Variant = snapshot.get("tools", [])
-	if state["tool_atlas_state"] == "observed" and typeof(tools) == TYPE_ARRAY:
-		var selected_tools: Array = tools.slice(0, 32)
-		for i in range(selected_tools.size()):
-			var source_tool: Variant = selected_tools[i]
-			if typeof(source_tool) != TYPE_DICTIONARY:
+	var atlas_seen: Dictionary = {}
+	var allowed: Array[Dictionary] = []
+	for raw in capability_snapshot:
+		if typeof(raw) != TYPE_DICTIONARY:
+			continue
+		var cap_id := String(raw.get("id", ""))
+		if cap_id.is_empty() or cap_id.length() > 64 or atlas_seen.has(cap_id):
+			continue
+		atlas_seen[cap_id] = true
+		allowed.append(raw)
+	allowed.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return String(a.get("name", "")).to_lower() < String(b.get("name", "")).to_lower())
+	for i in range(mini(MAX_CAPABILITIES, allowed.size())):
+		var cap: Dictionary = allowed[i]
+		var cid := String(cap.get("id", ""))
+		_push(nodes, by_key, {
+			"key": "capability:" + cid, "kind": "capability", "id": cid,
+			"title": String(cap.get("name", cid)).substr(0, 80),
+			"detail": String(cap.get("can_do", "unknown capability")).substr(0, 170),
+			"status": "snapshot:" + String(cap.get("snapshot_state", "unknown")),
+			"source": atlas_source + " (STATIC SNAPSHOT, NO ADMISSION)",
+			"machine": String(cap.get("machine", "unknown")),
+			"grade": String(cap.get("grade", "D")),
+			"cost_class": String(cap.get("cost_class", "unknown")),
+			"evidence": String(cap.get("evidence", "not_provided")).substr(0, 450),
+			"position": _orbit(i, mini(MAX_CAPABILITIES, allowed.size()), 13.0, -4.2, 0.26),
+			"observed": false, "admitted": false
+		})
+	# Opt-in local filesystem presence is a different observation grade from
+	# owner-admitted executable capabilities in the static capability atlas.
+	var discovered: Variant = snapshot.get("tools", [])
+	if state["tool_atlas_state"] == "observed" and typeof(discovered) == TYPE_ARRAY:
+		var bounded_tools: Array = discovered.slice(0, 32)
+		for i in range(bounded_tools.size()):
+			var local_tool: Variant = bounded_tools[i]
+			if typeof(local_tool) != TYPE_DICTIONARY:
 				continue
-			var id: String = String(source_tool.get("id", ""))
-			var status: String = String(source_tool.get("status", "unknown"))
-			var local_path: String = String(source_tool.get("path", ""))
-			if id.is_empty() or id.length() > 48 or not ["source_present", "directory_seen", "not_found"].has(status):
+			var tool_id := String(local_tool.get("id", ""))
+			var tool_state := String(local_tool.get("status", "unknown"))
+			var tool_path := String(local_tool.get("path", ""))
+			if tool_id.is_empty() or tool_id.length() > 48 or not ["source_present", "directory_seen", "not_found"].has(tool_state):
+				continue
+			if not tool_path.is_absolute_path() or tool_path.contains("..") or tool_path.length() > 500:
 				continue
 			_push(nodes, by_key, {
-				"key": "tool:" + id, "kind": "tool", "id": id,
-				"title": String(source_tool.get("name", id)).substr(0, 80),
-				"detail": "LOCAL PRESENCE ONLY / not callable or admitted",
-				"local_path": local_path if local_path.is_absolute_path() and not local_path.contains("..") and local_path.length() <= 500 else "",
-				"status": status,
-				"source": "Opt-in local tool atlas / read-only filesystem probe",
-				"position": _orbit(i, selected_tools.size(), 6.3, -1.45, 1.1),
-				"observed": true
+				"key": "tool:" + tool_id, "kind": "tool", "id": tool_id,
+				"title": String(local_tool.get("name", tool_id)).substr(0, 80),
+				"detail": "LOCAL FILESYSTEM PRESENCE; no connector or executor admission",
+				"status": tool_state, "local_path": tool_path,
+				"position": _orbit(i, bounded_tools.size(), 6.3, -1.55, 1.1),
+				"source": "opt-in local read-only discovery file", "observed": true,
+				"admitted": false
 			})
-			# This is a transparent path-equality cross-reference, NOT an agent admission,
-			# dependency edge, connected integration or proof of identical Git remotes.
-			if status == "source_present" and by_key.has("project:" + local_path):
-				edges.append({"from": "project:" + local_path, "to": "tool:" + id,
+			# Path equality is a reference hint, not proof of identical Git remote.
+			if tool_state == "source_present" and by_key.has("project:" + tool_path):
+				edges.append({"from": "project:" + tool_path, "to": "tool:" + tool_id,
 					"kind": "local_path_match"})
-	return {"nodes": nodes, "edges": edges, "feeds": state, "source": "KiloCore Studio + opt-in local tool atlas", "is_fixture": false}
+	return {"nodes": nodes, "edges": edges, "feeds": state, "source": "KiloCore Studio",
+		"atlas_source": atlas_source, "atlas_count": allowed.size(),
+		"atlas_omitted": maxi(0, allowed.size() - MAX_CAPABILITIES), "is_fixture": false}
 
 static func _push(nodes: Array[Dictionary], lookup: Dictionary, entry: Dictionary) -> void:
 	if lookup.has(entry["key"]):
@@ -171,6 +208,8 @@ static func _age_drift(value: String) -> float:
 	return clampf(age_h / 24.0, 0.0, 3.0)
 
 static func color_for(status: String) -> Color:
+	if status.begins_with("snapshot:"):
+		return Color("#af7cff")  # Static Atlas is violet, not live-green.
 	match status:
 		"reported_fresh", "observed", "succeeded", "healthy", "ok", "up":
 			return Color("#39ecd0")
