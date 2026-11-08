@@ -42,7 +42,8 @@ def orders(channel: list[dict]) -> list[dict]:
                 continue        # a re-posted order line must never reset an order's history
             state[m["id"]] = {"id": m["id"], "at": m.get("at"), "from": m.get("from"), "to": m.get("to", "any"),
                               "station": str(m.get("station") or "anvil")[:24],   # other cockpits add stations (ledger, act, factory)
-                              "text": m.get("text", ""), "status": "posted", "by": None, "note": "", "link": "",
+                              "text": m.get("text", ""), "ref": m.get("ref", ""), "url": m.get("url", ""),
+                              "status": "posted", "by": None, "note": "", "link": "",
                               "history": [{"at": m.get("at"), "status": "posted", "by": m.get("from")}]}
         elif m.get("kind") == "order-status" and m.get("id") in state:
             o = state[m["id"]]
@@ -106,7 +107,8 @@ def smiths(feed: dict, now: float | None = None) -> list[dict]:
 
 AGENT_PREFIXES = (("agent/chatgpt-gpt6", "GPT-6", "cloud"), ("gpt6/", "GPT-6", "cloud"), ("muse/", "Muse", "cloud"),
                   ("codex/", "Codex", "cloud"), ("bakeoff/mindview-gpt6", "GPT-6", "cloud"),
-                  ("bakeoff/mindview-i3claude", "i3 Claude", "i3"), ("claude/", "a Claude", "msi"),
+                  ("bakeoff/mindview-i3claude", "i3 Claude", "i3"), ("bakeoff/mindview-msiclaude", "MSI Claude", "msi"),
+                  ("claude/", "a Claude", "msi"),
                   ("sol/", "Sol", "cloud"))
 
 

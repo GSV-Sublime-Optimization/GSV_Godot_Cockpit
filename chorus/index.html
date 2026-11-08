@@ -809,7 +809,7 @@ async function poll() {
     events = d.events; heartbeats = d.heartbeats; live = true; nowFn = () => Date.now(); setSource(); drawRiver();
     extras = {backup: d.backup, mirror: d.mirror, steward_cards: d.steward_cards || [], prs_waiting: d.prs_waiting || [],
               channel: d.channel || [], claude_activity: d.claude_activity || [], spine: d.spine || extras.spine,
-              work: d.work || extras.work, doctor: d.doctor || extras.doctor || []};
+              work: d.work || extras.work, doctor: d.doctor || extras.doctor || [], suggestions: d.suggestions || []};
     renderNeeds(); renderTalk(); renderTick();
     if (!card.hidden) openRig(RIGS.find(r => r.id === card.dataset.rig));
     if (fresh && !rehearsing) show(events[events.length - 1]);
@@ -883,7 +883,8 @@ function needs() {
   if (!m || m.age_h > 26 || !m.ok) out.push({level: "notable", what: "Git mirrors are behind", meta: m ? `${m.age_h} h old · ${m.failures} failed` : "no receipt",
     why: "The off-GitHub copy of the colony's code is stale.", move: "python %LOCALAPPDATA%/KiloCore/bin/mirror_sync.py run", owner: "anyone on MSI"});
   if (extras.prs_waiting.length) out.push({level: "notable", what: `${extras.prs_waiting.length} pull requests are waiting for a reviewer`,
-    meta: "open, not draft, no review yet", why: "Colony rule: a different agent reviews before anything merges.",
+    meta: `open, not draft, no gsv review at the current head${extras.prs_waiting.some(p => p.stage === "stale-review") ? ` · ${extras.prs_waiting.filter(p => p.stage === "stale-review").length} reviewed only at an older head` : ""}`,
+    why: "Colony rule: a different agent reviews before anything merges. Agents share one GitHub account, so only a gsv-review marker bound to the PR's head counts.",
     move: "Ask Codex, GPT-6 or the i3 Claude to review the oldest first", owner: "any second actor", list: extras.prs_waiting.slice(0, 5)});
   const down = (extras.spine?.services || []).filter(s => !s.up && !EXPECTED_DOWN.has(s.name));
   if (down.length) out.push({level: down.some(s => s.tier === "core") ? "notable" : "routine",
@@ -895,6 +896,11 @@ function needs() {
     meta: `${c.branch || "?"} · ${c.ahead} commits ahead · ${c.dirty || 0} uncommitted${c.last_commit_h != null ? ` · last commit ${Number(c.last_commit_h).toFixed(1)} h ago` : ""}`,
     why: "Commits that exist only on MSI are lost if the disk is.",
     move: `git -C ${c.path} log --oneline @{u}..  (then push the branch or open a PR)`, owner: "whoever owns that repo"});
+  const sug = extras.suggestions || [];
+  if (sug.length) out.push({level: "routine", what: `${sug.length} open suggestion${sug.length === 1 ? "" : "s"} for this cockpit`,
+    meta: `newest from ${sug[0].from} · ${ago(Date.parse(sug[0].at))}`, why: "Agents suggest cockpit improvements in the shared channel ({kind: suggestion}); each stays open until someone posts an order for it.",
+    move: `python chorus/chorus.py next --as "claude (msi seat)"`, owner: "MSI Claude (CHORUS's seat)",
+    notes: sug.slice(0, 5).map(x => `${x.from}${x.node ? " [" + x.node + "]" : ""}: ${x.text}`)});
   if (extras.steward_cards.length) out.push({level: "routine", what: `${extras.steward_cards.length} questions from the xanadu Steward`,
     meta: `oldest ${Math.round(Math.max(...extras.steward_cards.map(c => c.age_d || 0)))} days`, why: "Several were answered tonight; the cards were never closed.",
     move: "Answer or close them in xanadu:~/steward/outbox/ (dev#419 has the re-checked digest)", owner: "Keath + MSI Claude"});
@@ -912,6 +918,7 @@ function renderNeeds() {
       <div class="move"><code>${esc(it.move)}</code><button type="button">Copy</button><button type="button" class="ask">Ask Claude</button></div>`;
     li.querySelector(".ask").onclick = () => askClaude(it.what);
     if (it.list) { const ul = document.createElement("ul"); for (const p of it.list) { const a = document.createElement("li"); a.innerHTML = `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.repo)}#${p.number}</a> ${esc(p.title)}`; ul.append(a); } li.append(ul); }
+    if (it.notes) { const ul = document.createElement("ul"); for (const t of it.notes) { const a = document.createElement("li"); a.textContent = t; ul.append(a); } li.append(ul); }
     const btn = li.querySelector("button");
     btn.onclick = () => navigator.clipboard?.writeText(it.move).then(() => { btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy", 1500); }, () => { btn.textContent = "Select it"; });
     list.append(li);

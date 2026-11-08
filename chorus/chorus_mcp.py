@@ -9,6 +9,8 @@ Stdio MCP server (JSON-RPC 2.0, one message per line), standard library only. It
     chorus_orders       work orders for this seat (or all)
     chorus_order_status take / working / done / decline an order, with a note and a link
     chorus_say          post to the shared cockpit channel as this seat
+    chorus_next         this seat's single highest-yield move: who/what/where/when/why and numbered steps
+    chorus_suggest      suggest a cockpit improvement ({kind: suggestion} line, the shared protocol)
 
 The seat comes from CHORUS_SEAT (default "claude (msi seat)"); an agent never speaks as Keath.
 Register with Claude Code:
@@ -41,10 +43,12 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "id": {"type": "string"}, "status": {"type": "string", "enum": ["taken", "working", "done", "declined"]},
          "note": {"type": "string"}, "link": {"type": "string"}}, "required": ["id", "status"]}},
-    {"name": "chorus_suggest", "description": "Suggest an improvement, fix or correction to the CHORUS cockpit itself; it becomes a work order for the MSI seat. Name the node or view it concerns.",
+    {"name": "chorus_suggest", "description": "Suggest an improvement, fix or correction to the CHORUS cockpit itself; posted as a shared-protocol suggestion line from this seat and shown on the page until someone orders it. Name the node or view it concerns.",
      "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}, "node": {"type": "string"}}, "required": ["text"]}},
     {"name": "chorus_knowledge", "description": "The colony's knowledge layer: capability atlas counts and dead lanes, GitNexus code graphs and staleness, vault recent notes, latest decisions, rival bakeoff cockpits.",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "chorus_next", "description": "Your seat's single highest-yield next move (never a review of your own PR; Keath-only and hands-on-hardware items go to Keath), with who/what/where/when/why and numbered steps.",
+     "inputSchema": {"type": "object", "properties": {"json": {"type": "boolean"}}}},
     {"name": "chorus_say", "description": "Post a message to the shared cockpit channel as this seat.",
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string"}, "to": {"type": "string", "description": "a seat, e.g. 'claude (i3 seat)', 'keath (chorus)', or 'all'"}},
@@ -83,6 +87,8 @@ def call(name: str, a: dict) -> str:
     if name == "chorus_knowledge":
         from knowledge import knowledge
         return json.dumps(knowledge(), indent=1, default=str)[:12000]
+    if name == "chorus_next":
+        return _capture(chorus.next_move, chorus.load(), chorus.SEAT, bool(a.get("json")))
     if name == "chorus_say":
         return _capture(chorus.say, a["text"], a.get("to", "all"))
     raise KeyError(name)

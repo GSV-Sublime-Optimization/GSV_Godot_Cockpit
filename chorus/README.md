@@ -26,7 +26,8 @@ The built-in **runbook** maps each health check to that cause and move. For exam
 Beyond the rigs, it also lists:
 - a stale off-box backup (finished sets only; an in-progress `.partial` never counts as fresh);
 - mirrors that are behind;
-- **pull requests waiting for a reviewer** (open, not draft, no review; linked);
+- **pull requests waiting for a reviewer** (open, not draft, and no `gsv-review` marker at the PR's current head; linked). GitHub's `reviewDecision` is never consulted: every agent posts as the PR author's account, so it never moves;
+- **open suggestions** agents posted for this cockpit (`{kind: suggestion}`), until someone orders one;
 - the xanadu Steward's unanswered questions.
 
 When nothing needs you, it says so.
@@ -110,6 +111,8 @@ Look down into the colony; every light is a fact from `feed.json`, and every nod
 - `chorus_doctor`: the read-only probes.
 - `chorus_orders` and `chorus_order_status`: take, working, done or decline, with a note and a link.
 - `chorus_say`: post to the channel as your own seat.
+- `chorus_next`: your seat's single highest-yield move, with steps.
+- `chorus_suggest`: suggest a cockpit improvement (a `{kind: suggestion}` line).
 
 Register it, setting `CHORUS_SEAT` to your seat:
 
@@ -117,4 +120,12 @@ Register it, setting `CHORUS_SEAT` to your seat:
 claude mcp add chorus -e CHORUS_SEAT="claude (msi seat)" -- python K:/dev/worktrees/cockpit/mindview-msiclaude/chorus/chorus_mcp.py
 ```
 
-The same tools exist as a CLI: `python chorus/chorus.py brief|rig|work|doctor|orders|take|working|done|decline|say`.
+The same tools exist as a CLI: `python chorus/chorus.py brief|rig|work|doctor|orders|take|working|done|decline|say|next|suggest`.
+
+### The shared agent protocol (`protocol.py`, `nextmove.py`)
+CHORUS speaks the same channel protocol as HOLOMIND (#15), re-implemented here so no entry imports another:
+- **Reviews** count only by `<!-- gsv-review: actor=.. verdict=.. head=<sha> -->` markers (issue comments or review bodies) at the PR's current head; an older head makes it `stale-review`. `chorus.py work` lists open PRs by stage.
+- **Receipts:** a seat's *done* is a report until reconciled. A review order is **verified** when a gsv review exists at the PR's current head, a merge order once the PR has closed; an open PR without that is **NOT confirmed**; anything that can't be checked stays **reported**. Shown by `chorus.py orders` and on the Forge tickets.
+- **`chorus.py next --as SEAT`** (`--json` too): the single highest-yield item that seat may do, with who / what / where / when / why and numbered steps. Never a review of the seat's own PR (author read from the branch prefix or the PR body); one open order per seat (if you hold one, it is your next move); merges, Steward cards and anything the doctor says needs hands on hardware (BIOS, power, cables) go to Keath; a *done* that comes back NOT confirmed returns to the seat that reported it. Scores are printed so they can be argued with.
+- **`chorus.py suggest "text" --as SEAT [--node N]`** posts `{kind: suggestion, from, text}`. It stays open on the Sky page and in `next` (for CHORUS's own seat) until an order carries `ref: suggestion:<at>`. The page's `/suggest` button is unchanged.
+- **Read receipts:** both shapes are read: a watermark `{kind: read, from, at}` and a list `{kind: read, from, reads: [...]}`.
