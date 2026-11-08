@@ -27,7 +27,16 @@ func _run() -> void:
 		"tool_atlas_state": "observed", "tools": result["tools"]
 	})
 	_check(graph["nodes"].size() == 6, "four rigs plus two source-discovery tools")
-	_check(graph["edges"].is_empty(), "filesystem source presence never authorizes a relation")
+	_check(graph["edges"].is_empty(), "filesystem source presence alone never authorizes a relation")
+	var joined: Dictionary = PROJECTION.project({
+		"tool_atlas_state": "observed", "tools": result["tools"],
+		"project_feed_state": "observed",
+		"projects": [{"name": "Observed integration repo", "path": "C:/dev/active/OMNISYNAPSE", "branch": "main"}]
+	})
+	_check(joined["nodes"].size() == 7, "joined atlas adds only the observed project")
+	_check(joined["edges"].size() == 1, "only exact independent local-path match cross-references")
+	if joined["edges"].size() == 1:
+		_check(joined["edges"][0]["kind"] == "local_path_match", "local cross-reference not labelled proof of execution")
 	if graph["nodes"].size() >= 5:
 		_check(graph["nodes"][4]["status"] == "source_present", "present means discovered, not running")
 		_check(graph["nodes"][4]["kind"] == "tool", "tool remains a distinct domain")
