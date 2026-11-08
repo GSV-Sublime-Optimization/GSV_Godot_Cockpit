@@ -125,37 +125,61 @@ def doctor_cached(data: dict) -> list[dict]:
 
 
 PRS_EVERY = 300          # GitHub is asked at most every 5 minutes
-_prs = {"at": 0.0, "items": []}
+ORG = "GSV-Sublime-Optimization"
+_prs: dict = {"at": 0.0, "items": None}
+
+
+def _gh_view(repo: str, number: int) -> dict | None:
+    v = subprocess.run(["gh", "pr", "view", str(number), "--repo", f"{ORG}/{repo}", "--json",
+                        "headRefOid,headRefName,comments,reviews,body"], capture_output=True, text=True, timeout=30,
+                       encoding="utf-8", errors="replace")
+    return json.loads(v.stdout or "{}") if v.returncode == 0 else None
+
+
+def classify_prs(rows: list[dict], view) -> list[dict]:
+    """Every open colony PR with its stage from the gsv-review head check (protocol.pr_stage).
+    GitHub's review state (reviewDecision, `--review none`) is NOT consulted: every agent reviews
+    through the PR author's account, so it never moves. `view(repo, number)` returns gh pr view JSON
+    (headRefOid, headRefName, comments, reviews, body) or None; drafts are not viewed."""
+    from nextmove import pr_author
+    from protocol import pr_stage
+    out = []
+    for p in rows:
+        repo = p["repository"]["name"]
+        item = {"repo": repo, "number": p["number"], "title": p["title"][:110], "url": p["url"],
+                "created": p["createdAt"], "draft": bool(p.get("isDraft"))}
+        info = None if item["draft"] else view(repo, p["number"])
+        if item["draft"]:
+            item.update(stage="draft", why="author still working", reviewers=[], head="")
+        elif info is None:
+            item.update(stage="needs-review", why="head not measured (gh pr view failed); assume waiting",
+                        reviewers=[], head="")
+        else:
+            item.update(pr_stage({**info, "isDraft": False}))
+            item["author"] = pr_author(info.get("headRefName", ""), info.get("body", ""))
+            item["branch"] = info.get("headRefName", "")
+        out.append(item)
+    return out
+
+
+def open_prs() -> list[dict] | None:
+    """All open colony PRs, staged by the gsv-review head check (read-only gh, cached 5 min).
+    None until GitHub has answered once, so receipts never 'verify' against an unmeasured list."""
+    if time.time() - _prs["at"] < PRS_EVERY:
+        return _prs["items"]
+    r = subprocess.run(["gh", "search", "prs", "--owner", ORG, "--state", "open", "--limit", "100", "--json",
+                        "repository,number,title,url,createdAt,isDraft"],
+                       capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
+    if r.returncode == 0:
+        _prs["items"] = classify_prs(json.loads(r.stdout or "[]"), _gh_view)
+        _prs["at"] = time.time()
+    return _prs["items"]
 
 
 def waiting_prs() -> list[dict]:
-    """Open, non-draft colony PRs with no review yet: the work waiting on a second actor (read-only gh)."""
-    if time.time() - _prs["at"] < PRS_EVERY:
-        return _prs["items"]
-    r = subprocess.run(["gh", "search", "prs", "--owner", "GSV-Sublime-Optimization", "--state", "open",
-                        "--draft=false", "--review", "none", "--limit", "30", "--json",
-                        "repository,number,title,url,createdAt"],
-                       capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
-    if r.returncode == 0:
-        items = []
-        for p in json.loads(r.stdout or "[]"):
-            repo = p["repository"]["name"]
-            # every agent reviews through the shared account, so GitHub's reviewDecision never moves;
-            # the colony's own record is a <!-- gsv-review: ... head=<sha> --> comment bound to the head
-            v = subprocess.run(["gh", "pr", "view", str(p["number"]), "--repo", f"GSV-Sublime-Optimization/{repo}",
-                                "--json", "headRefOid,comments"], capture_output=True, text=True, timeout=30,
-                               encoding="utf-8", errors="replace")
-            if v.returncode == 0:
-                info = json.loads(v.stdout or "{}")
-                head = info.get("headRefOid", "")
-                if head and any(f"head={head}" in c.get("body", "") and "<!-- gsv-review:" in c.get("body", "")
-                                for c in info.get("comments", [])):
-                    continue
-            items.append({"repo": repo, "number": p["number"], "title": p["title"][:110],
-                          "url": p["url"], "created": p["createdAt"]})
-        _prs["items"] = items
-        _prs["at"] = time.time()
-    return _prs["items"]
+    """Open, non-draft PRs with no gsv review at their current head (never reviewed, or only at an older head)."""
+    from protocol import WAITING
+    return [p for p in open_prs() or [] if p.get("stage") in WAITING]
 
 
 _recent = {"at": 0.0, "items": []}
@@ -194,9 +218,11 @@ def fetch() -> dict:
         raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
     data = json.loads(r.stdout.strip().splitlines()[-1])
     try:
-        data["prs_waiting"] = waiting_prs()
+        data["prs_open"] = open_prs()
     except (subprocess.SubprocessError, ValueError, OSError):
-        data["prs_waiting"] = _prs["items"]
+        data["prs_open"] = _prs["items"]
+    from protocol import WAITING
+    data["prs_waiting"] = [p for p in data["prs_open"] or [] if p.get("stage") in WAITING]
     flush_acks()
     try:
         from work import work           # colony claims + checkouts holding unsaved work
@@ -209,7 +235,9 @@ def fetch() -> dict:
     except (subprocess.SubprocessError, ValueError, OSError):
         data["prs_recent"] = _recent["items"]
     from shop import orders, smiths
-    data["orders"] = orders(data.get("channel", []))
+    import protocol
+    data["orders"] = protocol.annotate_receipts(orders(data.get("channel", [])), protocol.open_pr_index(data["prs_open"]))
+    data["suggestions"] = protocol.open_suggestions(data.get("channel", []), data["orders"])
     import actions
     data["actions"] = actions.catalog()
     data["impact"] = impact(data)

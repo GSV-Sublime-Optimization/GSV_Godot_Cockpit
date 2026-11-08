@@ -7,10 +7,12 @@
     python chorus/chorus.py work         # who edits what; checkouts holding unsaved work
     python chorus/chorus.py rig i3       # one rig in detail: checks, disks, RAM, what the Minds said
     python chorus/chorus.py say "text" [--to all|claude (i3 seat)|i3-mind]   # speak as this seat
+    python chorus/chorus.py next --as "claude (i3 seat)"   # your single highest-yield move, with steps
+    python chorus/chorus.py suggest "text" --as SEAT [--node N]   # suggest a cockpit improvement
     python chorus/chorus.py --json       # the brief as JSON (for other tools)
 
 It reads feed.json (written every 15 s by mindview_feed.py). If that is older than 2 minutes it
-refreshes it once with `mindview_feed.py --once`. Read-only except `say`.
+refreshes it once with `mindview_feed.py --once`. Read-only except `say`, `suggest` and order moves.
 """
 from __future__ import annotations
 
@@ -85,7 +87,7 @@ def needs(d: dict) -> list[dict]:
         out.append({"level": "notable", "what": f"spine {sp.get('up')}/{sp.get('total')} up", "detail": "down: " + ", ".join(down)})
     prs = d.get("prs_waiting") or []
     if prs:
-        out.append({"level": "notable", "what": f"{len(prs)} PRs wait for a reviewer",
+        out.append({"level": "notable", "what": f"{len(prs)} PRs wait for a reviewer (no gsv review at their head)",
                     "detail": ", ".join(f"{p['repo']}#{p['number']}" for p in prs[:6])})
     risky = [w for w in (d.get("work") or {}).get("at_risk", []) if w["ahead"] >= 3 or (w["ahead"] and w["dirty"] >= 20)]
     for w in risky[:3]:
@@ -119,8 +121,11 @@ def brief(d: dict, as_json: bool) -> None:
     for e in minds:
         print(f"    {e.get('mind')} [{e.get('level')}] {ago(ts(e.get('at')))}: {e.get('line')}")
     print(f"Channel: {len(new)} new" + (":" if new else ""))
+    from protocol import read_by
+    rb = read_by(d.get("channel", []))
     for m in new[-6:]:
-        print(f"    {m.get('from')} -> {m.get('to')}: {str(m.get('text'))[:200]}")
+        seen = sorted(rb.get(str(m.get("at")), set()) - {SEAT})
+        print(f"    {m.get('from')} -> {m.get('to')}: {str(m.get('text'))[:200]}" + (f"  (read by {', '.join(seen)})" if seen else ""))
     if d.get("channel"):
         SEEN.parent.mkdir(parents=True, exist_ok=True)
         SEEN.write_text(max(m.get("at", "") for m in d["channel"]))
@@ -152,15 +157,38 @@ def work_view(d: dict) -> None:
           f"{sum(1 for r in risk if r['ahead'])} with unpushed commits")
     for r in risk[:12]:
         print(f"  {r['label']:<42} {r['branch'][:34]:<34} ahead {r['ahead']:>3} dirty {r['dirty']:>4} last {r['last_commit_h']} h")
+    pr_view(d)
+
+
+def pr_view(d: dict) -> None:
+    """Open PRs by stage. Reviews count by the gsv-review head check only (never reviewDecision)."""
+    from nextmove import prs_of
+    prs = [p for p in prs_of(d) if p.get("stage") != "draft"]
+    if d.get("prs_open") is None and not prs:
+        print("Pull requests: not measured yet (the feeder asks GitHub every 5 min)")
+        return
+    order = ["changes", "needs-review", "stale-review", "approved", "reviewed", "unknown"]
+    by = {s: [p for p in prs if p.get("stage") == s] for s in order}
+    print("Pull requests (review = a gsv-review marker at the PR's CURRENT head): "
+          + (", ".join(f"{len(v)} {k}" for k, v in by.items() if v) or "none open"))
+    for s in order:
+        for p in by[s][:8]:
+            who = (p.get("author") or {}).get("name") or "unattributed"
+            revs = f" by {', '.join(p['reviewers'])}" if p.get("reviewers") else ""
+            print(f"  [{s:<12}] {p['repo']}#{p['number']:<5} {who:<12} {p.get('title', '')[:70]}{revs}")
 
 
 def orders_view(d: dict, mine: bool) -> None:
     from shop import orders
-    os_ = [o for o in orders(d.get("channel", [])) if not mine or o["to"] in (SEAT, "any")]
+    import protocol
+    every = protocol.annotate_receipts(orders(d.get("channel", [])), protocol.open_pr_index(d.get("prs_open")))
+    os_ = [o for o in every if not mine or o["to"] in (SEAT, "any")]
     open_ = [o for o in os_ if o["status"] not in ("done", "declined")]
     print(f"Work orders: {len(open_)} open" + (" for this seat" if mine else ""))
     for o in os_[-15:]:
-        print(f"  {o['id']}  [{o['status']:<8}] {o['station']:<7} to {o['to']:<18} by {o['by'] or '-':<18} {o['text'][:90]}")
+        # a seat's "done" is a report until the owner record agrees: verified / reported / NOT confirmed
+        st = f"done: {o['receipt']}" if o.get("receipt") else o["status"]
+        print(f"  {o['id']}  [{st:<8}] {o['station']:<7} to {o['to']:<18} by {o['by'] or '-':<18} {o['text'][:90]}")
         if o["note"] or o["link"]:
             print(f"      {o['note'][:120]} {o['link']}")
 
@@ -209,15 +237,35 @@ def act_orders(d: dict) -> None:
                      f"{res['action']} {res['target']}: {'ok' if res['ok'] else 'failed'} in {res['ms']} ms - {res['result'][:200]}", "")
 
 
-def suggest(text: str, node: str) -> None:
-    """Suggest an improvement to the cockpit itself; it lands as an order for the MSI seat."""
-    text = " ".join(text.split())[:500]
+def suggestion_line(text: str, node: str = "", seat: str | None = None) -> dict:
+    """The shared protocol's suggestion line, {kind: suggestion, from, text}. It stays open on the
+    page and in `next` until someone posts an order whose ref is its id (suggestion:<at>)."""
+    seat = (seat or SEAT).strip()
+    text = " ".join(str(text).split())[:500]
     if not text:
         sys.exit("empty suggestion")
-    now = time.gmtime()
-    _post({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", now), "from": SEAT, "kind": "order",
-           "id": "s-" + time.strftime("%m%d-%H%M%S", now), "to": "claude (msi seat)", "station": "cockpit",
-           "text": f"SUGGEST{(' [' + node[:60] + ']') if node else ''}: {text}"})
+    if not seat or seat.lower().startswith("keath"):
+        sys.exit("an agent never signs as Keath; use --as with your own seat (Keath suggests from the page)")
+    msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": seat, "to": "claude (msi seat)",
+           "kind": "suggestion", "text": text, "via": "chorus-cli"}
+    if node:
+        msg["node"] = node[:60]
+    return msg
+
+
+def suggest(text: str, node: str = "", seat: str | None = None) -> None:
+    """Suggest an improvement to the cockpit itself, as a shared-protocol suggestion line."""
+    _post(suggestion_line(text, node, seat))
+
+
+def next_move(d: dict, seat: str, as_json: bool = False) -> None:
+    """The single highest-yield item this seat can do (nextmove.py), with who/what/where/when/why and steps."""
+    import nextmove
+    plan = nextmove.plan_for(seat, d)
+    if as_json:
+        print(json.dumps(plan, indent=1, default=str))
+    else:
+        print(nextmove.render(seat, plan))
 
 
 def say(text: str, to: str) -> None:
@@ -235,18 +283,22 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "suggest", "work", "doctor", "act-orders", "orders", "take", "working", "done", "decline"])
+    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "suggest", "next", "work", "doctor", "act-orders", "orders", "take", "working", "done", "decline"])
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--to", default="all")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--note", default="")
     ap.add_argument("--link", default="")
     ap.add_argument("--all", action="store_true", help="orders: show every seat's orders")
+    ap.add_argument("--as", dest="seat", default=None, help="next/suggest: the seat to act as (default CHORUS_SEAT)")
+    ap.add_argument("--node", default="", help="suggest: the node or view it concerns")
     a = ap.parse_args()
     if a.cmd == "say":
         say(a.arg or "", a.to)
     elif a.cmd == "suggest":
-        suggest(a.arg or "", a.to if a.to != "all" else "")
+        suggest(a.arg or "", a.node or (a.to if a.to != "all" else ""), a.seat)
+    elif a.cmd == "next":
+        next_move(load(), a.seat or SEAT, a.json)
     elif a.cmd == "act-orders":
         act_orders(load())
     elif a.cmd == "orders":

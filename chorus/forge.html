@@ -132,6 +132,7 @@ form.order .go { display: flex; justify-content: space-between; align-items: cen
 .formnote.ok { color: var(--ok); } .formnote.bad { color: var(--bad); }
 .lane-h { font: 600 11px var(--f-data); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim); margin: 2px 0 -4px; }
 .tickets { display: grid; gap: 8px; }
+.receipt { font-weight: 600; } .receipt.ok { color: var(--ok); } .receipt.bad { color: var(--bad); }
 .ticket {
   position: relative; display: grid; gap: 6px; padding: 10px 11px 9px; border-radius: 4px 4px 8px 8px;
   background: linear-gradient(#f3e6c6, #e6d3a8); color: var(--paper-ink); box-shadow: 0 3px 10px rgba(0,0,0,0.45);
@@ -1020,6 +1021,7 @@ function ticketHTML(o) {
     <div class="th"><span>${esc(o.id)}${mock}</span><span>to ${esc(o.to === 'any' ? 'anyone' : displayName(o.to))} · ${esc(ST[o.station].title)}</span></div>
     <div class="tx">${esc(o.text)}</div>
     <ol class="track">${li}</ol>
+    ${o.status === 'done' && o.receipt ? `<div class="th"><span class="receipt ${o.receipt === 'verified' ? 'ok' : o.receipt === 'reported' ? '' : 'bad'}" title="A seat's done is a report until the owner record agrees: a review needs a gsv review at the PR's current head, a merge needs the PR closed.">${o.receipt === 'verified' ? '✓ verified' : o.receipt === 'reported' ? 'reported (not checkable)' : '✗ NOT confirmed'}</span></div>` : ''}
     ${next ? `<div class="th"><span>${next}${pend}</span></div>` : ''}
     ${(o.status === 'done' || o.status === 'declined') && (o.note || o.link) ? `<div class="tn">${esc(o.note || '')}${o.link ? ` <a href="${esc(o.link)}" target="_blank" rel="noopener">${esc(o.link.replace(/^https:\/\/github.com\/[^/]+\//, ''))}</a>` : ''}</div>` : ''}
   </article>`;
