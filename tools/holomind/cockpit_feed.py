@@ -23,7 +23,11 @@ import pathlib
 import subprocess
 import sys
 import time
+import traceback
 import urllib.request
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import mind  # noqa: E402  (the Mind's judgement: pure, tested in tests/python)
 
 HERE = pathlib.Path(r'C:\Users\Public\colony\mindview')
 FEED = HERE / 'feed.json'
@@ -105,7 +109,7 @@ def ssh(script, stdin=''):
                         f"python3 -c 'import base64; exec(base64.b64decode(\"{b64}\"))'"],
                        input=stdin, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40, creationflags=0x08000000)
     if r.returncode:
-        (HERE / 'cockpit.err.txt').write_text(f'{iso()} ssh rc={r.returncode} {r.stderr[-300:]}\n')
+        log_error('ssh', detail=f'rc={r.returncode} {r.stderr[-300:]}')
     return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
 
 
@@ -155,7 +159,8 @@ def github_activity():
                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=0x08000000)
         try:
             prs = json.loads(r.stdout or '[]')
-        except Exception:
+        except Exception as exc:
+            log_error('github', exc, f'{repo}: rc={r.returncode} {r.stderr[-200:]}')
             continue
         for p in prs:
             name, home = agent_of(p['headRefName'])
@@ -193,7 +198,8 @@ def chorus_facts():
         r = subprocess.run(MSI_SSH, capture_output=True, text=True, encoding='utf-8', timeout=30, stdin=subprocess.DEVNULL,
                            creationflags=0x08000000)
         f = json.loads(r.stdout)
-    except Exception:
+    except Exception as exc:
+        log_error('chorus_facts', exc)
         return None
     sp = f.get('spine') or {}
     return {'at': iso(), 'backup': f.get('backup'), 'mirror': {k: v for k, v in (f.get('mirror') or {}).items() if k != 'repos'},
@@ -328,25 +334,102 @@ def actions(bodies, awaiting, cards, channel, colony=None):
     return out
 
 
-def ask_mind(question, feed):
-    """The i3 Mind answers from the feed only. Never while a game is playing (GPU is shared)."""
-    if 'playing' in str(feed.get('screen', '')):
-        return "I'll answer after the current playtest; the engine room's GPU is busy with the game."
-    bodies = '; '.join(f"{b['label']} {b['status']}" + (f" (failing {', '.join(b['failing'])})" if b['failing'] else '') for b in feed['bodies'].values())
-    thoughts = ' | '.join(f"{e.get('mind')}: {e.get('line')}" for e in feed['events'][-6:])
-    agents = ' | '.join(f"{g['agent']}: {g['recent'][0]['title']} ({g['recent'][0]['repo']} #{g['recent'][0]['number']})" for g in feed.get('agents', [])[:8])
-    actions = ' | '.join(f"[{a['kind']}] {a['title']}" for a in feed.get('actions', [])[:12])
-    context = f"FLEET: {bodies}\nRECENT THOUGHTS: {thoughts}\nAGENTS AT WORK: {agents}\nWORK WAITING: {actions}\nSCREEN: {feed.get('screen')}"
-    body = {'model': MODEL, 'stream': False, 'think': False, 'keep_alive': 0, 'options': {'num_predict': 160, 'temperature': 0.3},
-            'messages': [{'role': 'system', 'content': 'You are the i3 Mind of the GSV colony, observing its fleet and agents. Answer in 1-3 short sentences, '
-                                                      'only from CONTEXT. MEASURED NOW facts override older RECENT THOUGHTS. If CONTEXT does not say, say you cannot see that yet. You cannot act; you only observe.'},
-                         {'role': 'user', 'content': f'CONTEXT:\n{context}\n\nQUESTION: {question}'}]}
+ERR = HERE / 'cockpit.err.txt'
+ERR_MAX_BYTES = 256 * 1024
+
+
+def log_error(where, exc=None, detail=''):
+    """Append (never overwrite) one error line, with the traceback tail, so failures stay visible after the next tick."""
     try:
-        req = urllib.request.Request(OLLAMA + '/api/chat', data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=120) as r:
-            return json.loads(r.read())['message']['content'].strip()
+        if ERR.exists() and ERR.stat().st_size > ERR_MAX_BYTES:
+            ERR.replace(ERR.with_suffix('.txt.1'))
+        tb = ''
+        if exc is not None:
+            tb = ' | ' + ' '.join(traceback.format_exception_only(type(exc), exc)).strip()[:300]
+        with ERR.open('a', encoding='utf-8') as f:
+            f.write(f'{iso()} [{where}] {detail}{tb}\n')
+    except OSError:
+        pass
+
+
+def ask_mind(question, feed):
+    """The i3 Mind answers from measured feed facts only. Returns (reply, problems) or raises on model failure.
+    The busy (playtest) gate lives in mind.plan(): this is only called when the GPU is free."""
+    body = {'model': MODEL, 'stream': False, 'think': False, 'keep_alive': 0, 'options': {'num_predict': 160, 'temperature': 0.2},
+            'messages': mind.prompt(feed, question)}
+    req = urllib.request.Request(OLLAMA + '/api/chat', data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        raw = json.loads(r.read())['message']['content'].strip()
+    return mind.check_reply(raw, feed, question)
+
+
+def chorus_route(text):
+    """CHORUS's router suggestion (POST /route on the MSI, read-only, no side effects) for an order. None if unreachable."""
+    payload = json.dumps({'text': text, 'kind': 'order'})
+    cmd = MSI_SSH[:-1] + ["curl -s -m 8 -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:8767/route"]
+    try:
+        r = subprocess.run(cmd, input=payload, capture_output=True, text=True, encoding='utf-8', timeout=30, creationflags=0x08000000)
+        return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip().startswith('{') else None
     except Exception as exc:
-        return f'(the i3 Mind could not think just now: {str(exc)[:80]})'
+        log_error('chorus_route', exc)
+        return None
+
+
+def append_lines(lines):
+    """Append channel lines on xanadu. True only if the write went through."""
+    return ssh(REMOTE, json.dumps({'append': '\n'.join(json.dumps(l, ensure_ascii=False) for l in lines)})) is not None
+
+
+def mind_turn(state, channel, feed):
+    """The Mind's turn this tick: route orders, acknowledge queued questions once while busy, answer one when free.
+    Everything goes through mind.plan(): ids are marked only after the channel write succeeded."""
+    ms = state.get('mind') or {}
+    if 'legacy_answered' not in ms:   # first run after the fix: honour what the old feeder already answered
+        ms = dict(ms, legacy_answered=list(state.get('answered', [])))
+    p = mind.plan(channel, feed, ms, time.time())
+    ms = p['state']
+    posted = []
+    for d in p['dropped']:
+        log_error('mind', detail=f'dropped question {d}: older than {mind.QUEUE_MAX_AGE_S // 3600} h')
+    for m in p['routes']:
+        seat, text = mind.routing_reply(m, chorus_route(m.get('text', '')))
+        lines = [{'at': iso(), 'from': mind.MIND, 'model': MODEL, 'to': m.get('from'), 'text': text, 're': mind.msg_id(m)}]
+        if m.get('kind') == 'order':
+            lines.append({'at': iso(), 'from': mind.MIND, 'kind': 'order-status', 'id': m.get('id'), 'status': 'declined',
+                          'note': f'no tools on the i3 Mind; route to {seat}'})
+        if append_lines(lines):
+            ms = mind.mark(ms, mind.msg_id(m), handled=True)
+            posted.append(lines[0])
+        else:
+            log_error('mind', detail=f'routing reply for {mind.msg_id(m)} not delivered; will retry')
+    if p['acks']:
+        to, text = mind.ack_text(p['acks'])
+        line = {'at': iso(), 'from': mind.MIND, 'model': MODEL, 'to': to, 'text': text, 're': [q['id'] for q in p['acks']]}
+        if append_lines([line]):
+            ms = mind.mark(ms, [q['id'] for q in p['acks']], acked=True)
+            posted.append(line)
+    q = p['answer']
+    if q:
+        try:
+            reply, problems = ask_mind(q['text'], feed)
+            state['mind_ok'] = True
+            if problems:
+                log_error('mind', detail=f"post-check rewrote answer to {q['id']}: {'; '.join(problems)}")
+        except Exception as exc:
+            state['mind_ok'] = False
+            log_error('mind', exc, f"model failed on {q['id']}")
+            ms, give_up = mind.failed(ms, q['id'])
+            reply = (f"I could not answer this ({mind.MAX_ATTEMPTS} attempts failed; see cockpit.err.txt on the i3)."
+                     if give_up else None)
+        if reply:
+            line = {'at': iso(), 'from': mind.MIND, 'model': MODEL, 'to': q.get('from'), 'text': reply, 're': q['id']}
+            if append_lines([line]):
+                ms = mind.mark(ms, q['id'], handled=True)
+                posted.append(line)
+            else:
+                log_error('mind', detail=f"answer to {q['id']} not delivered; will retry")
+    state['mind'] = ms
+    return posted, len(ms.get('queue', {}))
 
 
 def tick(state):
@@ -479,32 +562,13 @@ def tick(state):
         tmp.write_text(json.dumps(feed, ensure_ascii=False), encoding='utf-8')
         tmp.replace(FEED)
     # Publish first, so a Mind busy thinking never freezes the view.
-    pending = [m for m in channel if f"{m.get('at')}|{m.get('from')}|{m.get('text')}" not in set(state.get('answered', []))
-               and not m.get('kind') and not m.get('from', '').endswith('mind') and str(m.get('to', 'mind')).lower() in ('mind', '', 'all')
-               and not (age_s(m.get('at')) is not None and age_s(m.get('at')) > 600)]
-    feed['mind_thinking'] = len(pending)
+    feed['mind_thinking'] = len((state.get('mind') or {}).get('queue', {}))
     publish()
-    # The Mind answers new messages addressed to it (or to nobody in particular), one per tick.
-    answered = set(state.get('answered', []))
-    budget = 1
-    for m in channel:
-        key = f"{m.get('at')}|{m.get('from')}|{m.get('text')}"
-        if key in answered or m.get('kind') or m.get('from', '').endswith('mind') or str(m.get('to', 'mind')).lower() not in ('mind', '', 'all'):
-            continue
-        if age_s(m.get('at')) is not None and age_s(m.get('at')) > 600:
-            answered.add(key)
-            continue
-        if budget <= 0:
-            break
-        budget -= 1
-        reply = ask_mind(m.get('text', ''), feed)
-        state['mind_ok'] = not reply.startswith('(the i3 Mind could not')
-        line = {'at': iso(), 'from': 'i3-mind', 'model': MODEL, 'to': m.get('from'), 'text': reply}
-        m.setdefault('read_by', []).append('i3-mind') if 'i3-mind' not in m.get('read_by', []) else None
-        ssh(REMOTE, json.dumps({'append': json.dumps(line, ensure_ascii=False)}))
-        channel.append({**line, 'read_by': []})
-        answered.add(key)
-    state['answered'] = sorted(answered)[-200:]
+    # The Mind's turn: questions are queued (never dropped at 10 min), acknowledged once while a playtest holds the
+    # GPU, answered once when free; orders it cannot carry out are routed once; everything is rate-limited.
+    # raw_channel, not channel: orders (kind=order) addressed to the Mind must be seen too.
+    posted, queued = mind_turn(state, raw_channel, feed)
+    channel.extend({**line, 'read_by': []} for line in posted)
     feed['channel'] = channel[-40:]
     # The brief: the colony's state and work queue in one small document any agent can read from xanadu.
     state['brief'] = {'schema': 'colony.cockpit-brief/v0', 'at': feed['at'], 'screen': screen,
@@ -512,7 +576,7 @@ def tick(state):
                       'agents': [{'agent': g['agent'], 'latest': f"{g['recent'][0]['repo']}#{g['recent'][0]['number']} {g['recent'][0]['title']}"}
                                  for g in feed['agents']],
                       'actions': feed['actions'][:30], 'orders': [o for o in orders if o['status'] not in ('done', 'declined')][-20:], 'activity': feed.get('activity', [])[-8:], 'colony': feed.get('colony'), 'pipeline': feed.get('pipeline', []), 'sources': feed.get('sources'), 'channel': channel[-8:]}
-    feed['mind_thinking'] = max(0, len(pending) - (1 - budget))
+    feed['mind_thinking'] = queued
     publish()
     return feed
 
@@ -532,7 +596,7 @@ if __name__ == '__main__':
                                   'channel': len((f or {}).get('channel', []))}, indent=1)[:2500])
                 break
         except Exception as exc:
-            (HERE / 'cockpit.err.txt').write_text(f'{iso()} {exc}\n')
+            log_error('tick', exc)
             if '--once' in sys.argv:
                 raise
         time.sleep(10)
