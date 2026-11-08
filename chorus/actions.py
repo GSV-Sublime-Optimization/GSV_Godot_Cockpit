@@ -53,8 +53,13 @@ def _describe(action: str, target: str) -> str:
 
 
 def _checkout(target: str) -> Path | None:
-    p = Path(target)
-    return p if any(str(p).lower().startswith(str(r).lower()) for r in ROOTS) and (p / ".git").exists() else None
+    # resolve first: a plain string prefix let "C:/dev/active/../anything" and "C:/dev/active-x" through
+    try:
+        p = Path(target).resolve()
+    except (OSError, ValueError):
+        return None
+    inside = any(p != r.resolve() and p.is_relative_to(r.resolve()) for r in ROOTS)
+    return p if inside and (p / ".git").exists() else None
 
 
 def propose(action: str, target: str) -> dict:

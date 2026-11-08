@@ -269,10 +269,34 @@ def _append(msg: dict) -> None:
         raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
 
 
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+
+
+def post_allowed(headers) -> str | None:
+    """Why a POST must be refused, or None. Any web page Keath has open can send a 'simple'
+    cross-origin POST to 127.0.0.1 (text/plain, no preflight), and a DNS-rebinding page can even
+    read the reply. So: the Host must be loopback, any Origin must be this same loopback origin,
+    and the body must be declared JSON (which forces a CORS preflight this server never grants)."""
+    host = (headers.get("Host") or "").strip().lower()
+    hostname = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+    if hostname not in LOOPBACK_HOSTS:
+        return "bad Host"
+    origin = (headers.get("Origin") or "").strip().lower()
+    if origin and origin not in (f"http://{host}",):
+        return "cross-origin POST refused"
+    if not (headers.get("Content-Type") or "").lower().startswith("application/json"):
+        return "Content-Type must be application/json"
+    return None
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - http.server naming
         if self.path not in ("/say", "/order", "/act"):
             self.send_error(404, "only /say, /order and /act accept POST")
+            return
+        why = post_allowed(self.headers)
+        if why:
+            self.send_error(403, why)
             return
         try:
             n = min(int(self.headers.get("Content-Length", 0)), 4096)
