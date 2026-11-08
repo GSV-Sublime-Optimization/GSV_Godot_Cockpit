@@ -13,7 +13,10 @@ The existing 13-tab cockpit remains the default scene. A separate modular workst
 **BUILD SOFTWARE** desk using KiloCore Studio's actual mission API, a navigable native-3D **HYPERSPACE** source graph (with project-to-mission links and source-validated mission prefill), and a read-only mission
 receipt/validator inspector. No unapproved terminal attachment or autonomous promotion is
 implied. See [Software Factory Seat](docs/WORKSTATION_FACTORY_SEAT.md) for exact scope,
-execution contract and tested vs untested boundaries.
+execution contract and tested vs untested boundaries. The [Living Colony extension](docs/LIVING_COLONY_WORKSTATION.md)
+adds distinct domain-shaped meshes, an independent selectable object directory, verified
+work pulses, local source-path cross-references, and an opt-in, freshness-checked
+read-only tool inventory. A discovered checkout is not a running agent or connector.
 
 ## Status
 
