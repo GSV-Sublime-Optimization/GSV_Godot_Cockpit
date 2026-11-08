@@ -69,9 +69,68 @@ func _run() -> void:
 	# proof of network absence. Verify the actual file source contract instead.
 	_check(view._is_fixture and view._feed_path.begins_with("res://"),
 		"the fixture scene stays local-only and does not perform SSH")
+	await _check_work_tape(view)
 	view.queue_free()
 	await process_frame
 	_finish()
+
+## The tape carries colony work in its own lane, filter and inspector.
+func _check_work_tape(view: Control) -> void:
+	view._feed_path = "res://tests/fixtures/prime_mind_work_feed.json"
+	view._is_fixture = true
+	view._selected = -1
+	view._load_snapshot()
+	_check(view._error.is_empty(), "work fixture loads: " + view._error)
+	_check(view._feed.get("events", []).size() == 13, "thought events unchanged by work")
+	_check(view._tape.size() == 29, "tape merges 13 thoughts and 16 work lines")
+	var ordered := true
+	for i in range(1, view._tape.size()):
+		if String(view._tape[i]["at"]).substr(0, 19) < String(view._tape[i - 1]["at"]).substr(0, 19):
+			ordered = false
+	_check(ordered, "merged tape is in time order")
+	_check(view._selected_event().get("identity") == "model_summary",
+		"default selection is still the latest model thought, not work")
+	view._mind_filter = "models"
+	var models: int = view._filtered_indices().size()
+	view._mind_filter = "observer"
+	var observers: int = view._filtered_indices().size()
+	view._mind_filter = "work"
+	var work: Array[int] = view._filtered_indices()
+	_check(work.size() == 16, "work filter shows exactly the 16 work lines")
+	_check(models + observers + work.size() == 29, "models, observers and work partition the tape")
+	for i in work:
+		_check(view._tape[i]["identity"] == "work", "work filter holds only work")
+	view._select_within_filter()
+	_check(view._selected_event().get("identity") == "work", "work filter selects a work line")
+	var reported := -1
+	var linked := -1
+	for i in work:
+		var e: Dictionary = view._tape[i]
+		if e.get("receipt") == "reported" and reported < 0:
+			reported = i
+		if e.get("receipt") == "linked":
+			linked = i
+	_check(reported >= 0 and view.work_status_text(view._tape[reported]).contains("REPORTED"),
+		"done without link reads REPORTED")
+	_check(linked >= 0 and view.work_status_text(view._tape[linked]).contains("LINKED")
+		and not view.work_status_text(view._tape[linked]).contains("VERIF"),
+		"done with link reads LINKED and never VERIFIED")
+	for target in [reported, linked, work[0]]:
+		view._selected = target
+		view.queue_redraw()
+		await process_frame
+	_check(view._selected_event().get("kind") == "order", "first work line is an order")
+	_check(view.focus_of({"focus": null}) == "" and view.focus_of({}) == ""
+		and view.focus_of(view._tape[work[3]]) == "i3",
+		"null focus (orders, receipts) is safe; a rig change attends its rig")
+	var m := InputEventKey.new()
+	m.keycode = KEY_M
+	m.pressed = true
+	view._mind_filter = "observer"
+	view._unhandled_key_input(m)
+	_check(view._mind_filter == "work", "M cycles observer -> work")
+	view._unhandled_key_input(m)
+	_check(view._mind_filter == "all", "M cycles work -> all")
 
 func _finish() -> void:
 	if failures.is_empty():
