@@ -28,6 +28,12 @@ commands:
     - name: Hyperspace native 3D scene smoke
       run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_hyperspace_ui_test.gd
       requires: [godot]
+    - name: Workstation local tool atlas identity and freshness
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_tool_atlas_test.gd
+      requires: [godot]
+    - name: Workstation local inventory collector negative controls
+      run: ${python} -m unittest discover -s tools/workstation -p test_collect_tool_atlas.py
+      requires: [python]
     - name: Workstation UI scene smoke
       run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_ui_test.gd
       requires: [godot]
