@@ -86,3 +86,49 @@ A persistent identity, active self-model, and adaptive memory can make the
 entity behave coherently without implying subjective experience.
 No ambient shell access, self-signed privileged commands, automatic GitHub
 merges, remote-service exposure or new mutation plane is introduced.
+
+
+## Four physical body observations (next read-only seam)
+
+The same `EntitySession.tscn` now mounts **two** local asynchronous sensors:
+- existing Studio health (`/api/health`) for the mission/thermal snapshot;
+- new `FleetBodiesBridge.gd` (`/api/entity/bodies`) for four fixed-body
+  slots: MSI, I3, L9 and Xanadu. Studio owns the read projection in
+  [KiloCore-Studio #56](https://github.com/GSV-Sublime-Optimization/KiloCore-Studio/pull/56).
+  Physical R0 source is [FleetBridge #51](https://github.com/GSV-Sublime-Optimization/FleetBridge/pull/51).
+  No arbitrary SSH client or tool runner was added to Godot.
+
+The entity keeps one bounded session history; per-body records are
+`reported_fresh`, `stale`, `invalid`, or `unknown`. Any source asserting
+`identity_attested`, `remote_work_admitted` or
+`execution_authorized` is **rejected** by the new Godot projection. The
+proof is read-only data flow, not self-authentication or an admission grant.
+
+**Real end-to-end test, 2026-11-07 evening:** A single exact-code Python
+observer, sent over preexisting authenticated SSH stdin (no remote install),
+ran successfully on I3, L9 and Xanadu, and locally on MSI. Four observations
+were captured on MSI only. A separate isolated Studio Python server (port
+chosen locally, loopback only) exposed the opt-in observation directory;
+Godot 4.7.1 instantiated `EntitySession.tscn`, fetched all four physical
+reports over **real** `GET /api/entity/bodies`, and exited with
+`ENTITY_FOUR_BODIES_LIVE_PASS`. All four were reported fresh, each with
+`execution_authorized=false`. The temporary server exited cleanly.
+
+An optional inspection scene is `res://scenes/EntityObservationConsole.tscn`.
+It presents the reported machine states, not credentials, tool controls,
+or a privileged task editor. **The installed Studio service at 7340 will
+continue to show all four bodies UNKNOWN until PR #56 is independently
+reviewed, merged, deployed, and pointed at collected receipts.**
+Do not run a competing public Studio server or open remote access to make
+a demonstration look live.
+
+Port override `GSV_STUDIO_ENTITY_PORT` exists for isolated same-host tests
+only; it changes the loopback port, never the host. No production startup
+config, background listener or scheduled collection task is installed by
+this Godot PR. Missing observations expire rather than being silently
+replaced by canned telemetry.
+
+The next genuine intelligence milestone is *typed capability qualification
+and an authorized read-only tool invocation* through the owning Studio/Kilo_Core
+broker. Native learning policies and durable memory remain separate future
+milestones, not shipped claims.
