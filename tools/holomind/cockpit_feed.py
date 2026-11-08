@@ -246,7 +246,7 @@ def tick(state):
             continue
         reply = ask_mind(m.get('text', ''), feed)
         line = {'at': iso(), 'from': 'i3-mind', 'model': MODEL, 'to': m.get('from'), 'text': reply}
-        ssh(REMOTE, json.dumps(line))
+        ssh(REMOTE, json.dumps({'append': json.dumps(line, ensure_ascii=False)}))
         channel.append(line)
         answered.add(key)
     state['answered'] = sorted(answered)[-200:]
