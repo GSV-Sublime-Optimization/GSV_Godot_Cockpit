@@ -117,13 +117,15 @@ def agent_of(branch):
 
 
 STAGE_ORDER = {'changes': 0, 'needs-review': 1, 'stale-review': 2, 'approved': 3, 'draft': 4}
-GSV_REVIEW = re.compile(r'gsv-review: actor=(\S+) verdict=(\S+) head=([0-9a-f]+)')
+# Same rule as the merge gate (gsv_review.MARKER): a review counts only when the comment STARTS with its marker, so a
+# comment that merely quotes one (a dispatcher bridge note, a how-to) is never counted.
+GSV_REVIEW = re.compile(r'\A\s*<!--\s*gsv-review:\s*actor=(\S+)\s+verdict=(\S+)\s+head=([0-9a-f]+)')
 
 
 def pr_stage(repo, p, agent):
     """Where one PR is in the pipeline, and why: draft, needs-review, stale-review, changes, approved. Plus CI."""
     head = p.get('headRefOid', '')
-    reviews = [m.groups() for c in (p.get('comments') or []) for m in GSV_REVIEW.finditer(c.get('body', ''))]
+    reviews = [m.groups() for c in (p.get('comments') or []) for m in [GSV_REVIEW.match(c.get('body') or '')] if m]
     on_head = [r for r in reviews if r[2] == head]
     if p.get('isDraft'):
         stage, why = 'draft', 'author still working'
@@ -160,7 +162,7 @@ def github_activity():
         for p in prs:
             name, home = agent_of(p['headRefName'])
             pipeline.append(pr_stage(repo, p, name))
-            reviewed = any(f'head={p.get("headRefOid", "")}' in c.get('body', '') and 'gsv-review:' in c.get('body', '') for c in p.get('comments') or [])
+            reviewed = any((m := GSV_REVIEW.match(c.get('body') or '')) and m.group(3) == p.get('headRefOid') for c in p.get('comments') or [])
             if not p['isDraft'] and not reviewed and p.get('reviewDecision') in (None, '', 'REVIEW_REQUIRED'):
                 awaiting.append({'repo': repo, 'number': p['number'], 'title': p['title'][:80], 'agent': name or 'unattributed',
                                  'url': p['url'], 'at': p['updatedAt']})
@@ -486,7 +488,8 @@ def tick(state):
     publish()
     # The Mind answers new messages addressed to it (or to nobody in particular), one per tick.
     answered = set(state.get('answered', []))
-    budget = 1
+    # mind_worker.py (tools first, never drops a question) replaces this built-in answering when mind.external exists.
+    budget = 0 if (HERE / 'mind.external').exists() else 1
     for m in channel:
         key = f"{m.get('at')}|{m.get('from')}|{m.get('text')}"
         if key in answered or m.get('kind') or m.get('from', '').endswith('mind') or str(m.get('to', 'mind')).lower() not in ('mind', '', 'all'):
