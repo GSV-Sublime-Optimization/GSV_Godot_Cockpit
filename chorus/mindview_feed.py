@@ -137,8 +137,23 @@ def waiting_prs() -> list[dict]:
                         "repository,number,title,url,createdAt"],
                        capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
     if r.returncode == 0:
-        _prs["items"] = [{"repo": p["repository"]["name"], "number": p["number"], "title": p["title"][:110],
-                          "url": p["url"], "created": p["createdAt"]} for p in json.loads(r.stdout or "[]")]
+        items = []
+        for p in json.loads(r.stdout or "[]"):
+            repo = p["repository"]["name"]
+            # every agent reviews through the shared account, so GitHub's reviewDecision never moves;
+            # the colony's own record is a <!-- gsv-review: ... head=<sha> --> comment bound to the head
+            v = subprocess.run(["gh", "pr", "view", str(p["number"]), "--repo", f"GSV-Sublime-Optimization/{repo}",
+                                "--json", "headRefOid,comments"], capture_output=True, text=True, timeout=30,
+                               encoding="utf-8", errors="replace")
+            if v.returncode == 0:
+                info = json.loads(v.stdout or "{}")
+                head = info.get("headRefOid", "")
+                if head and any(f"head={head}" in c.get("body", "") and "<!-- gsv-review:" in c.get("body", "")
+                                for c in info.get("comments", [])):
+                    continue
+            items.append({"repo": repo, "number": p["number"], "title": p["title"][:110],
+                          "url": p["url"], "created": p["createdAt"]})
+        _prs["items"] = items
         _prs["at"] = time.time()
     return _prs["items"]
 
