@@ -34,7 +34,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; border-color: var(--hair);
 button.primary { background: linear-gradient(#a8551f, #7d3a14); border-color: #c7702f; }
 button.act { border-color: color-mix(in srgb, var(--fire) 55%, var(--hair)); color: #ffd9b0; }
 button.small { padding: 4px 9px; font-size: 11px; }
-kbd { font: 600 10px var(--f-data); border: 1px solid var(--hair-2); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--ink-dim); }
+kbd { font: 700 10px var(--f-body); border: 1px solid var(--hair-2); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--ink-dim); }
 
 .app { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 390px; grid-template-rows: auto minmax(0, 1fr); }
 .top {
@@ -59,7 +59,7 @@ kbd { font: 600 10px var(--f-data); border: 1px solid var(--hair-2); border-bott
 #fg { cursor: default; }
 .plaque {
   position: absolute; transform: translate(-50%, 0); pointer-events: auto; text-align: left;
-  display: grid; gap: 1px; padding: 5px 9px 6px; border-radius: 6px; max-width: 200px; min-width: 120px;
+  display: grid; gap: 1px; padding: 5px 9px 6px; border-radius: 6px; width: max-content; max-width: 166px; min-width: 0;
   background: color-mix(in srgb, #140e0a 88%, transparent); border: 1px solid var(--hair-2); border-left: 3px solid var(--ok);
   color: var(--ink); font: 400 12px/1.3 var(--f-body); letter-spacing: 0; box-shadow: 0 4px 14px rgba(0,0,0,0.45);
 }
@@ -71,7 +71,7 @@ kbd { font: 600 10px var(--f-data); border: 1px solid var(--hair-2); border-bott
 .plaque .pt kbd { margin-right: 4px; }
 .plaque .pv { font-weight: 700; font-variant-numeric: tabular-nums; }
 .plaque .ps { color: var(--ink-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hint { position: absolute; left: 12px; bottom: 8px; font: 11px var(--f-data); color: var(--ink-dim); pointer-events: none; text-shadow: 0 1px 3px #000; }
+.hint { position: absolute; left: 12px; top: 6px; font: 11px var(--f-data); color: var(--ink-dim); pointer-events: none; text-shadow: 0 1px 3px #000; }
 
 #tip {
   position: fixed; z-index: 30; pointer-events: none; max-width: 340px; padding: 8px 10px; border-radius: 6px;
@@ -83,7 +83,7 @@ kbd { font: 600 10px var(--f-data); border: 1px solid var(--hair-2); border-bott
 /* ledger: everything behind a station, selectable text, with order + action buttons beside each item */
 .ledger {
   position: absolute; top: 0; right: 0; bottom: 0; width: min(460px, 94%); z-index: 5; overflow: auto; user-select: text;
-  background: linear-gradient(#1d150fef, #150f0bf2); border-left: 1px solid var(--hair-2); box-shadow: -14px 0 30px rgba(0,0,0,0.5);
+  background: linear-gradient(#1d150f, #150f0b); border-left: 1px solid var(--hair-2); box-shadow: -14px 0 30px rgba(0,0,0,0.5);
   padding: 0 16px 18px; animation: slidein 0.18s ease-out;
 }
 @keyframes slidein { from { transform: translateX(24px); opacity: 0; } }
@@ -98,6 +98,7 @@ kbd { font: 600 10px var(--f-data); border: 1px solid var(--hair-2); border-bott
 .row { display: grid; gap: 4px; padding: 8px 10px; border-radius: 7px; background: #241a12; margin-bottom: 6px; border-left: 3px solid var(--hair-2); }
 .row.bad { border-left-color: var(--bad); } .row.ok { border-left-color: var(--ok); } .row.warn { border-left-color: var(--warn); }
 .row .rt { font-weight: 700; }
+.row .num { font-size: 12px; }
 .row .rm { font: 11px var(--f-data); color: var(--ink-dim); }
 .row .ra { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .row ul { margin: 2px 0 0; padding-left: 16px; font: 11px var(--f-data); color: var(--ink-dim); }
@@ -286,19 +287,23 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const STATIONS = ['anvil', 'quench', 'bellows', 'pegs', 'vault', 'hearth'];
 // x = where a smith stands (world units, floor at y=512); face = which way it faces while working
 const ST = {
-  anvil:   { n: 1, title: 'Anvil', what: 'editing code', x: 664, face: 1, plaque: [728, 556] },
-  quench:  { n: 2, title: 'Quench tub', what: 'tests and checks', x: 834, face: 1, plaque: [898, 556] },
-  bellows: { n: 3, title: 'Bellows', what: 'a Mind thinking on a local model', x: 366, face: 1, plaque: [425, 556] },
-  pegs:    { n: 4, title: 'Pegboard', what: 'pull requests: open and review', x: 292, face: -1, plaque: [300, 350] },
-  vault:   { n: 5, title: 'Vault', what: 'backups, mirrors, the record on xanadu', x: 200, face: -1, plaque: [118, 556] },
-  hearth:  { n: 6, title: 'Hearth', what: 'talking, or idle', x: 1010, face: 1, plaque: [1112, 556] },
-  fire:    { n: 7, title: 'Forge fire', what: 'fleet health: every rig and service', plaque: [572, 600] },
+  anvil:   { n: 1, title: 'Anvil', what: 'editing code', x: 664, face: 1, plaque: [742, 552] },
+  quench:  { n: 2, title: 'Quench tub', what: 'tests and checks', x: 834, face: 1, plaque: [908, 552] },
+  bellows: { n: 3, title: 'Bellows', what: 'a Mind thinking on a local model', x: 366, face: 1, plaque: [398, 552] },
+  pegs:    { n: 4, title: 'Pegboard', what: 'pull requests: open and review', x: 292, face: -1, plaque: [300, 112] },
+  vault:   { n: 5, title: 'Vault', what: 'backups, mirrors, the record on xanadu', x: 200, face: -1, plaque: [112, 552] },
+  hearth:  { n: 6, title: 'Hearth', what: 'talking, or idle', x: 1010, face: 1, plaque: [1112, 552] },
+  fire:    { n: 7, title: 'Forge fire', what: 'fleet health: every rig and service', plaque: [572, 552] },
   rack:    { title: 'Unfinished blades', what: 'checkouts holding unsaved or unpushed work', plaque: [782, 268] },
 };
 const REGIONS = { // world-space hit boxes [x, y, w, h]
-  pegs: [222, 196, 158, 142], vault: [64, 372, 112, 142], bellows: [372, 428, 136, 66], fire: [498, 288, 152, 214],
+  pegs: [222, 168, 158, 170], vault: [64, 372, 112, 142], bellows: [384, 446, 124, 64], fire: [498, 288, 152, 214],
   anvil: [672, 436, 108, 78], quench: [852, 440, 92, 74], hearth: [968, 376, 210, 138], rack: [672, 150, 222, 112],
 };
+// where smiths stand at each station: [x, facing]; a crowd spreads to the next spot
+const SPOTS = { vault: [[205, -1], [238, -1]], pegs: [[300, -1], [268, -1], [332, -1], [364, -1], [236, -1]], bellows: [[424, 1], [390, 1]],
+  anvil: [[662, 1], [792, -1], [630, 1]], quench: [[834, 1], [956, -1], [804, 1]], hearth: [[1014, 1], [986, 1], [1042, 1], [958, 1]] };
+function spotFor(st, i) { const L = SPOTS[st] || SPOTS.hearth; if (i < L.length) return L[i]; const l = L[L.length - 1]; return [l[0] - 26 * (i - L.length + 1), l[1]]; }
 const KEYS = ['anvil', 'quench', 'bellows', 'pegs', 'vault', 'hearth', 'fire'];
 const RIGS = { msi: 'MSI', i3: 'i3', l9: 'L9', xanadu: 'xanadu' };
 const RIGC = { msi: '#e2b25a', i3: '#ec7348', l9: '#63cbdb', xanadu: '#b9a2f0', cloud: '#b9b2a2' };
@@ -382,11 +387,12 @@ function derive() {
   let smiths = (!MOCK && Array.isArray(f.smiths)) ? f.smiths.map((s) => ({ ...s, name: displayName(s.name), t: ts(s.at) })) : foldSmiths({ ...f, channel }, nowMs);
   const byName = {}; for (const s of smiths) if (!byName[s.name] || s.t > byName[s.name].t) byName[s.name] = s;
   smiths = Object.values(byName).sort((a, b) => b.t - a.t);
+  // (in mock, a rehearsal order wins over the agent's newer real activity)
   // an agent holding an order carries the ticket: to the pegboard when it takes it, to the order's station while it works
   for (const s of smiths) {
     const mine = orders.filter((o) => displayName(o.by) === s.name && (o.status === 'taken' || o.status === 'working'))
       .sort((a, b) => ts(b.history.at(-1).at) - ts(a.history.at(-1).at))[0];
-    if (mine && ts(mine.history.at(-1).at) >= s.t - 1000) { s.carry = mine; s.station = mine.status === 'working' ? mine.station : 'pegs'; }
+    if (mine && (ts(mine.history.at(-1).at) >= s.t - 1000 || /^o-mock/.test(mine.id))) { s.carry = mine; s.station = mine.status === 'working' ? mine.station : 'pegs'; }
   }
   const rigs = heartbeatsList(f);
   const failing = []; for (const r of rigs) for (const c of r.failing || []) failing.push({ rig: r.rig, ...c, doc: (f.doctor || []).find((d) => d.key === `${r.rig}:${c.name}`) });
@@ -614,21 +620,19 @@ function spawn(p) { if (parts.length < MAXP) parts.push(p); }
 function syncActors() {
   const nowMs = now(); const seen = new Set(); const byStation = {};
   for (const s of M.smiths) (byStation[s.station] = byStation[s.station] || []).push(s);
-  const SLOT = [0, -30, 30, -58, 58, -86, 86];
-  for (const st in byStation) byStation[st].forEach((s, i) => { s.slot = i; });
+  for (const st in byStation) byStation[st].forEach((s, i) => { s.slot = i; s.crowd = byStation[st].length; });
   for (const s of M.smiths) {
     seen.add(s.name);
-    const spot = ST[s.station] || ST.hearth;
-    const tx = (spot.x || 600) + SLOT[s.slot % SLOT.length] * (spot.face || 1) * (s.station === 'hearth' ? -1 : 1);
+    const [tx, sface] = spotFor(s.station, s.slot);
     let a = actors.get(s.name);
     if (!a) {
       const R = rng(s.name.length * 97 + s.name.charCodeAt(0));
       a = { name: s.name, kind: kindOf(s.name), seed: R() * 10, x: firstPlace || reduced ? tx : -20, y: FLOOR + 4, face: 1, ph: 0, moving: false, leaving: false, struck: false, fx: 0 };
       actors.set(s.name, a);
     }
-    Object.assign(a, { station: s.station, doing: s.doing, at: s.at, t: s.t, rig: s.rig, slot: s.slot, carry: s.carry || null, tx, leaving: false,
+    Object.assign(a, { sface, crowd: s.crowd, station: s.station, doing: s.doing, at: s.at, t: s.t, rig: s.rig, slot: s.slot, carry: s.carry || null, tx, leaving: false,
       color: NAMEC[s.name] || RIGC[s.rig] || '#c8c0b0', faded: nowMs - s.t > 30 * 60e3, idleFor: nowMs - s.t });
-    a.y = FLOOR + 4 + (s.slot % 2) * 6;
+    a.y = FLOOR + 4 + (s.slot % 2) * 7;
     if (reduced) a.x = tx;
   }
   for (const [name, a] of actors) if (!seen.has(name)) { a.leaving = true; a.tx = -40; a.carry = null; }
@@ -641,11 +645,11 @@ function stepActors(dt) {
   for (const [name, a] of actors) {
     const d = a.tx - a.x;
     if (Math.abs(d) > 1.5) { a.moving = true; a.face = Math.sign(d); a.x += Math.sign(d) * Math.min(Math.abs(d), 70 * dt); a.ph += dt * 10; }
-    else { a.x = a.tx; a.moving = false; a.face = (ST[a.station] || {}).face || 1; if (a.station === 'hearth') a.face = 1; }
+    else { a.x = a.tx; a.moving = false; a.face = a.sface || 1; }
     if (a.leaving && a.x <= -38) actors.delete(name);
   }
 }
-const U = 2.5;
+const U = 3.3;
 function armFor(a, t) { // returns [angle, tool] for the smith's arm, by station
   if (a.moving) return [a.carry ? -1.35 : Math.sin(a.ph) * 0.5, a.carry ? 'ticket' : null];
   if (a.faded) return [0.08, null];
@@ -697,7 +701,7 @@ function drawFigure(c, a, t) {
   c.fillStyle = robe ? dark : col; c.fillRect(-0.8 * U, 0, 1.6 * U, 4.6 * U); c.fillStyle = skin; c.fillRect(-0.8 * U, 4.4 * U, 1.6 * U, 1.3 * U);
   drawTool(c, tool); c.restore();
   // the hammer strike throws sparks off the anvil
-  if (tool === 'hammer') { if (p > 0.97 && !a.struck) { a.struck = true; strikeSparks(a.x + a.face * 22, 448); } else if (p < 0.5) a.struck = false; }
+  if (tool === 'hammer') { if (p > 0.97 && !a.struck) { a.struck = true; strikeSparks(a.x + a.face * 26, 448); } else if (p < 0.5) a.struck = false; }
 }
 function drawDrone(c, a, t) {
   const hy = -20 * U + Math.sin(t * 2.2 + a.seed) * 1.4 * U, col = a.color, dark = shade(col, -0.5);
@@ -710,7 +714,11 @@ function drawDrone(c, a, t) {
   c.fillStyle = '#f2fdff'; c.fillRect(2 * U, hy - 1.4 * U, 1.6 * U, 1.6 * U);
 }
 function drawTag(c, a, t, hover) {
-  const head = a.kind === 'drone' ? -78 : (a.station === 'hearth' && !a.moving ? -50 : -44);
+  const sit = a.station === 'hearth' && !a.moving && !a.faded;
+  const base = a.kind === 'drone' ? -98 : sit ? -54 : -64;
+  const lift = a.moving ? 0 : a.slot * 19;            // crowded station: tags stack, each with a thread down to its smith
+  const head = base - lift - (a.y - FLOOR - 4);   // tags line up by slot, whatever row the smith stands in
+  if (lift) { c.strokeStyle = 'rgba(241,231,210,0.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(0, head + 3); c.lineTo(0, base + 4); c.stroke(); }
   const age = a.idleFor;
   const name = a.name + (age > 3 * 60e3 ? ` · ${age < 3600e3 ? Math.round(age / 60e3) + 'm' : (age / 3600e3).toFixed(1) + 'h'}` : '');
   c.font = '700 11px "Atkinson Hyperlegible", sans-serif'; c.textAlign = 'center';
@@ -726,12 +734,15 @@ function drawTag(c, a, t, hover) {
   if (!(a.talk || hover) || !a.doing) return;
   const full = hover ? a.doing : a.doing;
   c.font = '12px "Atkinson Hyperlegible", sans-serif';
-  const max = hover ? 300 : 190; let txt = full;
+  const max = hover ? 300 : 170; let txt = full;
   if (c.measureText(txt).width > max) { while (txt.length > 4 && c.measureText(txt + '…').width > max) txt = txt.slice(0, -1); txt += '…'; }
-  const bw = c.measureText(txt).width + 16, by = head - 20 - ((ST[a.station] || {}).n % 2 ? 0 : 22);
-  c.fillStyle = 'rgba(243,230,198,0.95)'; rr(c, -bw / 2, by - 20, bw, 22, 8); c.fill();
+  const top = base - (a.moving ? 0 : ((a.crowd || 1) - 1) * 19);
+  const bw = c.measureText(txt).width + 16, by = top - 20 - (a.y - FLOOR - 4) - (a.station === 'pegs' ? 6 : 0);
+  // stations at the walls open their bubble inward, so neighbours do not collide
+  const bx0 = a.station === 'bellows' || a.station === 'anvil' ? -22 : a.station === 'vault' || a.station === 'hearth' ? -bw + 22 : -bw / 2;
+  c.fillStyle = 'rgba(243,230,198,0.95)'; rr(c, bx0, by - 20, bw, 22, 8); c.fill();
   c.beginPath(); c.moveTo(-5, by + 2); c.lineTo(5, by + 2); c.lineTo(0, by + 8); c.fill();
-  c.fillStyle = '#2b1d12'; c.fillText(txt, 0, by - 5);
+  c.fillStyle = '#2b1d12'; c.fillText(txt, bx0 + bw / 2, by - 5);
 }
 function strikeSparks(x, y) { if (reduced) return; for (let i = 0; i < 9; i++) spawn({ k: 'spark', x, y, vx: (Math.random() - 0.5) * 160, vy: -60 - Math.random() * 120, life: 0, max: 0.4 + Math.random() * 0.4 }); }
 function burst(st, ok) { // the result of an action shows on its station
@@ -760,11 +771,15 @@ function fire(c, t, cx, cy, w, h, heat, k) {
 }
 function drawBellows(c, t) {
   const comp = (Math.sin(bellowsPh) + 1) / 2; // 0 open, 1 squeezed
-  c.save(); c.translate(380, 474);
-  c.fillStyle = '#4a301b'; c.fillRect(0, 6, 112, 6);                                   // bottom board
-  c.fillStyle = '#6b4024'; c.beginPath(); c.moveTo(4, 6); c.lineTo(104, 4); c.lineTo(4, 6 - 22 + comp * 14); c.closePath(); c.fill(); // leather
-  c.save(); c.translate(104, 4); c.rotate(-0.2 + comp * 0.14); c.fillStyle = '#5b3c22'; c.fillRect(-104, -4, 106, 5); c.restore(); // top board
-  c.fillStyle = '#3a3f44'; c.fillRect(104, 0, 26, 6);                                   // nozzle into the forge
+  c.save(); c.translate(398, 486);
+  c.fillStyle = '#2b1c12'; c.fillRect(10, 12, 6, 14); c.fillRect(70, 12, 6, 14);        // trestle
+  c.fillStyle = '#4a301b'; c.fillRect(-6, 6, 92, 7);                                    // bottom board
+  const lift = 30 - comp * 20;
+  c.fillStyle = '#7a4a28'; c.beginPath(); c.moveTo(0, 6); c.lineTo(82, 4); c.lineTo(0, 6 - lift); c.closePath(); c.fill();   // leather
+  c.strokeStyle = '#4d2c16'; c.lineWidth = 1; for (let k = 1; k < 4; k++) { c.beginPath(); c.moveTo(k * 18, 6 - lift * (1 - k * 18 / 82) * 0.98); c.lineTo(k * 18, 6); c.stroke(); }
+  c.save(); c.translate(82, 4); c.rotate(-Math.atan2(lift, 82)); c.fillStyle = '#5b3c22'; c.fillRect(-92, -5, 94, 6); c.restore();     // top board
+  c.fillStyle = '#5b3c22'; c.fillRect(-12, 3 - lift, 8, 4);                                // handle
+  c.fillStyle = '#3a3f44'; c.beginPath(); c.moveTo(80, 0); c.lineTo(104, 2); c.lineTo(104, 6); c.lineTo(80, 10); c.fill();   // nozzle into the forge
   c.restore();
 }
 function frame(tms) {
@@ -808,15 +823,19 @@ function drawFrame(tms, force) {
     else if (p.k === 'ember') { p.vx += Math.sin(t * 3 + i) * 4 * dt; c.fillStyle = `rgba(255,${120 + 100 * k | 0},40,${k})`; c.fillRect(p.x, p.y, 1.6, 1.6); }
     else { const r = p.r * (1 + (1 - k) * 2.2); c.globalAlpha = k * 0.8; c.drawImage(p.k === 'redpuff' ? PUFF_RED : PUFF, p.x - r, p.y - r, r * 2, r * 2); c.globalAlpha = 1; }
   }
-  // posted orders hang on the pegboard's top rail as cream tickets with a red seal, until someone takes them
-  const posted = M.orders.filter((o) => o.status === 'posted').slice(0, 5);
-  posted.forEach((o, i) => { const x = 236 + i * 28, y = 176 + Math.sin(t * 1.5 + i) * 0.8; c.fillStyle = 'rgba(0,0,0,.35)'; c.fillRect(x + 2, y + 2, 22, 18); c.fillStyle = '#f3e6c6'; c.fillRect(x, y, 22, 18); c.fillStyle = '#b3261e'; c.beginPath(); c.arc(x + 11, y + 4, 3, 0, 7); c.fill(); });
+  // posted orders hang from the beam over the pegboard as cream tickets with a red seal, until someone takes them
+  const posted = M.orders.filter((o) => o.status === 'posted').slice(0, 6);
+  c.font = '600 8px "JetBrains Mono", monospace'; c.textAlign = 'center';
+  posted.forEach((o, i) => { const x = 232 + i * 26, sw = Math.sin(t * 1.3 + i * 1.7) * 0.06, y = 62;
+    c.save(); c.translate(x + 11, 48); c.rotate(sw); c.strokeStyle = '#8a7356'; c.lineWidth = 0.8; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, y - 48); c.stroke();
+    c.fillStyle = 'rgba(0,0,0,.35)'; c.fillRect(-9, y - 46, 22, 26); c.fillStyle = '#f3e6c6'; c.fillRect(-11, y - 48, 22, 26);
+    c.fillStyle = '#b3261e'; c.beginPath(); c.arc(0, y - 43, 3, 0, 7); c.fill(); c.fillStyle = '#3b2a19'; c.fillText('NEW', 0, y - 30); c.restore(); });
   if (flashSt && performance.now() < flashSt.until) { const r = REGIONS[flashSt.st]; c.strokeStyle = flashSt.ok ? 'rgba(255,214,120,0.85)' : 'rgba(239,79,90,0.85)'; c.lineWidth = 2; rr(c, r[0] - 4, r[1] - 4, r[2] + 8, r[3] + 8, 8); c.stroke(); }
   // smiths, back to front
   const list = [...actors.values()].sort((a, b) => a.y - b.y);
   for (const a of list) {
     c.save(); c.translate(a.x, a.y); c.globalAlpha = a.faded ? 0.42 : 1;
-    c.fillStyle = 'rgba(0,0,0,0.38)'; c.beginPath(); c.ellipse(0, 0, a.kind === 'drone' ? 9 : 13, 3, 0, 0, 7); c.fill();
+    c.fillStyle = 'rgba(0,0,0,0.38)'; c.beginPath(); c.ellipse(0, 0, a.kind === 'drone' ? 10 : 15, 3.5, 0, 0, 7); c.fill();
     c.save(); c.scale(a.face, 1); if (a.kind === 'drone') drawDrone(c, a, t); else drawFigure(c, a, t); c.restore();
     c.restore();
   }
@@ -867,7 +886,7 @@ function moveTip(e) { const w = tip.offsetWidth, h = tip.offsetHeight; tip.style
 function hideTip() { tip.hidden = true; }
 function hit(px, py) {
   const [x, y] = toWorld(px, py);
-  for (const a of [...actors.values()].sort((p, q) => q.y - p.y)) { const top = a.kind === 'drone' ? -64 : -44; if (Math.abs(x - a.x) < 15 && y < a.y + 4 && y > a.y + top) return { actor: a }; }
+  for (const a of [...actors.values()].sort((p, q) => q.y - p.y)) { const top = a.kind === 'drone' ? -88 : -58; if (Math.abs(x - a.x) < 18 && y < a.y + 4 && y > a.y + top) return { actor: a }; }
   for (const [k, r] of Object.entries(REGIONS)) if (x >= r[0] && x <= r[0] + r[2] && y >= r[1] && y <= r[1] + r[3]) return { region: k };
   if (y >= 46 && y <= 124 && x >= 660 && x <= 900) return { region: 'fire', banner: true };
   if (y >= 44 && y <= 84 && x >= 925 && x <= 1185 && M.spine) return { region: 'fire', lamps: true };
@@ -1112,7 +1131,7 @@ function ingest() {
   if (!ledger.hidden && !ledger.contains(document.activeElement)) renderLedger();
 }
 async function poll() {
-  try { const r = await fetch('feed.json', { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); feed = await r.json(); live = true; feedErr = ''; lastOk = Date.now(); ingest(); }
+  try { const r = await fetch('feed.json', { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); feed = await r.json(); live = true; feedErr = ''; lastOk = Date.now(); if (started) ingest(); }
   catch (err) { feedErr = String(err.message || err); chips(); }
 }
 function report() {
@@ -1144,10 +1163,16 @@ new ResizeObserver(() => { resize(); }).observe($('#shop'));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { last = 0; if (HTTP && !MOCK) poll(); } });
 
 // ---------------------------------------------------------------- start
-buildPlaques();
-if (MOCK) seedMock();
-resize(); ingest();
-if (HTTP) { poll(); setInterval(poll, 15000); }
+// served: wait for the first live feed (max 1.5 s) so smiths are placed where they really are, not walked from a snapshot
+let started = false;
+function start() {
+  if (started) return; started = true;
+  if (MOCK) seedMock();
+  ingest();
+  const h = decodeURIComponent(location.hash.slice(1)); if (ST[h]) openLedger(h);
+}
+buildPlaques(); resize();
+if (HTTP) { poll().finally(start); setTimeout(start, 1500); setInterval(poll, 15000); } else start();
 setInterval(() => { if (M) { chips(); updatePlaques(); for (const a of actors.values()) { a.idleFor = now() - a.t; a.faded = a.idleFor > 30 * 60e3; } } }, 5000);
 requestAnimationFrame(frame);
 </script>
