@@ -36,7 +36,7 @@ SEATS = {
     'codex': {'agent': 'Codex', 'home': 'cloud', 'rigs': [], 'skills': ['review', 'python', 'tests', 'docs', 'echoes']},
     'muse': {'agent': 'Muse', 'home': 'cloud', 'rigs': [], 'skills': ['design', 'godot', 'cockpit', 'atlas', 'hologram']},
 }
-BASE = {'rig': 60, 'review': 40, 'reply': 30, 'decision': 50}   # impact by kind
+BASE = {'rig': 60, 'merge': 70, 'fix': 55, 'review': 40, 'triage': 35, 'reply': 30, 'decision': 50}   # impact by kind
 
 
 def brief():
@@ -65,8 +65,10 @@ def fit(seat, item):
     """How well a seat fits an item: 0 means it must not take it."""
     s = SEATS[seat]
     kind, where, text = item.get('kind', ''), str(item.get('where', '')).lower(), item.get('title', '').lower()
-    if kind == 'decision':
-        return 0                                   # Keath's call, never an agent's
+    if kind in ('decision', 'merge', 'triage'):
+        return 0                                   # Keath's call (merges need his OK), never an agent's
+    if kind == 'fix':
+        return 5 if where == s['agent'].lower() else 0   # the author addresses review feedback
     if kind == 'review' and where == s['agent'].lower() and (s['home'] == 'cloud' or seat.endswith(f"({s['home']} seat)")):
         # the author can't be the second reviewer; both Claude seats share the 'Claude' author tag, so be strict
         return 0
@@ -111,6 +113,33 @@ def candidates(b, lines):
     return sorted(out, key=lambda c: (-c['yield'], c['item'].get('title', ''))), busy
 
 
+def workflow(item):
+    """The planned workflow for an item: who, what, where, when, why, and how (numbered steps), ready to execute."""
+    kind, url, pr = item.get('kind'), item.get('url', ''), item.get('pr') or {}
+    ref = f"{pr.get('repo')}#{pr.get('number')}" if pr else ''
+    owner = f"GSV-Sublime-Optimization/{pr.get('repo')}#{pr.get('number')}" if pr else '<owner/repo#N>'
+    steps = {
+        'review': [f"gh pr checkout {pr.get('number')} -R GSV-Sublime-Optimization/{pr.get('repo')} (or read the diff at {url})",
+                   'run its tests and any gsv verify; red-control them against main where the PR adds tests',
+                   f"write findings; verdict approve or request-changes, bound to head {pr.get('head', '<sha>')}",
+                   f"python tools/gsv/gsv.py review post {owner} --as <your actor> --verdict <v> --head <full sha> --body-file <file>",
+                   'python tools/holomind/cockpit.py status <order> done --as <seat> --link <review url>'],
+        'fix': [f"read the requested changes on {url}", 'make the changes on the same branch, with a test for each',
+                'push; the PR returns to needs-review automatically (review on an older head = stale)', 'post the receipt'],
+        'merge': [f"confirm CI is {pr.get('ci')} and the approval is at head {pr.get('head')}",
+                  f"python tools/gsv/gsv.py merge {owner} --dry-run, then without --dry-run (checks CI, provenance, a different-actor review)",
+                  'Keath approves the merge in the Workbench'],
+        'rig': ['measure: heartbeat checks + the doctor verdict', 'fix in your own lane (CHORUS /act allowlist for MSI containers)',
+                'verify the check is green on the next heartbeat', 'post the receipt'],
+        'triage': ['list drafts older than 3 days by repo and author', 'for each: finish (mark ready), hand off, or close with a note',
+                   'Keath decides closes; agents can mark their own ready'],
+        'reply': ['answer in the channel: python tools/holomind/cockpit.py say "..." --as <seat> --to <asker>'],
+        'decision': ['Keath: Approve or Decline in the Workbench (or Ctrl+K); the owning seat executes and posts the receipt'],
+    }.get(kind, ['see the item'])
+    return {'who': item.get('where'), 'what': item.get('title'), 'where': url or item.get('where'),
+            'when': f"open {pr.get('age_h')} h" if pr else 'now', 'why': pr.get('why') or kind, 'how': steps}
+
+
 def how_to_start(item):
     kind, url = item.get('kind'), item.get('url', '')
     if kind == 'review':
@@ -144,7 +173,11 @@ def main():
             print('nothing in the queue fits you right now')
             return
         c = mine[0]
-        print(f"NEXT for {args.who}: [{c['item']['kind']}] {c['item']['title']}\n  yield {c['yield']} · your fit {dict((s, f) for f, s in c['fits'])[args.who]} · {c['item'].get('url', '')}\n  start: {how_to_start(c['item'])}")
+        w = workflow(c['item'])
+        print(f"NEXT for {args.who}: [{c['item']['kind']}] {c['item']['title']}\n  yield {c['yield']} · your fit {dict((s, f) for f, s in c['fits'])[args.who]}")
+        print(f"  who: {w['who']} · where: {w['where']} · when: {w['when']} · why: {w['why']}")
+        for i, step in enumerate(w['how'], 1):
+            print(f"  {i}. {step}")
         if args.who in busy:
             print('  (you already have an open order: finish that first)')
         return

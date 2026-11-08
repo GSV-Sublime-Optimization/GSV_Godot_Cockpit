@@ -78,11 +78,11 @@ var _now_text: String = ""
 var _bench_scroll: ScrollContainer
 var _bench_backing: ColorRect
 const SEATS: Array[String] = ["claude (i3 seat)", "claude (msi seat)", "gpt-6", "muse", "codex", "any"]
-const STATION_FOR: Dictionary = {"review": "pegs", "rig": "anvil", "decision": "ledger", "reply": "bell"}
+const STATION_FOR: Dictionary = {"review": "pegs", "rig": "anvil", "decision": "ledger", "reply": "bell", "merge": "ledger", "fix": "anvil", "triage": "ledger"}
 var _hud_clock: float = 0.0
 var _sent_local: Array[Dictionary] = []   # what you typed this session, to show sent > delivered > read
 var _actions_root: Node3D
-const KIND_COLOURS := {"rig": Color(1.0, 0.4, 0.4), "review": Color(0.5, 0.75, 1.0), "decision": Color(1.0, 0.78, 0.35), "reply": Color(0.95, 0.95, 1.0)}
+const KIND_COLOURS := {"rig": Color(1.0, 0.4, 0.4), "review": Color(0.5, 0.75, 1.0), "decision": Color(1.0, 0.78, 0.35), "reply": Color(0.95, 0.95, 1.0), "merge": Color(0.35, 0.95, 0.55), "fix": Color(1.0, 0.6, 0.25), "triage": Color(0.7, 0.7, 0.8)}
 var _seen_channel: int = 0
 
 
@@ -906,6 +906,24 @@ func _count_waiting() -> void:
 backup %s h old%s · mirror %s h, %s failures · MSI spine %s/%s up%s" % [str(b.get("age_h", "?")), " (running)" if bool(b.get("in_progress", false)) else "",
 			str(m.get("age_h", "?")), str(m.get("failures", "?")), str(sp.get("up", "?")), str(sp.get("total", "?")),
 			(" (down: " + ", ".join(PackedStringArray(down)) + ")") if not down.is_empty() else ""]
+	# Self-awareness: name any stale or failing source in the header.
+	var srcs: Dictionary = feed.get("sources", {}) if feed.get("sources") is Dictionary else {}
+	var bad := PackedStringArray()
+	for k: String in srcs:
+		var v: Dictionary = srcs[k]
+		if not bool(v.get("ok", true)):
+			bad.append(k)
+	if not srcs.is_empty():
+		_colony_text += ("  ·  sources: all fresh" if bad.is_empty() else "  ·  STALE/FAILING: " + ", ".join(bad))
+	# The development pipeline in one line.
+	var pipe: Array = feed.get("pipeline", [])
+	if not pipe.is_empty():
+		var st := {}
+		for x: Variant in pipe:
+			var k2 := String((x as Dictionary).get("stage", ""))
+			st[k2] = int(st.get(k2, 0)) + 1
+		_colony_text += "\nPRs %d open · %d draft · %d need review · %d changes requested · %d approved, ready to merge" % [pipe.size(),
+			int(st.get("draft", 0)), int(st.get("needs-review", 0)) + int(st.get("stale-review", 0)), int(st.get("changes", 0)), int(st.get("approved", 0))]
 	var thinking := int(feed.get("mind_thinking", 0))
 	if thinking > 0:
 		_waiting_text += " · the Mind is thinking (%d message%s queued)" % [thinking, "" if thinking == 1 else "s"]
@@ -1026,6 +1044,8 @@ func _rebuild_bench() -> void:
 		box.add_child(_bench_label("[%s] %s%s" % [kind.to_upper(), String(a.get("title", "")).left(150), ("  · ordered: " + ordered) if ordered != "" else ""], 13, kc.lightened(0.25)))
 		var bar := HBoxContainer.new()
 		bar.add_theme_constant_override("separation", 4)
+		if kind == "merge":
+			bar.add_child(_bench_button("Merge", "You approve; a seat runs gsv merge (re-checks CI, provenance, a different-actor review) and posts the receipt", func() -> void: _order(a, "claude (i3 seat)", "MERGE, Keath approved: ")))
 		if kind == "decision" and String(a.get("where", "")) in ["keath", _speaker.to_lower()]:
 			bar.add_child(_bench_button("Approve", "Your decision goes to the shared channel for the Steward and the seats", func() -> void: _decide(a, "approve")))
 			bar.add_child(_bench_button("Decline", "Decline this request", func() -> void: _decide(a, "decline")))
@@ -1063,9 +1083,9 @@ func _now_iso() -> String:
 	return Time.get_datetime_string_from_system(true) + "Z"
 
 
-func _order(a: Dictionary, seat: String) -> void:
+func _order(a: Dictionary, seat: String, prefix: String = "") -> void:
 	var stamp := Time.get_datetime_string_from_system(true).replace("-", "").replace(":", "").replace("T", "-")
-	var text := String(a.get("title", ""))
+	var text := prefix + String(a.get("title", ""))
 	if String(a.get("url", "")) != "":
 		text += "  " + String(a.get("url"))
 	var line := {"at": _now_iso(), "from": _speaker, "kind": "order", "id": "o-" + stamp.right(11) + "-h", "to": seat,
@@ -1177,6 +1197,8 @@ func _palette_commands() -> Array[Dictionary]:
 		var a: Dictionary = x
 		var title := String(a.get("title", ""))
 		var kind := String(a.get("kind", ""))
+		if kind == "merge":
+			out.append({"label": "Merge · " + title, "do": "merge", "item": a})
 		if kind == "decision":
 			out.append({"label": "Approve · " + title, "do": "approve", "item": a})
 			out.append({"label": "Decline · " + title, "do": "decline", "item": a})
@@ -1242,6 +1264,7 @@ func _run_palette(i: int) -> void:
 	_palette.visible = false
 	match String(c["do"]):
 		"assign": _order(c["item"] as Dictionary, String(c["seat"]))
+		"merge": _order(c["item"] as Dictionary, "claude (i3 seat)", "MERGE, Keath approved: ")
 		"approve": _decide(c["item"] as Dictionary, "approve")
 		"decline": _decide(c["item"] as Dictionary, "decline")
 		"open": OS.shell_open(String(c["url"]))

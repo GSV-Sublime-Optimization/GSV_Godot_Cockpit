@@ -16,6 +16,7 @@ Nothing here can run commands or change systems: the only writes are chat lines 
 import base64
 import datetime as dt
 import json
+import re
 import pathlib
 import subprocess
 import sys
@@ -113,13 +114,42 @@ def agent_of(branch):
     return None, None
 
 
+STAGE_ORDER = {'changes': 0, 'needs-review': 1, 'stale-review': 2, 'approved': 3, 'draft': 4}
+GSV_REVIEW = re.compile(r'gsv-review: actor=(\S+) verdict=(\S+) head=([0-9a-f]+)')
+
+
+def pr_stage(repo, p, agent):
+    """Where one PR is in the pipeline, and why: draft, needs-review, stale-review, changes, approved. Plus CI."""
+    head = p.get('headRefOid', '')
+    reviews = [m.groups() for c in (p.get('comments') or []) for m in GSV_REVIEW.finditer(c.get('body', ''))]
+    on_head = [r for r in reviews if r[2] == head]
+    if p.get('isDraft'):
+        stage, why = 'draft', 'author still working'
+    elif p.get('reviewDecision') == 'CHANGES_REQUESTED' or any(r[1] == 'request-changes' for r in on_head):
+        stage, why = 'changes', 'a reviewer asked for changes'
+    elif p.get('reviewDecision') == 'APPROVED' or any(r[1] == 'approve' for r in on_head):
+        stage, why = 'approved', 'approved at this head: can merge (gsv merge checks CI + provenance)'
+    elif reviews:
+        stage, why = 'stale-review', 'reviewed at an older head; the new commits need a look'
+    else:
+        stage, why = 'needs-review', 'no second review yet'
+    checks = p.get('statusCheckRollup') or []
+    states = {str(c.get('conclusion') or c.get('state') or c.get('status') or '').upper() for c in checks}
+    ci = 'none' if not checks else ('fail' if states & {'FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT'} else
+                                     ('pending' if states & {'PENDING', 'IN_PROGRESS', 'QUEUED', 'EXPECTED'} else 'pass'))
+    created = dt.datetime.fromisoformat(p['createdAt'].replace('Z', '+00:00'))
+    return {'repo': repo.split('/')[1], 'number': p['number'], 'title': p['title'][:90], 'url': p['url'],
+            'agent': agent or 'unattributed', 'stage': stage, 'why': why, 'ci': ci, 'head': head[:10],
+            'reviewers': sorted({r[0] for r in on_head}), 'age_h': round((now() - created).total_seconds() / 3600, 1)}
+
+
 def github_activity():
     """Agents' latest PRs (last 24 h) and every open, non-draft PR still waiting for a second review."""
-    acts, awaiting = [], []
+    acts, awaiting, pipeline = [], [], []
     since = now() - dt.timedelta(hours=24)
     for repo in REPOS:
         r = subprocess.run(['gh', 'pr', 'list', '-R', repo, '--state', 'open', '--limit', '60', '--json',
-                            'number,title,headRefName,headRefOid,updatedAt,isDraft,reviewDecision,url,comments'], stdin=subprocess.DEVNULL,
+                            'number,title,headRefName,headRefOid,updatedAt,createdAt,isDraft,reviewDecision,url,comments,statusCheckRollup'], stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, creationflags=0x08000000)
         try:
             prs = json.loads(r.stdout or '[]')
@@ -127,6 +157,7 @@ def github_activity():
             continue
         for p in prs:
             name, home = agent_of(p['headRefName'])
+            pipeline.append(pr_stage(repo, p, name))
             reviewed = any(f'head={p.get("headRefOid", "")}' in c.get('body', '') and 'gsv-review:' in c.get('body', '') for c in p.get('comments') or [])
             if not p['isDraft'] and not reviewed and p.get('reviewDecision') in (None, '', 'REVIEW_REQUIRED'):
                 awaiting.append({'repo': repo, 'number': p['number'], 'title': p['title'][:80], 'agent': name or 'unattributed',
@@ -137,6 +168,7 @@ def github_activity():
                 acts.append({'agent': name, 'home': home, 'at': p['updatedAt'], 'repo': repo.split('/')[1], 'number': p['number'],
                              'title': p['title'][:90], 'draft': p['isDraft'], 'url': p['url']})
     github_activity.awaiting = sorted(awaiting, key=lambda a: a['at'], reverse=True)
+    github_activity.pipeline = sorted(pipeline, key=lambda x: (STAGE_ORDER.get(x['stage'], 9), x['age_h']), reverse=False)
     agents = {}
     for a in sorted(acts, key=lambda a: a['at'], reverse=True):
         g = agents.setdefault(a['agent'], {'agent': a['agent'], 'home': a['home'], 'recent': []})
@@ -214,8 +246,28 @@ def actions(bodies, awaiting, cards, channel, colony=None):
             out.append({'kind': 'rig', 'where': rid, 'title': f"{b['label']} is {b['status']}" + (f": {', '.join(b['failing'])}" if b['failing'] else '')})
     for name in ((colony or {}).get('spine') or {}).get('down', []):
         out.append({'kind': 'rig', 'where': 'msi', 'title': f"MSI spine service down: {name}"})
-    for a in awaiting[:12]:
-        out.append({'kind': 'review', 'where': a['agent'], 'title': f"{a['repo'].split('/')[1]}#{a['number']} awaits a second review: {a['title']}", 'url': a['url']})
+    pipe = (colony or {}).get('_pipeline') or []
+    if pipe:
+        # The development pipeline, by yield: merge what's approved, unblock what was sent back, review what's waiting.
+        for p in pipe:
+            ref = f"{p['repo']}#{p['number']}"
+            if p['stage'] == 'approved':
+                out.append({'kind': 'merge', 'where': 'keath', 'url': p['url'], 'pr': p,
+                            'title': f"{ref} is approved at its head (CI {p['ci']}): merge it: {p['title']}"})
+            elif p['stage'] == 'changes':
+                out.append({'kind': 'fix', 'where': p['agent'], 'url': p['url'], 'pr': p,
+                            'title': f"{ref} has changes requested (CI {p['ci']}): {p['agent']} to address: {p['title']}"})
+            elif p['stage'] in ('needs-review', 'stale-review'):
+                out.append({'kind': 'review', 'where': p['agent'], 'url': p['url'], 'pr': p,
+                            'title': f"{ref} awaits a {'fresh ' if p['stage'] == 'stale-review' else ''}second review (CI {p['ci']}): {p['title']}"})
+        drafts = [p for p in pipe if p['stage'] == 'draft']
+        old_drafts = [p for p in drafts if p['age_h'] > 72]
+        if old_drafts:
+            out.append({'kind': 'triage', 'where': 'keath',
+                        'title': f"{len(drafts)} draft PRs open, {len(old_drafts)} older than 3 days: triage (finish, close, or mark ready)"})
+    else:
+        for a in awaiting[:12]:
+            out.append({'kind': 'review', 'where': a['agent'], 'title': f"{a['repo'].split('/')[1]}#{a['number']} awaits a second review: {a['title']}", 'url': a['url']})
     for c in cards[:8]:
         out.append({'kind': 'decision', 'where': 'keath', 'title': f"xanadu card {c['file']}: {c['title']}"})
     try:
@@ -268,6 +320,7 @@ def tick(state):
     if time.time() - state.get('gh_at', 0) > 180:
         state['agents'] = github_activity()
         state['awaiting'] = getattr(github_activity, 'awaiting', [])
+        state['pipeline'] = getattr(github_activity, 'pipeline', [])
         state['gh_at'] = time.time()
     bodies = {}
     for bid, (label, role) in BODIES.items():
@@ -324,9 +377,22 @@ def tick(state):
             fresh['spine'] = prev['spine']   # CHORUS omitted it this pass: keep the last measurement
         state['colony'] = fresh or state.get('colony')
     feed['colony'] = state.get('colony')
-    feed['actions'] = actions(bodies, state.get('awaiting', []), remote.get('cards', []), channel, feed['colony'])
+    feed['actions'] = actions(bodies, state.get('awaiting', []), remote.get('cards', []), channel, dict(feed['colony'] or {}, _pipeline=state.get('pipeline', [])))
     feed['orders'] = orders[-30:]
     feed['activity'] = seat_activity()
+    feed['pipeline'] = state.get('pipeline', [])
+    # Self-awareness: how fresh is each thing this cockpit believes? Stale sources are named, never hidden.
+    t = time.time()
+    colony_age = age_s((feed.get('colony') or {}).get('at'))
+    act = feed.get('activity') or []
+    feed['sources'] = {
+        'xanadu': {'ok': True, 'age_s': 0, 'what': 'heartbeats, Minds, channel, Steward cards'},
+        'github': {'ok': bool(state.get('gh_at')) and t - state.get('gh_at', 0) < 600, 'age_s': int(t - state.get('gh_at', t)),
+                   'what': f"{len(feed['pipeline'])} open PRs across {len(REPOS)} repos"},
+        'chorus': {'ok': colony_age is not None and colony_age < 300, 'age_s': colony_age, 'what': 'backup, mirror, MSI spine, doctor'},
+        'mind': {'ok': bool(state.get('mind_ok', True)), 'age_s': None, 'what': f'{MODEL} on the i3 (answers questions)'},
+        'activity': {'ok': bool(act), 'age_s': age_s(act[-1].get('at')) if act else None, 'what': 'agent seats\' live steps (needs the hook)'},
+    }
     feed['decisions'] = list(decisions.values())[-30:]
     ordered = {o.get('ref') for o in orders if o.get('status') not in ('declined',)}
     for a in feed['actions']:
@@ -360,6 +426,7 @@ def tick(state):
             break
         budget -= 1
         reply = ask_mind(m.get('text', ''), feed)
+        state['mind_ok'] = not reply.startswith('(the i3 Mind could not')
         line = {'at': iso(), 'from': 'i3-mind', 'model': MODEL, 'to': m.get('from'), 'text': reply}
         m.setdefault('read_by', []).append('i3-mind') if 'i3-mind' not in m.get('read_by', []) else None
         ssh(REMOTE, json.dumps({'append': json.dumps(line, ensure_ascii=False)}))
@@ -372,7 +439,7 @@ def tick(state):
                       'rigs': {k: {'status': v['status'], 'failing': v['failing']} for k, v in bodies.items()},
                       'agents': [{'agent': g['agent'], 'latest': f"{g['recent'][0]['repo']}#{g['recent'][0]['number']} {g['recent'][0]['title']}"}
                                  for g in feed['agents']],
-                      'actions': feed['actions'][:30], 'orders': [o for o in orders if o['status'] not in ('done', 'declined')][-20:], 'activity': feed.get('activity', [])[-8:], 'colony': feed.get('colony'), 'channel': channel[-8:]}
+                      'actions': feed['actions'][:30], 'orders': [o for o in orders if o['status'] not in ('done', 'declined')][-20:], 'activity': feed.get('activity', [])[-8:], 'colony': feed.get('colony'), 'pipeline': feed.get('pipeline', []), 'sources': feed.get('sources'), 'channel': channel[-8:]}
     feed['mind_thinking'] = max(0, len(pending) - (1 - budget))
     publish()
     return feed
