@@ -1,0 +1,4 @@
+{"schema":"colony.heartbeat/v1","rig":"i3","at":"2026-11-08T05:58:00Z","green":false,"checks":[{"name":"audio","ok":false},{"name":"docker","ok":false},{"name":"disk","ok":true}]}
+{"schema":"colony.heartbeat/v1","rig":"i3","at":"2026-11-08T06:12:00Z","green":false,"checks":[{"name":"docker","ok":false},{"name":"disk","ok":true}]}
+not json
+{"schema":"colony.heartbeat/v1","rig":"msi","at":"2026-11-08T06:20:00Z","green":true,"checks":[{"name":"disk","ok":true}]}

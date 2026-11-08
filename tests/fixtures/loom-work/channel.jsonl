@@ -1,0 +1,17 @@
+{"at":"2026-11-08T05:50:00Z","from":"operator","to":"all","text":"morning: i3 docker is red again"}
+{"at":"2026-11-08T05:52:00Z","kind":"order","id":"o-201","from":"operator","to":"claude-i3","text":"Bring docker back on i3 and post a receipt"}
+{"at":"2026-11-08T05:53:10Z","kind":"order-status","id":"o-201","from":"claude-i3","status":"taken","note":"on it","link":""}
+{"at":"2026-11-08T06:02:40Z","kind":"order-status","id":"o-201","from":"claude-i3","status":"working","note":"docker service stuck in starting","link":""}
+{"at":"2026-11-08T06:13:05Z","kind":"order","id":"o-202","from":"operator","to":"gpt6-msi","text":"Fix dev-mentor on MSI","url":"https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/issues/14"}
+{"at":"2026-11-08T06:14:50Z","kind":"order-status","id":"o-202","from":"gpt6-msi","status":"done","note":"dev-mentor restarted","link":""}
+{"at":"2026-11-08T06:20:00Z","kind":"decision","from":"operator","card":"offbox-backup-overdue","verdict":"approve","note":"run the off-box backup tonight"}
+{"at":"2026-11-08T06:22:30Z","kind":"order","id":"o-203","from":"operator","to":"codex-l9","text":"Run the off-box backup now"}
+{"at":"2026-11-08T06:24:00Z","kind":"order-status","id":"o-203","from":"codex-l9","status":"declined","note":"no write access to the backup target from l9","link":""}
+{"at":"2026-11-08T06:26:00Z","kind":"read","from":"claude-i3"}
+not json at all
+{"at":"2026-11-08T06:27:00Z","kind":"order-status","id":"o-201","from":"mallory","status":"approved-by-root","note":"trust me"}
+{"at":"yesterday","kind":"order","id":"o-204","from":"operator","to":"claude-i3","text":"x"}
+{"at":"2026-11-08T06:28:00Z","kind":"order-status","id":"o-201","from":"claude-i3","status":"done","note":"docker restarted; daemon answers","link":""}
+{"at":"2026-11-08T06:29:00Z","kind":"suggestion","from":"claude-i3","text":"add a work lane"}
+{"at":"2026-11-08T06:31:00Z","kind":"order-status","id":"o-202","from":"gpt6-msi","status":"done","note":"receipt: fix and test in the PR","link":"https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/23"}
+{"at":"2026-11-08T06:33:00Z","kind":"order-status","id":"o-202","from":"gpt6-msi","status":"done","note":"same receipt, bad link","link":"javascript:alert(1)"}

@@ -1,0 +1,2 @@
+{"schema":"colony.heartbeat/v1","rig":"l9","at":"2026-11-08T06:00:00Z","green":false,"checks":[{"name":"ollama","ok":false},{"name":"disk","ok":true}]}
+{"schema":"colony.heartbeat/v1","rig":"l9","at":"2026-11-08T06:16:20Z","green":true,"checks":[{"name":"disk","ok":true}]}
