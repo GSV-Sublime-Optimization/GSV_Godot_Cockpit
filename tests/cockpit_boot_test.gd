@@ -42,6 +42,8 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	_check_chug_trigger_truth()
+	_check_event_bbcode()
 	var scene := load(MAIN_SCENE) as PackedScene
 	if scene == null:
 		_fail("could not load %s" % MAIN_SCENE)
@@ -68,6 +70,36 @@ func _run() -> void:
 
 	main.queue_free()
 	_finish()
+
+
+## A failed POST or missing transport acknowledgement must not be promoted
+## into a claim that a cultivation cycle was triggered or completed.
+func _check_chug_trigger_truth() -> void:
+	if CHUGPanel.classify_trigger_result(0, true) != "accepted":
+		_fail("CHUG rejected an explicitly acknowledged HTTP success")
+	if CHUGPanel.classify_trigger_result(0, false) != "unverified":
+		_fail("CHUG promoted an unacknowledged request into success")
+	if CHUGPanel.classify_trigger_result(1, true) != "unverified":
+		_fail("CHUG promoted a failed request into success")
+	if CHUGPanel.classify_trigger_result(-1, false) != "unverified":
+		_fail("CHUG promoted missing PowerShell transport into success")
+
+
+## Negative control for external event text embedded in a trusted colour span.
+## A naive append_text() would consume the hostile tags and falsify the log.
+func _check_event_bbcode() -> void:
+	var hostile := "[url=https://example.invalid]UP[/url] [color=green]LIVE[/color]"
+	var safe := EventStream.escape_event_text(hostile)
+	var expected := "[lb]url=https://example.invalid]UP[lb]/url] [lb]color=green]LIVE[lb]/color]"
+	if safe != expected:
+		_fail("event stream failed to escape hostile BBCode markup")
+	var label := RichTextLabel.new()
+	label.bbcode_enabled = true
+	root.add_child(label)
+	label.append_text("[color=gray]" + safe + "[/color]")
+	if label.get_parsed_text() != hostile:
+		_fail("RichTextLabel parsed event payload as markup instead of literal text")
+	label.queue_free()
 
 
 func _check_tab_surface(tabs: TabContainer) -> void:
