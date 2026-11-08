@@ -281,7 +281,7 @@ func _refresh_navigation() -> void:
 			var heading: int = _nav.add_item("LIVE STUDIO MISSIONS")
 			_nav.set_item_disabled(heading, true)
 			for mission in missions.slice(0, 12):
-				var item := mission.duplicate(true)
+				var item: Dictionary = mission.duplicate(true)
 				item["kind"] = "mission"
 				item["name"] = mission.get("title", "Mission")
 				var idx := _nav.add_item("  " + String(item["name"]).substr(0, 27))
