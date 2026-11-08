@@ -114,7 +114,10 @@ static func _seat_present(seats: String, wanted: String) -> bool:
 
 
 func current_atlas() -> Dictionary:
-	if _last_good.is_empty():
+	# A failed read (missing / unreadable / malformed / wrong schema) reads
+	# as unavailable; the last-good snapshot is kept but never presented as
+	# current, or a deleted or corrupt file would keep showing old data.
+	if _last_good.is_empty() or not _failure.is_empty():
 		return {
 			"state": "unknown" if _failure == "not_observed" else "unavailable",
 			"error": _failure,
