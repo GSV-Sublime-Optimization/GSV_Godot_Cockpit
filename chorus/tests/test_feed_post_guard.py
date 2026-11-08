@@ -62,3 +62,21 @@ class PostGuardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GetGuardTest(PostGuardTest):
+    """A DNS-rebinding page reaches the feeder under its own hostname; reading feed.json must fail."""
+
+    def _get(self, host):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/index.html", headers={"Host": host})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def test_get_refuses_a_foreign_host(self):
+        self.assertEqual(self._get("evil.example:8767"), 403)
+
+    def test_get_serves_loopback(self):
+        self.assertEqual(self._get(f"127.0.0.1:{self.port}"), 200)

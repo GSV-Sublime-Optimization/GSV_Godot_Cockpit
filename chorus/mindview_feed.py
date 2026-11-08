@@ -290,17 +290,33 @@ def post_allowed(headers) -> str | None:
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802 - http.server naming
+        # a DNS-rebinding page reaches us under its own hostname; refuse it so feed.json (fleet
+        # topology, channel, work at risk) cannot be read from a foreign site
+        host = (self.headers.get("Host") or "").strip().lower()
+        if (host.rsplit(":", 1)[0] if not host.endswith("]") else host) not in LOOPBACK_HOSTS:
+            self.send_error(403, "bad Host")
+            return
+        super().do_GET()
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self.do_GET()
+
     def do_POST(self) -> None:  # noqa: N802 - http.server naming
         if self.path not in ("/say", "/order", "/act"):
             self.send_error(404, "only /say, /order and /act accept POST")
             return
+        try:
+            n = min(int(self.headers.get("Content-Length", 0)), 4096)
+        except ValueError:
+            n = 0
+        raw = self.rfile.read(n)   # read before answering: refusing first makes Windows reset the socket
         why = post_allowed(self.headers)
         if why:
             self.send_error(403, why)
             return
         try:
-            n = min(int(self.headers.get("Content-Length", 0)), 4096)
-            body = json.loads(self.rfile.read(n) or b"{}")
+            body = json.loads(raw or b"{}")
             if self.path == "/act":
                 import actions
                 if body.get("token"):                       # step 2: Keath confirmed
