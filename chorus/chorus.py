@@ -17,6 +17,7 @@ refreshes it once with `mindview_feed.py --once`. Read-only except `say`, `sugge
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -32,6 +33,14 @@ RIGS = ["msi", "i3", "l9", "xanadu"]
 SILENT_MIN = 15
 EXPECTED_DOWN = {"trueform-forge", "rimapi", "desktop-ollama"}
 SEEN = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "KiloCore" / "chorus" / "cli.seen"
+
+
+def seen_path(seat: str) -> Path:
+    """Keep the existing MSI cursor; other seats get independent, path-safe cursors."""
+    if seat == "claude (msi seat)":
+        return SEEN
+    digest = hashlib.sha256(seat.encode("utf-8")).hexdigest()[:20]
+    return SEEN.with_name(f"cli.{digest}.seen")
 
 
 def ts(s: str | None) -> float:
@@ -101,7 +110,8 @@ def needs(d: dict) -> list[dict]:
 
 
 def unseen(d: dict) -> list[dict]:
-    last = SEEN.read_text().strip() if SEEN.exists() else ""
+    cursor = seen_path(SEAT)
+    last = cursor.read_text(encoding="utf-8").strip() if cursor.exists() else ""
     return [m for m in d.get("channel", []) if m.get("at", "") > last and m.get("from") != SEAT
             and m.get("kind") != "read" and str(m.get("text") or "").strip()]
 
@@ -110,7 +120,7 @@ def brief(d: dict, as_json: bool) -> None:
     ns, new = needs(d), unseen(d)
     minds = [e for e in d.get("events", []) if e.get("line")][-3:]
     if as_json:
-        print(json.dumps({"needs": ns, "new_messages": new, "minds": minds, "spine": d.get("spine")}, indent=1))
+        print(json.dumps({"feed_age_s": d.get("_age_s"), "needs": ns, "new_messages": new, "minds": minds, "spine": d.get("spine")}, indent=1))
         return
     mark = {"alarm": "!!", "notable": "! ", "routine": "  "}
     print(f"CHORUS brief  (feed {d['_age_s']:.0f} s old)")
@@ -127,8 +137,9 @@ def brief(d: dict, as_json: bool) -> None:
         seen = sorted(rb.get(str(m.get("at")), set()) - {SEAT})
         print(f"    {m.get('from')} -> {m.get('to')}: {str(m.get('text'))[:200]}" + (f"  (read by {', '.join(seen)})" if seen else ""))
     if d.get("channel"):
-        SEEN.parent.mkdir(parents=True, exist_ok=True)
-        SEEN.write_text(max(m.get("at", "") for m in d["channel"]))
+        cursor = seen_path(SEAT)
+        cursor.parent.mkdir(parents=True, exist_ok=True)
+        cursor.write_text(max(m.get("at", "") for m in d["channel"]), encoding="utf-8")
 
 
 def rig(d: dict, rid: str) -> None:

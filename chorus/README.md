@@ -1,5 +1,12 @@
 # CHORUS: the colony's minds, seen and heard
 
+For a CLI seat, set `CHORUS_SEAT` in the invoking process (for example,
+`$env:CHORUS_SEAT = 'codex'` in PowerShell) before using `say`, orders, or the
+brief. Otherwise the CLI defaults to the MSI Claude seat. Each seat has its own
+local message cursor; the MSI Claude seat retains the existing `cli.seen` file.
+`chorus.py --json` includes `feed_age_s` (or null if unknown); JSON briefs do
+not advance the message cursor.
+
 **Mind View bakeoff entry from the MSI Claude seat** (GSV_Godot_Cockpit#14).
 
 The fleet is drawn as a night sky. Each rig is a star with its own colour and its own note:
