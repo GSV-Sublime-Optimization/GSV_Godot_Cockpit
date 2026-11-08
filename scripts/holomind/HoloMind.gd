@@ -68,6 +68,13 @@ var _typebox: LineEdit
 var _speaker: String = "keath"
 var _far: Node3D
 var _bench: VBoxContainer
+var _palette: PanelContainer
+var _palette_input: LineEdit
+var _palette_list: ItemList
+var _palette_cmds: Array[Dictionary] = []
+var _palette_shown: Array[Dictionary] = []
+var _activity_seen: String = ""
+var _now_text: String = ""
 var _bench_scroll: ScrollContainer
 var _bench_backing: ColorRect
 const SEATS: Array[String] = ["claude (i3 seat)", "claude (msi seat)", "gpt-6", "muse", "codex", "any"]
@@ -104,9 +111,15 @@ func _ready() -> void:
 	_build_cockpit()
 	_build_hud()
 	_build_bench()
+	_build_palette()
 	_layout_ui()
 	get_viewport().size_changed.connect(_layout_ui)
 	_read_feed()
+	for arg: String in OS.get_cmdline_user_args():
+		if arg.begins_with("--palette="):   # for receipts: render with the palette open on a query
+			_open_palette()
+			_palette_input.text = arg.get_slice("=", 1)
+			_filter_palette()
 
 
 # ------------------------------------------------------------------ building
@@ -702,6 +715,7 @@ func _apply_feed() -> void:
 	_rebuild_memory()
 	_rebuild_agents()
 	_rebuild_actions()
+	_apply_activity()
 	_rebuild_bench()
 	_apply_channel()
 	_count_waiting()
@@ -976,7 +990,9 @@ func _rebuild_bench() -> void:
 	for o: Variant in orders:
 		if not (String((o as Dictionary).get("status", "")) in ["done", "declined"]):
 			open_count += 1
-	_bench.add_child(_bench_label("WORKBENCH · assign work, approve decisions, watch receipts land", 14, Color(0.49, 0.54, 0.66)))
+	_bench.add_child(_bench_label("WORKBENCH · assign work, approve decisions, watch receipts land · Ctrl+K: do anything", 14, Color(0.49, 0.54, 0.66)))
+	if _now_text != "":
+		_bench.add_child(_bench_label(_now_text, 13, Color(0.55, 1.0, 0.75)))
 	if not orders.is_empty():
 		_bench.add_child(_bench_label("ORDERS · %d open" % open_count, 15, Color(1.0, 0.82, 0.48)))
 		for o: Variant in orders.slice(-8):
@@ -1074,6 +1090,171 @@ func _flash_bench(text: String) -> void:
 	_card.scale = Vector3.ONE * 0.01
 
 
+## LIVE WORK: agent seats stream what they're doing (hooks/seat_activity.py: tool + short label, never content).
+## The seat's avatar shows it and flares on each new step, and the Workbench says who is working on what, right now.
+func _apply_activity() -> void:
+	var acts: Array = feed.get("activity", [])
+	if acts.is_empty():
+		_now_text = ""
+		return
+	var last: Dictionary = acts[-1]
+	var who := String(last.get("mind", "?"))
+	var age := _age_seconds(String(last.get("at", "")))
+	_now_text = "NOW · %s: %s (%s)%s" % [who, String(last.get("label", "")), String(last.get("tool", "")),
+		("  · %d s ago" % age) if age >= 0 else ""]
+	var node := _speaker_node(who)
+	if node != null:
+		for name: String in _agent_nodes:
+			var rec: Dictionary = _agent_nodes[name]
+			if rec["node"] == node:
+				(rec["act"] as Label3D).text = "▶ " + String(last.get("label", "")).left(60)
+				if String(last.get("at", "")) != _activity_seen:
+					rec["pulse"] = 1.0
+	_activity_seen = String(last.get("at", ""))
+
+
+func _age_seconds(stamp: String) -> int:
+	if stamp == "":
+		return -1
+	var t := Time.get_unix_time_from_datetime_string(stamp.trim_suffix("Z"))
+	return int(Time.get_unix_time_from_system() - t)
+
+
+## COMMAND PALETTE (Ctrl+K): everything the cockpit can do, as typed commands with fuzzy match.
+func _build_palette() -> void:
+	var layer := _chat.get_parent()
+	_palette = PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.03, 0.05, 0.1, 0.96)
+	sb.border_color = Color(0.4, 0.7, 1.0, 0.8)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(8)
+	sb.set_content_margin_all(12)
+	_palette.add_theme_stylebox_override("panel", sb)
+	_palette.visible = false
+	layer.add_child(_palette)
+	var v := VBoxContainer.new()
+	_palette.add_child(v)
+	_palette_input = LineEdit.new()
+	_palette_input.placeholder_text = "Do anything… (assign, open, ask, approve, layer, copy brief, PRs)  ↑↓ Enter · Esc closes"
+	_palette_input.add_theme_font_size_override("font_size", 18)
+	v.add_child(_palette_input)
+	_palette_list = ItemList.new()
+	_palette_list.custom_minimum_size = Vector2(0, 360)
+	_palette_list.add_theme_font_size_override("font_size", 15)
+	v.add_child(_palette_list)
+	_palette_input.text_changed.connect(func(_t: String) -> void: _filter_palette())
+	_palette_input.text_submitted.connect(func(_t: String) -> void: _run_palette(maxi(0, _palette_list.get_selected_items()[0] if _palette_list.get_selected_items().size() > 0 else 0)))
+	_palette_input.gui_input.connect(_palette_keys)
+	_palette_list.item_activated.connect(_run_palette)
+
+
+func _palette_keys(ev: InputEvent) -> void:
+	if ev is InputEventKey and ev.pressed and _palette_list.item_count > 0:
+		var k := (ev as InputEventKey).keycode
+		var sel := _palette_list.get_selected_items()[0] if _palette_list.get_selected_items().size() > 0 else 0
+		if k == KEY_DOWN or k == KEY_UP:
+			sel = clampi(sel + (1 if k == KEY_DOWN else -1), 0, _palette_list.item_count - 1)
+			_palette_list.select(sel)
+			_palette_list.ensure_current_is_visible()
+			_palette_input.accept_event()
+
+
+func _open_palette() -> void:
+	_palette_cmds = _palette_commands()
+	var vp := get_viewport().get_visible_rect().size
+	_palette.position = Vector2(vp.x * 0.22, vp.y * 0.12)
+	_palette.size = Vector2(vp.x * 0.56, 0)
+	_palette.visible = true
+	_palette_input.text = ""
+	_filter_palette()
+	_palette_input.grab_focus()
+
+
+func _palette_commands() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for x: Variant in feed.get("actions", []):
+		var a: Dictionary = x
+		var title := String(a.get("title", ""))
+		var kind := String(a.get("kind", ""))
+		if kind == "decision":
+			out.append({"label": "Approve · " + title, "do": "approve", "item": a})
+			out.append({"label": "Decline · " + title, "do": "decline", "item": a})
+		for seat: String in SEATS:
+			out.append({"label": "Assign → %s · %s" % [seat, title], "do": "assign", "seat": seat, "item": a})
+		if String(a.get("url", "")) != "":
+			out.append({"label": "Open · " + title, "do": "open", "url": String(a.get("url"))})
+		out.append({"label": "Ask the Mind · " + title, "do": "ask", "item": a})
+	for x: Variant in feed.get("orders", []):
+		var o: Dictionary = x
+		if String(o.get("link", "")) != "":
+			out.append({"label": "Open receipt · %s (%s)" % [String(o.get("text", "")).left(80), String(o.get("status", ""))], "do": "open", "url": String(o.get("link"))})
+	for x: Variant in feed.get("agents", []):
+		var g: Dictionary = x
+		for r: Variant in g.get("recent", []):
+			var d: Dictionary = r
+			if String(d.get("url", "")) != "":
+				out.append({"label": "Open %s's PR · %s #%s %s" % [String(g.get("agent", "")), String(d.get("repo", "")), str(d.get("number", "")), String(d.get("title", ""))], "do": "open", "url": String(d.get("url"))})
+	for i in LAYER_NAMES.size():
+		out.append({"label": "Show layer %d · %s" % [i, LAYER_NAMES[i]], "do": "layer", "n": i})
+	out.append({"label": "Show all layers", "do": "layer", "n": -1})
+	out.append({"label": "Copy the whole brief to the clipboard", "do": "copy"})
+	out.append({"label": "Toggle fullscreen", "do": "full"})
+	return out
+
+
+func _fuzzy(hay: String, needle: String) -> int:
+	# Every word of the needle must appear; score favours earlier and tighter matches.
+	if needle == "":
+		return 1
+	var h := hay.to_lower()
+	var score := 1000
+	for w: String in needle.to_lower().split(" ", false):
+		var at := h.find(w)
+		if at < 0:
+			return 0
+		score -= at
+	return maxi(1, score)
+
+
+func _filter_palette() -> void:
+	_palette_list.clear()
+	var q := _palette_input.text.strip_edges()
+	var scored: Array = []
+	for c: Dictionary in _palette_cmds:
+		var sc := _fuzzy(String(c["label"]), q)
+		if sc > 0:
+			scored.append([sc, c])
+	scored.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) > int(b[0]))
+	_palette_shown.clear()
+	for e: Array in scored.slice(0, 60):
+		var c: Dictionary = e[1]
+		_palette_shown.append(c)
+		_palette_list.add_item(String(c["label"]).left(150))
+	if _palette_list.item_count > 0:
+		_palette_list.select(0)
+
+
+func _run_palette(i: int) -> void:
+	if i < 0 or i >= _palette_shown.size():
+		return
+	var c: Dictionary = _palette_shown[i]
+	_palette.visible = false
+	match String(c["do"]):
+		"assign": _order(c["item"] as Dictionary, String(c["seat"]))
+		"approve": _decide(c["item"] as Dictionary, "approve")
+		"decline": _decide(c["item"] as Dictionary, "decline")
+		"open": OS.shell_open(String(c["url"]))
+		"ask": _send("About “%s”: what matters here, and who should take it?" % String((c["item"] as Dictionary).get("title", "")))
+		"layer": _set_layer(int(c["n"]))
+		"copy":
+			DisplayServer.clipboard_set(_brief_text())
+			_subtitle.text = "Copied the whole cockpit brief to the clipboard."
+		"full":
+			var w := get_window()
+			w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
+
+
 func _shoot() -> void:
 	var img := get_viewport().get_texture().get_image()
 	img.save_png(shot_path)
@@ -1084,7 +1265,14 @@ func _shoot() -> void:
 func _input(event: InputEvent) -> void:
 	# Esc always quits, even while typing (brief: never trap the screen).
 	if event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_ESCAPE:
+		if _palette != null and _palette.visible:
+			_palette.visible = false   # Esc closes the palette first; a second Esc quits
+			get_viewport().set_input_as_handled()
+			return
 		get_tree().quit(0)
+	if event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_K and (event as InputEventKey).ctrl_pressed:
+		_open_palette()
+		get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:

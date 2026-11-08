@@ -135,7 +135,7 @@ def github_activity():
                 continue
             if name:
                 acts.append({'agent': name, 'home': home, 'at': p['updatedAt'], 'repo': repo.split('/')[1], 'number': p['number'],
-                             'title': p['title'][:90], 'draft': p['isDraft']})
+                             'title': p['title'][:90], 'draft': p['isDraft'], 'url': p['url']})
     github_activity.awaiting = sorted(awaiting, key=lambda a: a['at'], reverse=True)
     agents = {}
     for a in sorted(acts, key=lambda a: a['at'], reverse=True):
@@ -165,6 +165,24 @@ def chorus_facts():
     return {'at': iso(), 'backup': f.get('backup'), 'mirror': {k: v for k, v in (f.get('mirror') or {}).items() if k != 'repos'},
             'spine': {'up': sp.get('up'), 'total': sp.get('total'),
                       'down': [x.get('name') for x in sp.get('services', []) if not x.get('up', True)]}}
+
+
+ACTIVITY = HERE / 'activity.jsonl'
+
+
+def seat_activity(limit=30):
+    """What the agent seats on this rig are doing right now, from hooks/seat_activity.py (tool + short label only)."""
+    if not ACTIVITY.exists():
+        return []
+    out = []
+    with ACTIVITY.open('rb') as f:
+        f.seek(max(0, ACTIVITY.stat().st_size - 16384))
+        for line in f.read().decode('utf-8', 'replace').splitlines()[-limit:]:
+            try:
+                out.append(json.loads(line))
+            except Exception:
+                pass
+    return out
 
 
 ORDER_RANK = {'working': 0, 'taken': 1, 'posted': 2, 'declined': 3, 'done': 4}
@@ -307,6 +325,7 @@ def tick(state):
     feed['colony'] = state.get('colony')
     feed['actions'] = actions(bodies, state.get('awaiting', []), remote.get('cards', []), channel, feed['colony'])
     feed['orders'] = orders[-30:]
+    feed['activity'] = seat_activity()
     feed['decisions'] = list(decisions.values())[-30:]
     ordered = {o.get('ref') for o in orders if o.get('status') not in ('declined',)}
     for a in feed['actions']:
@@ -352,7 +371,7 @@ def tick(state):
                       'rigs': {k: {'status': v['status'], 'failing': v['failing']} for k, v in bodies.items()},
                       'agents': [{'agent': g['agent'], 'latest': f"{g['recent'][0]['repo']}#{g['recent'][0]['number']} {g['recent'][0]['title']}"}
                                  for g in feed['agents']],
-                      'actions': feed['actions'][:30], 'orders': [o for o in orders if o['status'] not in ('done', 'declined')][-20:], 'channel': channel[-8:]}
+                      'actions': feed['actions'][:30], 'orders': [o for o in orders if o['status'] not in ('done', 'declined')][-20:], 'activity': feed.get('activity', [])[-8:], 'channel': channel[-8:]}
     feed['mind_thinking'] = max(0, len(pending) - (1 - budget))
     publish()
     return feed
