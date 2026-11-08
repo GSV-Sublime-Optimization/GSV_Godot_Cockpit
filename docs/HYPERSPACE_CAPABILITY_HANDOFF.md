@@ -22,6 +22,10 @@ An agent seat is useful when it can carry a selected, **real** task across inter
 4. Press `EXPORT AGENT HANDOFF`. A real coding or planning agent reads the JSON from clipboard or local `user://` path, checks schema and identifies the owner route and missing admission. Use the owner system to decide what to do next.
 5. For actual code work, use the Hyperspace project/mission nodes, Studio's exact project re-scan, acceptance criteria, R2 human approval when needed, source-backed logs and validators. No extra authorization was created by importing an Atlas or handoff.
 
+### Verified Studio re-observation, beyond the capsule
+
+The owner-backed read-only extension is documented in [HYPERSPACE_LIVE_OWNER_LOOP.md](HYPERSPACE_LIVE_OWNER_LOOP.md). A native Godot scene exported a real Studio-observed mission and the independent Python command `agent_handoff.py --observe-studio` successfully GET-read the exact owning mission record and returned receipt/acceptance/validator status without posting or claiming an authenticated terminal. This is a completed real-source read path, not a production R2 build.
+
 ### Real owner integration roadmap
 
 Kilo_Core: capability admission and risk policy. KiloCore-Studio: mission owner. gsv-steward: Atlas search/probe/route with verified tool results. Dev-Mentor/Terminal Depths: typed game and agent sessions. GSV dev: build/check/review receipts. FleetBridge: machine eligibility and topology, not current uptime. ChatGPT and custom plugins: execute through their connected providers and consent rules, not through Godot-stored cloud secrets. This edition provides **a validated interchange and meaningful navigation**, not an already-functional connector to every named service.

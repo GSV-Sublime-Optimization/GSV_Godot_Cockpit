@@ -43,12 +43,12 @@ def validate(value: Any) -> dict[str, Any]:
         if auth.get(field) is not False:
             raise ValueError("false_authority_grant")
     kind, ident = ref.get("kind"), ref.get("id")
-    if kind not in KINDS or not isinstance(ident, str) or not 1 <= len(ident) <= 500:
+    if not isinstance(kind, str) or kind not in KINDS or not isinstance(ident, str) or not 1 <= len(ident) <= 500:
         raise ValueError("invalid_resource")
     if ref.get("execution_admitted") is not False:
         raise ValueError("false_execution_admission")
     owner, route = auth.get("owner"), auth.get("next_route")
-    if not isinstance(owner, str) or not owner or len(owner) > 140 or route not in ROUTES:
+    if not isinstance(owner, str) or not owner or len(owner) > 140 or not isinstance(route, str) or route not in ROUTES:
         raise ValueError("bad_owner_route")
     if kind == "project":
         branch = ref.get("branch")
@@ -85,9 +85,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("file", type=Path, help="Path printed by Hyperspace's export action")
     parser.add_argument("--json", action="store_true", help="Machine-readable allowlisted projection")
+    parser.add_argument("--observe-studio", action="store_true",
+                        help="Perform one source-bounded, read-only loopback Studio observation")
+    parser.add_argument("--timeout", type=float, default=6.0,
+                        help="Max seconds for one Studio GET (0.5..35, default 6)")
     args = parser.parse_args(argv)
     try:
         result = load(args.file)
+        if args.observe_studio:
+            from studio_reobserve import get_local_json, observe
+            result["owner_observation"] = observe(
+                result, lambda route: get_local_json(route, timeout=args.timeout))
     except (ValueError, OSError, json.JSONDecodeError) as exc:
         print(f"HANDOFF_REFUSED: {exc}", file=sys.stderr)
         return 2
@@ -97,6 +105,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"SOURCE: {result['kind']} {result['id']} [{result['state']}]")
         print(f"OWNER: {result['owner']} | ROUTE: {result['route']}")
         print(f"STEP: {result['next_step']}")
+        if args.observe_studio:
+            observed = result["owner_observation"]
+            print("OWNER RE-OBSERVATION: " + json.dumps(observed, ensure_ascii=False, sort_keys=True))
         print("AUTHORITY: NONE. Recheck the owning system before any execution.")
     return 0
 
