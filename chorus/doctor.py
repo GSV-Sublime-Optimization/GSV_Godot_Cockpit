@@ -80,6 +80,27 @@ def msi_docker() -> dict:
     return {"verdict": "confirmed: MSI's Docker engine is not answering; containers may still run, but nothing can be started or inspected", "evidence": ev}
 
 
+def spine_container(name: str, container: str, url: str):
+    """Probe for a spine service that runs as a container: is it running, what is its restart policy, does it answer."""
+    def probe() -> dict:
+        r = subprocess.run(["docker", "inspect", container, "--format",
+                            "{{.State.Status}}|{{.State.ExitCode}}|{{.State.FinishedAt}}|{{.HostConfig.RestartPolicy.Name}}"],
+                           capture_output=True, text=True, timeout=20)
+        state = (r.stdout or "").strip() or "missing"
+        code, ms = _http_ms(url, 8)
+        ev = [f"{container}: {state}", f"{url}: {code or 'no answer'} in {ms} ms"]
+        parts = state.split("|")
+        if parts[0] == "exited" and len(parts) > 3 and parts[3] == "no":
+            return {"verdict": f"confirmed: {container} exited (code {parts[1]}) and its restart policy is 'no', so it stayed down after Docker restarted", "evidence": ev}
+        if code:
+            return {"verdict": f"not confirmed: {name} answers now", "evidence": ev}
+        return {"verdict": f"unknown: {container} is {parts[0]} but {url} does not answer", "evidence": ev}
+    return probe
+
+
+SPINE_PROBES = {"openwebui": spine_container("OpenWebUI", "ai-openwebui", "http://127.0.0.1:8080/")}
+
+
 PROBES = {"msi:docker": msi_docker, "msi:dev-mentor": msi_dev_mentor, "i3:docker": i3_docker, "i3:ollama": i3_ollama}
 
 
@@ -95,6 +116,13 @@ def diagnose(feed: dict) -> list[dict]:
             except (OSError, subprocess.SubprocessError, ValueError) as e:
                 res = {"verdict": f"unknown: probe failed ({e.__class__.__name__})", "evidence": []}
             out.append({"key": key, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **res})
+    for svc in (feed.get("spine") or {}).get("services", []):
+        if not svc.get("up") and svc.get("name") in SPINE_PROBES:
+            try:
+                res = SPINE_PROBES[svc["name"]]()
+            except (OSError, subprocess.SubprocessError, ValueError) as e:
+                res = {"verdict": f"unknown: probe failed ({e.__class__.__name__})", "evidence": []}
+            out.append({"key": f"spine:{svc['name']}", "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **res})
     return out
 
 
