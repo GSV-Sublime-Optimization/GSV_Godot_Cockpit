@@ -27,6 +27,7 @@
   --f-data: "JetBrains Mono", ui-monospace, Consolas, monospace;
 }
 html, body { height: 100%; }
+[hidden] { display: none !important; }   /* .rig-card sets display:grid; hidden must still win */
 body {
   margin: 0; background: var(--sky); color: var(--ink); font-family: var(--f-body);
   overflow: hidden; -webkit-font-smoothing: antialiased;
@@ -282,19 +283,183 @@ let current = events[events.length - 1], silenceOverride = null;
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ---------- canvas sky ----------
+// Every mark in the sky is data. Static layers (sky, galactic band, far stars, vignette, mood tint) are
+// painted ONCE to an offscreen canvas and blitted; glows are pre-rendered sprites. Nothing static allocates
+// per frame. Everything is rebuilt only on resize, DPR change, or when the data the layer encodes changes.
 const cv = document.getElementById("sky"), cx = cv.getContext("2d");
-let W = 0, H = 0, DPR = 1, stars = [], comets = [], ripples = [];
+let W = 0, H = 0, DPR = 1, comets = [], ripples = [], sparks = [];
+const COL = {};
+const TOKENS = ["--sky", "--sky-2", "--ink", "--ink-dim", "--hair", "--msi", "--i3", "--l9", "--xanadu", "--tranquillo", "--attento", "--agitato"];
+function readTokens() { for (const k of TOKENS) COL[k] = css(k); COL.fData = css("--f-data"); COL.fDisp = css("--f-display"); }
+readTokens();
+const rgbOf = hex => { const h = hex.replace("#", ""), n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+function hexA(hex, a) { const [r, g, b] = rgbOf(hex); return `rgba(${r},${g},${b},${a})`; }
+// Seeded random so the sky keeps its constellations across resizes and reloads.
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const gauss = r => (r() + r() + r() + r() - 2) / 2;
+function canvas(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
+// A sprite is drawn at `size` CSS px; its backing store is size*DPR so it stays crisp on HiDPI.
+function sprite(size, paint) { const c = canvas(size * DPR, size * DPR), g = c.getContext("2d"); g.scale(DPR, DPR); paint(g, size / 2); return c; }
+function glow(hex, size, stops) {
+  return sprite(size, (g, h) => {
+    const gr = g.createRadialGradient(h, h, 0, h, h, h);
+    for (const [o, a] of stops) gr.addColorStop(o, hexA(hex, a));
+    g.fillStyle = gr; g.fillRect(0, 0, size, size);
+  });
+}
+const blit = (img, x, y, s) => cx.drawImage(img, x - s / 2, y - s / 2, s, s);
+
+// ----- sprites: built once per DPR -----
+let SP = null;
+function buildSprites() {
+  SP = {rig: {}, dot: {}};
+  SP.white = glow("#ffffff", 16, [[0, 1], [0.18, 0.9], [0.45, 0.25], [1, 0]]);
+  SP.whiteSpike = sprite(40, (g, h) => {              // a bright star: core plus faint diffraction spikes
+    g.globalCompositeOperation = "lighter";
+    for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      const lg = g.createLinearGradient(h - dx * h, h - dy * h, h + dx * h, h + dy * h);
+      lg.addColorStop(0, "rgba(255,255,255,0)"); lg.addColorStop(0.5, "rgba(255,255,255,0.55)"); lg.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = lg; dx ? g.fillRect(0, h - 0.6, 2 * h, 1.2) : g.fillRect(h - 0.6, 0, 1.2, 2 * h);
+    }
+    const gr = g.createRadialGradient(h, h, 0, h, h, h * 0.4);
+    gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.25, "rgba(255,255,255,0.5)"); gr.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = gr; g.fillRect(0, 0, 2 * h, 2 * h);
+  });
+  for (const k of ["--tranquillo", "--agitato", "--ink-dim", "--msi", "--i3", "--l9", "--xanadu", "--attento"])
+    SP.dot[k] = glow(COL[k], 24, [[0, 1], [0.12, 0.95], [0.3, 0.35], [0.6, 0.08], [1, 0]]);
+  for (const r of RIGS) {
+    const c = COL[r.color];
+    SP.rig[r.id] = {
+      // corona: a wide soft bloom in the rig's colour, with long faint spikes (drawn additively)
+      corona: sprite(r.r * 9, (g, h) => {
+        const gr = g.createRadialGradient(h, h, 0, h, h, h);
+        gr.addColorStop(0, hexA(c, 0.55)); gr.addColorStop(0.08, hexA(c, 0.32)); gr.addColorStop(0.22, hexA(c, 0.11));
+        gr.addColorStop(0.5, hexA(c, 0.03)); gr.addColorStop(1, hexA(c, 0));
+        g.fillStyle = gr; g.fillRect(0, 0, 2 * h, 2 * h);
+        g.globalCompositeOperation = "lighter";
+        g.translate(h, h);
+        for (let i = 0; i < 2; i++) {
+          g.rotate(i ? Math.PI / 2 : Math.PI / 4);
+          const lg = g.createLinearGradient(-h, 0, h, 0);
+          lg.addColorStop(0, hexA(c, 0)); lg.addColorStop(0.5, hexA(c, 0.22)); lg.addColorStop(1, hexA(c, 0));
+          g.fillStyle = lg; g.fillRect(-h, -0.7, 2 * h, 1.4);
+        }
+      }),
+      // core: white-hot centre bleeding into the rig colour, a crisp limb
+      core: sprite(r.r * 2, (g, h) => {
+        const gr = g.createRadialGradient(h * 0.85, h * 0.85, 0, h, h, h);
+        gr.addColorStop(0, "#fffdf6"); gr.addColorStop(0.28, mix(c, "#ffffff", 0.55)); gr.addColorStop(0.72, c);
+        gr.addColorStop(0.93, mix(c, "#000000", 0.25)); gr.addColorStop(1, hexA(c, 0));
+        g.fillStyle = gr; g.beginPath(); g.arc(h, h, h, 0, 6.283); g.fill();
+      })
+    };
+  }
+  SP.redAura = sprite(256, (g, h) => {                  // alarm: red-shifted edges of the sky
+    const gr = g.createRadialGradient(h, h, h * 0.55, h, h, h * 1.42);
+    gr.addColorStop(0, "rgba(239,79,90,0)"); gr.addColorStop(0.6, "rgba(239,79,90,0.35)"); gr.addColorStop(1, "rgba(150,20,40,0.85)");
+    g.fillStyle = gr; g.fillRect(0, 0, 2 * h, 2 * h);
+  });
+}
+function mix(a, b, k) { const p = rgbOf(a), q = rgbOf(b); return `rgb(${p.map((v, i) => Math.round(v + (q[i] - v) * k)).join(",")})`; }
+
+// ----- the backdrop: one offscreen canvas, rebuilt on resize or when the mood/mirror changes -----
+const PAR = 14;   // parallax margin (px) baked around the backdrop
+let BG = null, bgKey = "";
+function moodLevel() { return current?.level || "routine"; }
+function mirrorFresh() { const m = extras.mirror; return !!m && m.ok && m.age_h <= 26; }
+function buildBackdrop() {
+  const s = Math.min(DPR, 1.5), bw = W + 2 * PAR, bh = H + 2 * PAR, c = canvas(bw * s, bh * s), g = c.getContext("2d");
+  g.scale(s, s);
+  const r = rng(144);
+  // the night: deep blue, a little lighter toward the horizon
+  const sk = g.createLinearGradient(0, 0, 0, bh);
+  sk.addColorStop(0, "#03060e"); sk.addColorStop(0.55, COL["--sky"]); sk.addColorStop(1, "#0c1326");
+  g.fillStyle = sk; g.fillRect(0, 0, bw, bh);
+  // the galactic band, sweeping low-left to high-right; its glow takes the colour of the current marking
+  const band = u => { const x = -0.1 * bw + u * 1.2 * bw; return [x, bh * (0.92 - 0.78 * u) + Math.sin(u * 3.1) * bh * 0.07]; };
+  const bwid = Math.max(bw, bh) * 0.16, mood = COL[LEVEL[moodLevel()].color];
+  const pal = ["#2b3f8f", "#45358f", "#1d5c80", "#5f3378", "#2b3f8f", mood];
+  g.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 190; i++) {
+    const u = r(), [bx, by] = band(u), off = gauss(r) * bwid * 0.55, rad = bwid * (0.2 + r() * 0.7);
+    const x = bx + off * 0.45, y = by + off, col = pal[Math.floor(r() * pal.length)];
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, hexA(col, 0.045 + r() * 0.05)); gr.addColorStop(0.5, hexA(col, 0.015)); gr.addColorStop(1, hexA(col, 0));
+    g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  for (let i = 0; i < 26; i++) {
+    const [bx, by] = band(0.25 + r() * 0.6), rad = bwid * (0.08 + r() * 0.18), x = bx + gauss(r) * bwid * 0.15, y = by + gauss(r) * bwid * 0.2;
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, "rgba(200,205,240,0.06)"); gr.addColorStop(1, "rgba(200,205,240,0)");
+    g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  // dark dust lanes along the band's spine
+  g.globalCompositeOperation = "source-over";
+  for (let i = 0; i < 70; i++) {
+    const u = r(), [bx, by] = band(u), rad = bwid * (0.12 + r() * 0.3), x = bx + gauss(r) * bwid * 0.1, y = by + gauss(r) * bwid * 0.18;
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, "rgba(3,5,11,0.38)"); gr.addColorStop(1, "rgba(3,5,11,0)");
+    g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  // far stars: dense along the band, sparse elsewhere; colour temperatures from blue-white to amber
+  const temps = ["255,255,255", "205,220,255", "255,240,215", "255,215,170", "180,200,255"];
+  const n = Math.round(bw * bh / 320);
+  for (let i = 0; i < n; i++) {
+    let x, y;
+    if (r() < 0.62) { const [bx, by] = band(r()); const off = gauss(r) * bwid * 0.6; x = bx + off * 0.45; y = by + off; }
+    else { x = r() * bw; y = r() * bh; }
+    const z = Math.pow(r(), 4), a = 0.1 + z * 0.8, sz = z > 0.8 ? 1.3 : z > 0.4 ? 0.9 : 0.6;
+    g.fillStyle = `rgba(${temps[Math.floor(r() * temps.length)]},${a.toFixed(3)})`; g.fillRect(x, y, sz, sz);
+    if (z > 0.96) { g.globalAlpha = 0.6; g.drawImage(SP.white, x - 3, y - 3, 7, 7); g.globalAlpha = 1; }
+  }
+  // the mood rising from the horizon
+  const mg = g.createRadialGradient(bw / 2, bh * 1.08, 10, bw / 2, bh * 1.08, Math.max(bw, bh) * 0.85);
+  mg.addColorStop(0, hexA(mood, 0.16)); mg.addColorStop(1, hexA(mood, 0));
+  g.fillStyle = mg; g.fillRect(0, 0, bw, bh);
+  // vignette: the eye settles on the fleet
+  const vg = g.createRadialGradient(bw * 0.55, bh * 0.48, Math.min(bw, bh) * 0.3, bw * 0.55, bh * 0.48, Math.max(bw, bh) * 0.78);
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.6)");
+  g.fillStyle = vg; g.fillRect(0, 0, bw, bh);
+  BG = c;
+}
+// The near stars: one per repo the off-GitHub mirror keeps. They twinkle while the mirror is fresh; when it
+// falls behind they go dull, and a mirror failure turns that many of them red.
+let NEAR = [];
+function buildNear() {
+  const r = rng(75), n = Math.min(400, extras.mirror?.repos || 0);
+  NEAR = Array.from({length: n}, (_, i) => ({x: r() * (W + 2 * PAR) - PAR, y: r() * H * 0.86, z: 0.35 + r() * 0.65, p: r() * 6.28, w: 0.6 + r() * 1.4, spike: r() < 0.12, i}));
+}
+
+// ----- labels: text rendered once to a small canvas per distinct string -----
+const labels = new Map();
+function label(text, font, color) {
+  const key = font + "|" + color + "|" + text;
+  let l = labels.get(key);
+  if (!l) {
+    if (labels.size > 96) labels.clear();
+    const m = cx.measureText ? (cx.font = font, cx.measureText(text)) : {width: text.length * 8};
+    const w = Math.ceil(m.width) + 8, h = 26, c = canvas(w * DPR, h * DPR), g = c.getContext("2d");
+    g.scale(DPR, DPR); g.font = font; g.fillStyle = color; g.textAlign = "center"; g.textBaseline = "middle";
+    g.shadowColor = "rgba(0,0,0,0.8)"; g.shadowBlur = 6; g.fillText(text, w / 2, h / 2);
+    l = {c, w, h}; labels.set(key, l);
+  }
+  return l;
+}
+document.fonts?.ready.then(() => labels.clear());
+
+let geomKey = "", threads = {};
 function resize() {
   DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight;
-  cv.width = W * DPR; cv.height = H * DPR; cx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  stars = Array.from({length: Math.round(W * H / 2600)}, () => ({x: Math.random() * W, y: Math.random() * H, z: Math.random(), p: Math.random() * 6.28}));
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  buildSprites(); labels.clear(); bgKey = ""; geomKey = "";
 }
-addEventListener("resize", resize); resize();
+addEventListener("resize", resize);
 // On wide screens the sky sits right of the "What needs you" panel (420 px), so no star hides behind it.
 const rigXY = id => {
   const r = RIGS.find(q => q.id === id), left = W >= 900 ? 440 : 0;
   return [left + r.pos[0] * (W - left), r.pos[1] * H * (W < 520 ? 0.9 : 1)];
 };
+resize();
 const ageMin = hb => hb ? (nowFn() - Date.parse(hb.at)) / 60000 : Infinity;
 function rigState(id) {
   if (id === "xanadu") return {silent: false, host: true, checks: []};   // xanadu holds the record itself
@@ -302,18 +467,44 @@ function rigState(id) {
   const silent = silenceOverride === id || !hb || ageMin(hb) > 15;
   return {silent, hb, age: silenceOverride === id ? 60 : ageMin(hb), checks: hb ? hb.checks : []};
 }
+// The light streams from each rig to xanadu: their gradients depend only on geometry, so cache them.
+function buildThreads() {
+  threads = {}; const [xx, xy] = rigXY("xanadu");
+  for (const r of RIGS) {
+    if (r.id === "xanadu") continue;
+    const [x, y] = rigXY(r.id), lg = cx.createLinearGradient(x, y, xx, xy);
+    lg.addColorStop(0, COL[r.color]); lg.addColorStop(1, COL["--xanadu"]);
+    threads[r.id] = {x, y, xx, xy, lg};
+  }
+}
+function ensureLayers() {
+  const gk = `${W}x${H}@${DPR}`;
+  if (gk !== geomKey) { geomKey = gk; buildThreads(); buildNear(); }
+  const bk = `${gk}|${moodLevel()}`;
+  if (bk !== bgKey) { bgKey = bk; buildBackdrop(); }
+  if (NEAR.length !== Math.min(400, extras.mirror?.repos || 0)) buildNear();
+}
+
+// Pointer parallax: the far sky shifts a little, the near stars more, the fleet not at all (so clicks land).
+let px = 0, py = 0, tpx = 0, tpy = 0;
+addEventListener("pointermove", e => { tpx = e.clientX / W * 2 - 1; tpy = e.clientY / H * 2 - 1; });
 
 let lastDraw = 0;
 function frame(t) {
-  // Budget (bakeoff rule: <= 5% of one core idle): draw at most 30 fps; browsers pause hidden tabs.
-  if (t - lastDraw < 33) { requestAnimationFrame(frame); return; }
-  lastDraw = t; drawSky(t); requestAnimationFrame(frame);
+  requestAnimationFrame(frame);
+  if (document.hidden) return;
+  // Budget (bakeoff rule: <= 5% of one core idle): at most 30 fps; with reduced motion, one still frame a second.
+  if (t - lastDraw < (reduced ? 1000 : 33)) return;
+  lastDraw = t;
+  if (Math.min(2, devicePixelRatio || 1) !== DPR) resize();
+  drawSky(reduced ? 0 : t);
 }
 // ?perf: draw 300 frames back to back (t advancing 33 ms each, as at the 30 fps cap) and report the
 // average and p95 cost of one frame in the title and console. Headless browsers starve rAF, so this
 // times the draw work itself, which is what the budget is about.
 function perfRun() {
   const ms = [], t0 = performance.now();
+  if (!reduced && !comets.length) show(current);                  // include a comet in flight
   for (let i = 0; i < 300; i++) {          // getImageData forces the canvas to actually rasterise each frame
     const a = performance.now(); drawSky(t0 + i * 33); cx.getImageData(0, 0, 1, 1); ms.push(performance.now() - a);
   }
@@ -322,82 +513,151 @@ function perfRun() {
   console.log(msg); document.title = msg;
 }
 function drawSky(t) {
-  const lvl = LEVEL[current?.level || "routine"];
-  const tint = css(lvl.color);
-  // sky + mood: a soft glow from below, tinted by the current marking
-  cx.fillStyle = css("--sky"); cx.fillRect(0, 0, W, H);
-  const g = cx.createRadialGradient(W / 2, H * 1.05, 10, W / 2, H * 1.05, Math.max(W, H) * 0.9);
-  const pulse = current?.level === "alarm" && !reduced ? 0.10 + 0.06 * Math.sin(t / 380) : 0.09;
-  g.addColorStop(0, hexA(tint, pulse)); g.addColorStop(1, "transparent");
-  cx.fillStyle = g; cx.fillRect(0, 0, W, H);
-  // stars
-  for (const s of stars) {
-    const a = 0.25 + 0.55 * s.z * (reduced ? 1 : 0.6 + 0.4 * Math.sin(t / 900 + s.p));
-    cx.fillStyle = `rgba(233,228,214,${a})`; cx.fillRect(s.x, s.y, s.z > 0.92 ? 1.6 : 1, s.z > 0.92 ? 1.6 : 1);
+  ensureLayers();
+  if (!reduced) { px += (tpx - px) * 0.06; py += (tpy - py) * 0.06; }
+  // 1. the backdrop (sky, galactic band in the mood's colour, far stars, vignette): one blit
+  cx.globalCompositeOperation = "source-over"; cx.globalAlpha = 1;
+  cx.drawImage(BG, -PAR - px * 8, -PAR - py * 6, W + 2 * PAR, H + 2 * PAR);
+  // agitato: the sky's edges red-shift and pulse
+  if (moodLevel() === "alarm") {
+    cx.globalAlpha = reduced ? 0.4 : 0.32 + 0.2 * Math.sin(t / 380);
+    cx.drawImage(SP.redAura, -W * 0.1, -H * 0.1, W * 1.2, H * 1.2); cx.globalAlpha = 1;
   }
-  // heartbeat threads: every rig reports to the librarian
-  const [xx, xy] = rigXY("xanadu");
-  for (const r of RIGS) {
-    if (r.id === "xanadu") continue;
-    const st = rigState(r.id), [x, y] = rigXY(r.id);
-    cx.strokeStyle = hexA(css(r.color), st.silent ? 0.08 : 0.18); cx.setLineDash(st.silent ? [3, 7] : []);
-    cx.lineWidth = 1; cx.beginPath(); cx.moveTo(x, y); cx.lineTo(xx, xy); cx.stroke(); cx.setLineDash([]);
-    if (!st.silent && !reduced) {           // a pulse travels the thread, faster when the beat is fresh
-      const k = ((t / (2600 + 120 * st.age)) + RIGS.indexOf(r) * 0.27) % 1;
-      cx.fillStyle = hexA(css(r.color), 0.9);
-      cx.beginPath(); cx.arc(x + (xx - x) * k, y + (xy - y) * k, 2, 0, 6.28); cx.fill();
-    }
-  }
-  // the rigs
+  cx.globalCompositeOperation = "lighter";
+  drawNear(t);
+  drawThreads(t);
+  cx.globalCompositeOperation = "source-over";
+  // 2. the fleet, with MSI's spine moons passing behind and in front of it
+  drawMoons(t, true);
   for (const r of RIGS) drawRig(r, t);
+  drawMoons(t, false);
   drawOrbiters(t);
-  // ripples and comets
+  // 3. thoughts in flight, and where they landed
   ripples = ripples.filter(p => t - p.t0 < 2400);
   for (const p of ripples) {
-    const k = (t - p.t0) / 2400;
-    cx.strokeStyle = hexA(p.c, 0.6 * (1 - k)); cx.lineWidth = 2;
-    cx.beginPath(); cx.arc(p.x, p.y, 20 + k * 120, 0, 6.28); cx.stroke();
+    const k = (t - p.t0) / 2400, rad = 20 + (1 - Math.pow(1 - k, 2)) * 130;
+    cx.strokeStyle = hexA(p.c, 0.12 * (1 - k)); cx.lineWidth = 9; cx.beginPath(); cx.arc(p.x, p.y, rad, 0, 6.283); cx.stroke();
+    cx.strokeStyle = hexA(p.c, 0.7 * (1 - k)); cx.lineWidth = 1.5; cx.beginPath(); cx.arc(p.x, p.y, rad, 0, 6.283); cx.stroke();
   }
-  comets = comets.filter(c => t - c.t0 < c.dur + 300);
+  comets = comets.filter(c => t - c.t0 < c.dur + 900);
+  cx.globalCompositeOperation = "lighter";
   for (const c of comets) drawComet(c, t);
+  drawSparks(t);
+  cx.globalCompositeOperation = "source-over";
 }
+function drawNear(t) {
+  const fresh = mirrorFresh(), fails = extras.mirror?.failures || 0, ox = -px * 16, oy = -py * 11;
+  for (const s of NEAR) {
+    const tw = reduced ? 0.85 : 0.6 + 0.4 * Math.sin(t / (700 + s.w * 500) + s.p);
+    const bad = s.i < fails, img = bad ? SP.dot["--agitato"] : s.spike && fresh ? SP.whiteSpike : SP.white;
+    cx.globalAlpha = (fresh ? 0.35 + 0.65 * s.z * tw : 0.18 * s.z);
+    const size = (s.spike && fresh ? 16 : bad ? 12 : 5.5) * s.z;
+    cx.drawImage(img, s.x + ox - size / 2, s.y + oy - size / 2, size, size);
+  }
+  cx.globalAlpha = 1;
+}
+// Heartbeat threads: every rig reports to the librarian. The beads travelling each thread are that rig's
+// health checks (teal ok, red failing); they travel faster the fresher the beat. Silent rigs: dashed, empty.
+function drawThreads(t) {
+  for (const r of RIGS) {
+    if (r.id === "xanadu") continue;
+    const st = rigState(r.id), th = threads[r.id];
+    cx.strokeStyle = th.lg;
+    if (st.silent) { cx.globalAlpha = 0.18; cx.setLineDash([3, 7]); cx.lineWidth = 1; }
+    else { cx.globalAlpha = 0.07; cx.lineWidth = 7; cx.beginPath(); cx.moveTo(th.x, th.y); cx.lineTo(th.xx, th.xy); cx.stroke(); cx.globalAlpha = 0.45; cx.lineWidth = 1; }
+    cx.beginPath(); cx.moveTo(th.x, th.y); cx.lineTo(th.xx, th.xy); cx.stroke(); cx.setLineDash([]); cx.globalAlpha = 1;
+    if (st.silent || !st.checks.length) continue;
+    const n = st.checks.length, period = 2600 + 120 * Math.min(st.age, 15);
+    for (let i = 0; i < n; i++) {
+      const ok = st.checks[i].ok, img = SP.dot[ok ? "--tranquillo" : "--agitato"];
+      const base = reduced ? (i + 0.5) / n : ((t / period) + i / n + RIGS.indexOf(r) * 0.27) % 1;
+      for (let j = 3; j >= 0; j--) {                 // a short fading wake behind each bead
+        const k = base - j * 0.012; if (k < 0) continue;
+        const sz = (ok ? 11 : 17) * (1 - j * 0.2);
+        cx.globalAlpha = (1 - j * 0.28) * (ok ? 0.8 : 1);
+        blit(img, th.x + (th.xx - th.x) * k, th.y + (th.xy - th.y) * k, sz);
+      }
+    }
+    cx.globalAlpha = 1;
+  }
+}
+function ramScale(st) { const mb = st.hb?.ram_avail_mb; return mb == null ? 1 : 0.8 + Math.min(1, mb / 16000) * 0.45; }
 function drawRig(r, t) {
-  const st = rigState(r.id), [x, y] = rigXY(r.id), col = css(r.color);
-  const breathe = reduced || st.silent ? 1 : 1 + 0.045 * Math.sin(t / (st.host ? 1800 : 1100 + 40 * Math.min(st.age || 0, 15)));
-  const rad = r.r * breathe * (W < 520 ? 0.75 : 1);
-  const halo = cx.createRadialGradient(x, y, rad * 0.2, x, y, rad * 3.2);
-  halo.addColorStop(0, hexA(col, st.silent ? 0.06 : 0.32)); halo.addColorStop(1, "transparent");
-  cx.fillStyle = halo; cx.beginPath(); cx.arc(x, y, rad * 3.2, 0, 6.28); cx.fill();
-  cx.fillStyle = st.silent ? hexA(col, 0.18) : col; cx.beginPath(); cx.arc(x, y, rad * 0.62, 0, 6.28); cx.fill();
-  // check ring: one arc per health check, gap between them
-  const checks = st.checks || [], n = checks.length;
+  const st = rigState(r.id), [x, y] = rigXY(r.id), col = COL[r.color], sp = SP.rig[r.id], small = W < 520 ? 0.75 : 1;
+  const breathe = reduced || st.silent ? 1 : 1 + 0.06 * Math.sin(t / (st.host ? 1800 : 1100 + 40 * Math.min(st.age || 0, 15)));
+  const rad = r.r * small;
+  // corona: breathes with the heartbeat; its reach is the RAM the rig has free
+  cx.globalCompositeOperation = "lighter";
+  cx.globalAlpha = st.silent ? 0.12 : 0.95;
+  blit(sp.corona, x, y, r.r * 9 * small * breathe * (st.silent ? 0.6 : ramScale(st)));
+  cx.globalCompositeOperation = "source-over";
+  // a failing check sends out a red shockwave every couple of seconds
+  const fails = st.checks.filter(c => !c.ok).length;
+  if (fails && !st.silent && !reduced) {
+    const k = (t % 2400) / 2400, rr = rad + 10 + k * rad * 2.6;
+    cx.strokeStyle = hexA(COL["--agitato"], 0.10 * (1 - k)); cx.lineWidth = 10; cx.beginPath(); cx.arc(x, y, rr, 0, 6.283); cx.stroke();
+    cx.strokeStyle = hexA(COL["--agitato"], 0.55 * (1 - k)); cx.lineWidth = 1.2; cx.beginPath(); cx.arc(x, y, rr, 0, 6.283); cx.stroke();
+  }
+  cx.globalAlpha = st.silent ? 0.22 : 1;
+  blit(sp.core, x, y, rad * 1.3 * breathe);
+  cx.globalAlpha = 1;
+  // check ring: one arc per health check (xanadu: the off-box backup and the git mirror it keeps)
+  const ring = st.host ? xanaduChecks() : st.checks, n = ring.length;
   for (let i = 0; i < n; i++) {
-    const a0 = -1.57 + i * 6.283 / n + 0.12, a1 = -1.57 + (i + 1) * 6.283 / n - 0.12;
-    cx.strokeStyle = st.silent ? hexA(css("--ink-dim"), 0.35) : checks[i].ok ? hexA(css("--tranquillo"), 0.85) : css("--agitato");
-    cx.lineWidth = checks[i].ok ? 2 : 3.5; cx.beginPath(); cx.arc(x, y, rad + 9, a0, a1); cx.stroke();
+    const a0 = -1.57 + i * 6.283 / n + 0.12, a1 = -1.57 + (i + 1) * 6.283 / n - 0.12, ok = ring[i].ok;
+    if (!ok && !st.silent) { cx.strokeStyle = hexA(COL["--agitato"], 0.25); cx.lineWidth = 9; cx.beginPath(); cx.arc(x, y, rad + 9, a0, a1); cx.stroke(); }
+    cx.strokeStyle = st.silent ? hexA(COL["--ink-dim"], 0.35) : ok ? hexA(COL["--tranquillo"], 0.85) : COL["--agitato"];
+    cx.lineWidth = ok ? 1.6 : 3.5; cx.beginPath(); cx.arc(x, y, rad + 9, a0, a1); cx.stroke();
   }
   // label, set like a staff annotation
-  cx.textAlign = "center"; cx.fillStyle = st.silent ? css("--ink-dim") : css("--ink");
-  cx.font = `600 ${W < 520 ? 12 : 14}px ${css("--f-data")}`; cx.fillText(r.name, x, y + rad + 30);
-  cx.font = `italic 400 ${W < 520 ? 12 : 14}px ${css("--f-display")}`; cx.fillStyle = css("--ink-dim");
+  const fs = W < 520 ? 12 : 14, failing = st.checks.filter(c => !c.ok).map(c => c.name).join(", ");
   const sub = st.host ? "keeps the record" : st.silent ? `silent ${Math.round(st.age)} min` :
-    checks.filter(c => !c.ok).map(c => c.name).join(", ") ? `${checks.filter(c => !c.ok).map(c => c.name).join(", ")} failing` : `${r.role} · ${Math.max(0, Math.round(st.age))} min ago`;
-  cx.fillText(sub, x, y + rad + 48);
+    failing ? `${failing} failing` : `${r.role} · ${Math.max(0, Math.round(st.age))} min ago`;
+  const l1 = label(r.name, `600 ${fs}px ${COL.fData}`, st.silent ? COL["--ink-dim"] : COL["--ink"]);
+  const l2 = label(sub, `italic 400 ${fs}px ${COL.fDisp}`, failing && !st.silent ? mix(COL["--agitato"], COL["--ink"], 0.35) : COL["--ink-dim"]);
+  cx.drawImage(l1.c, x - l1.w / 2, y + rad + 25 - l1.h / 2, l1.w, l1.h);
+  cx.drawImage(l2.c, x - l2.w / 2, y + rad + 43 - l2.h / 2, l2.w, l2.h);
 }
+function xanaduChecks() {
+  const b = extras.backup, m = extras.mirror;
+  return [{name: "off-box backup", ok: !!b && b.age_h <= 36}, {name: "git mirror", ok: mirrorFresh()}];
+}
+// Thoughts as comets: a tapered tail in the marking's colour, shedding sparks; a ripple where it lands.
 function drawComet(c, t) {
   const k = Math.min(1, (t - c.t0) / c.dur), e = 1 - Math.pow(1 - k, 3);
   const x = c.x0 + (c.x1 - c.x0) * e, y = c.y0 + (c.y1 - c.y0) * e - Math.sin(e * 3.14) * 60;
-  c.trail.push([x, y]); if (c.trail.length > 26) c.trail.shift();
-  for (let i = 1; i < c.trail.length; i++) {
-    cx.strokeStyle = hexA(c.c, i / c.trail.length * 0.8); cx.lineWidth = i / c.trail.length * 4;
-    cx.beginPath(); cx.moveTo(...c.trail[i - 1]); cx.lineTo(...c.trail[i]); cx.stroke();
+  if (k < 1) { c.trail.push(x, y); if (c.trail.length > 64) c.trail.splice(0, 2); }
+  else if (c.trail.length > 2) c.trail.splice(0, 4);    // after landing the tail drains into the rig
+  const tr = c.trail, n = tr.length / 2;
+  if (n > 2) {
+    // tapered tail: a ribbon whose half-width grows from 0 at the end to 5 px at the head
+    cx.fillStyle = hexA(c.c, 0.55); cx.beginPath();
+    for (let i = 0; i < n; i++) { const [nx, ny] = normal(tr, i), w = 5 * i / (n - 1); cx.lineTo(tr[2 * i] + nx * w, tr[2 * i + 1] + ny * w); }
+    for (let i = n - 1; i >= 0; i--) { const [nx, ny] = normal(tr, i), w = 5 * i / (n - 1); cx.lineTo(tr[2 * i] - nx * w, tr[2 * i + 1] - ny * w); }
+    cx.fill();
+    for (let i = 0; i < n; i += 3) { cx.globalAlpha = 0.5 * i / n; blit(c.img, tr[2 * i], tr[2 * i + 1], 6 + 14 * i / n); }
+    cx.globalAlpha = 1;
   }
-  cx.fillStyle = "#fff"; cx.beginPath(); cx.arc(x, y, 3, 0, 6.28); cx.fill();
+  if (k < 1) {
+    blit(c.img, x, y, 34); blit(SP.white, x, y, 12);
+    if (sparks.length < 160) for (let i = 0; i < 2; i++) sparks.push({x, y, vx: (Math.random() - 0.5) * 0.05, vy: (Math.random() - 0.3) * 0.05, t0: t, img: c.img});
+  }
   if (k >= 1 && !c.landed) { c.landed = true; ripples.push({x: c.x1, y: c.y1, c: c.c, t0: t}); }
 }
-function hexA(hex, a) {
-  const h = hex.replace("#", ""), n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16);
-  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+function normal(tr, i) {
+  const n = tr.length / 2, a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
+  const dx = tr[2 * b] - tr[2 * a], dy = tr[2 * b + 1] - tr[2 * a + 1], l = Math.hypot(dx, dy) || 1;
+  return [-dy / l, dx / l];
+}
+function drawSparks(t) {
+  let w = 0;
+  for (const s of sparks) {
+    const age = t - s.t0; if (age > 900) continue;
+    cx.globalAlpha = 0.8 * (1 - age / 900);
+    blit(s.img, s.x + s.vx * age, s.y + s.vy * age + 0.00002 * age * age, 7);
+    sparks[w++] = s;
+  }
+  sparks.length = w; cx.globalAlpha = 1;
 }
 
 // ---------- the thought ----------
@@ -416,7 +676,7 @@ function show(ev, animate = true) {
   if (animate && !reduced) {
     const home = MIND_HOME[ev.mind] || "l9", f = focusOf(ev);
     const [x0, y0] = rigXY(home), [x1, y1] = f ? rigXY(f) : [W / 2, H * 0.5];
-    comets.push({x0, y0, x1, y1, c: css(lv.color), t0: performance.now(), dur: 1500, trail: []});
+    comets.push({x0, y0, x1, y1, c: COL[lv.color], img: SP.dot[lv.color], t0: performance.now(), dur: 1500, trail: []});
   }
   sing(ev);
   markCurrent();
@@ -653,23 +913,46 @@ const SPINE_MOVES = {
   "trueform-forge": "Optional; expected down (memory: Spine expected-down set)"
 };
 const EXPECTED_DOWN = new Set(["trueform-forge", "rimapi", "desktop-ollama"]);
-function drawOrbiters(t) {
-  const [x, y] = rigXY("msi"), s = extras.spine;
-  if (s && s.services) {                                   // one small moon per spine service
-    const n = s.services.length, R = 64;
-    s.services.forEach((svc, i) => {
-      const a = i / n * 6.283 + (reduced ? 0 : t / 60000);
-      cx.fillStyle = svc.up ? hexA(css("--tranquillo"), 0.75) : EXPECTED_DOWN.has(svc.name) ? hexA(css("--ink-dim"), 0.5) : css("--agitato");
-      cx.beginPath(); cx.arc(x + Math.cos(a) * R, y + Math.sin(a) * R * 0.55, svc.up ? 2.2 : 3, 0, 6.28); cx.fill();
-    });
+// MSI's spine: one moon per colony service on a tilted orbit; moons pass behind MSI and in front of it.
+// Teal = up, red with a glow = down, dim grey = down but expected.
+function drawMoons(t, back) {
+  const s = extras.spine; if (!s || !s.services) return;
+  const [x, y] = rigXY("msi"), n = s.services.length, R = 64 * (W < 520 ? 0.8 : 1), ry = R * 0.42;
+  if (back) {                                            // the orbit itself, a faint tilted ellipse
+    cx.strokeStyle = hexA(COL["--msi"], 0.13); cx.lineWidth = 1;
+    cx.beginPath(); cx.ellipse(x, y, R, ry, -0.18, 0, 6.283); cx.stroke();
   }
-  // MSI Claude: a bright satellite whose glow follows how busy I am (steps in the last 2 minutes)
+  const ca = Math.cos(-0.18), sa = Math.sin(-0.18);
+  s.services.forEach((svc, i) => {
+    const a = i / n * 6.283 + (reduced ? 0 : t / 60000), ex = Math.cos(a) * R, ey = Math.sin(a) * ry;
+    if ((ey < 0) !== back) return;                       // behind MSI first, in front after
+    const mx = x + ex * ca - ey * sa, my = y + ex * sa + ey * ca, depth = back ? 0.55 : 1;
+    const down = !svc.up, expected = EXPECTED_DOWN.has(svc.name);
+    const img = SP.dot[svc.up ? "--tranquillo" : expected ? "--ink-dim" : "--agitato"];
+    cx.globalCompositeOperation = "lighter";
+    cx.globalAlpha = (svc.up ? 0.85 : expected ? 0.45 : 1) * depth;
+    blit(img, mx, my, (svc.up ? 9 : expected ? 8 : 16) * (back ? 0.85 : 1));
+    if (down && !expected && !reduced) { cx.globalAlpha = 0.35 * (0.5 + 0.5 * Math.sin(t / 300 + i)); blit(img, mx, my, 30); }
+  });
+  cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
+}
+// MSI Claude: a bright satellite on its own orbit. Its light trail is as long, and its glow as strong,
+// as the number of steps it took in the last two minutes.
+function drawOrbiters(t) {
+  const [x, y] = rigXY("msi");
   const now = live ? nowFn() : Date.parse("2026-11-08T07:15:30Z");   // snapshot layers were captured at 07:15
   const busy = (extras.claude_activity || []).filter(a => now - Date.parse(a.at) < 120000).length;
-  const a = reduced ? -0.8 : t / 2400, cxm = x + Math.cos(a) * 44, cym = y + Math.sin(a) * 26;
-  const glow = cx.createRadialGradient(cxm, cym, 1, cxm, cym, 10 + busy * 3);
-  glow.addColorStop(0, "rgba(255,255,255,0.95)"); glow.addColorStop(1, hexA(css("--msi"), 0));
-  cx.fillStyle = glow; cx.beginPath(); cx.arc(cxm, cym, 10 + busy * 3, 0, 6.28); cx.fill();
+  const a = reduced ? -0.8 : t / 2400, rx = 46, ry = 27, trail = Math.min(4.2, 0.25 + busy * 0.45);
+  const img = SP.dot["--msi"];
+  cx.globalCompositeOperation = "lighter";
+  for (let i = 18; i >= 1; i--) {                        // the trail, fading back along the orbit
+    const b = a - trail * i / 18;
+    cx.globalAlpha = 0.55 * (1 - i / 19);
+    blit(img, x + Math.cos(b) * rx, y + Math.sin(b) * ry, 4 + 6 * (1 - i / 19));
+  }
+  const hx = x + Math.cos(a) * rx, hy = y + Math.sin(a) * ry;
+  cx.globalAlpha = 1; blit(img, hx, hy, 18 + busy * 5); blit(SP.white, hx, hy, 9);
+  cx.globalCompositeOperation = "source-over";
 }
 function renderTick() {
   const el = document.getElementById("claude-tick"), acts = (extras.claude_activity || []).slice(-3).reverse();
@@ -681,9 +964,18 @@ function renderTick() {
 
 // ---------- conversation: the shared cockpit channel ----------
 const VOICE = {"claude (msi seat)": "--msi", "claude (i3 seat)": "--i3", "i3-mind": "--i3", "keath (chorus)": "--ink", "keath": "--ink"};
+const SEATS = {"claude (i3 seat)": "Claude i3", "claude (msi seat)": "Claude MSI", "i3-mind": "i3 Mind"};
+const seatName = from => SEATS[from] || from.replace(/^claude \((\w+) seat\)$/, (_, s) => `Claude ${s.length <= 3 ? s.toUpperCase() : s}`);
 function renderTalk() {
-  const all = extras.channel || [], readBy = {};
-  for (const r of all.filter(m => m.kind === "read")) for (const at of r.reads || []) (readBy[at] ||= new Set()).add(r.from.replace(/ \(.*\)/, "").replace("claude", "Claude") + " " + (r.from.match(/\((\w+)/)?.[1] || "").toUpperCase());
+  const all = extras.channel || [], readBy = {}, said = all.filter(m => m.kind !== "read");
+  // Two receipt shapes: {reads: [at...]} lists exact messages (MSI seat); {at} with no list is a watermark
+  // (HOLOMIND, i3 seat): that seat has read every message up to and including `at`, except its own.
+  for (const r of all.filter(m => m.kind === "read")) {
+    const who = seatName(r.from || "");
+    const ats = Array.isArray(r.reads) ? r.reads
+      : said.filter(m => m.from !== r.from && Date.parse(m.at) <= Date.parse(r.at)).map(m => m.at);
+    for (const at of ats) (readBy[at] ||= new Set()).add(who);
+  }
   const list = document.getElementById("talk-list"), msgs = all.filter(m => m.kind !== "read").slice(-14);
   list.replaceChildren();
   for (const m of msgs) {
