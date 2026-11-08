@@ -32,22 +32,29 @@ static func parse(text: String, expected_id: String) -> Dictionary:
 		"review": raw.get("review", false) == true,
 		"mergeable": raw.get("mergeable", false) == true,
 		"receipt": "NOT REPORTED", "validator": "NOT REPORTED",
-		"report": "NOT REPORTED", "commits": [], "changed_paths": []
+		"report": "NOT REPORTED", "audit": "NOT REPORTED", "commits": [], "changed_paths": []
 	}
+	# Studio owns merge admission. Never infer a PASS from an executor exit code.
+	var gate: Variant = raw.get("validator_admission")
+	if typeof(gate) == TYPE_DICTIONARY:
+		var gate_state: Variant = gate.get("state")
+		if typeof(gate_state) == TYPE_STRING and ["PASS", "BLOCKED", "NOT_REQUIRED"].has(gate_state):
+			var gate_reason := ""
+			if typeof(gate.get("reason")) == TYPE_STRING:
+				gate_reason = String(gate["reason"]).replace("\\n", " ").replace("\\r", " ").substr(0, 180)
+			proof["validator"] = String(gate_state) + (" / " + gate_reason if not gate_reason.is_empty() else "")
 	var result: Variant = raw.get("result")
 	if typeof(result) != TYPE_DICTIONARY:
 		return {"ok": true, "proof": proof}
 	var receipt: Variant = result.get("receipt_id")
 	if typeof(receipt) == TYPE_STRING and receipt.length() >= 8 and receipt.length() <= 120:
 		proof["receipt"] = receipt.strip_escapes()
-	var validator: Variant = result.get("validator")
-	if typeof(validator) == TYPE_DICTIONARY:
-		var code: Variant = validator.get("exit_code")
-		var timed_out: Variant = validator.get("timed_out")
-		if (typeof(code) in [TYPE_INT, TYPE_FLOAT] and float(code) == float(int(code))
-				and typeof(timed_out) == TYPE_BOOL):
-			proof["validator"] = ("PASS (exit 0)" if code == 0 and not timed_out
-				else "FAILED or TIMED OUT (exit %d)" % code)
+	# The acceptance audit is owner-reconciled against immutable criteria.
+	var audit: Variant = result.get("acceptance_audit")
+	if typeof(audit) == TYPE_DICTIONARY:
+		var audit_state: Variant = audit.get("status")
+		if typeof(audit_state) == TYPE_STRING and ["reported_complete", "incomplete", "missing_report"].has(audit_state):
+			proof["audit"] = String(audit_state).to_upper()
 	var report: Variant = result.get("report")
 	if typeof(report) == TYPE_DICTIONARY and typeof(report.get("raw_ok")) == TYPE_BOOL:
 		var acc: Variant = report.get("acceptance", [])
@@ -60,8 +67,8 @@ static func parse(text: String, expected_id: String) -> Dictionary:
 				total += 1
 				if row["met"]:
 					met += 1
-			proof["report"] = ("%d/%d acceptance criteria met" % [met, total]
-				if report["raw_ok"] else "report explicitly invalid")
+			proof["report"] = ("executor self-report: %d/%d claimed met" % [met, total]
+				if report["raw_ok"] else "executor report explicitly invalid")
 	var commits: Variant = result.get("commits", [])
 	if typeof(commits) == TYPE_ARRAY:
 		for sha in commits.slice(0, 8):
@@ -85,6 +92,7 @@ static func format(proof: Dictionary) -> String:
 		"MERGE ELIGIBLE   " + ("YES (still owner-gated)" if proof.get("mergeable", false) else "NO / UNKNOWN"),
 		"RECEIPT ID       " + String(proof.get("receipt", "NOT REPORTED")),
 		"VALIDATOR        " + String(proof.get("validator", "NOT REPORTED")),
+		"ACCEPTANCE AUDIT " + String(proof.get("audit", "NOT REPORTED")),
 		"REPORT           " + String(proof.get("report", "NOT REPORTED")), "",
 		"COMMITS"
 	])
@@ -104,6 +112,6 @@ static func format(proof: Dictionary) -> String:
 			lines.append("  " + String(path))
 	lines.append("")
 	lines.append("Studio is authoritative for mission lifecycle and receipt links.")
-	lines.append("A reported validator exit of 0 does not prove independent playtest or visual quality.")
+	lines.append("Studio validator_admission and acceptance_audit are owner projections; executor self-report is not independent evidence.")
 	lines.append("No merge, deployment, runner admission or approval originates here.")
 	return "\n".join(lines)
