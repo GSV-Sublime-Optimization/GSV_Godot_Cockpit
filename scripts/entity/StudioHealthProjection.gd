@@ -7,7 +7,10 @@ const EXPECTED_SCHEMA := "kilocore-studio.cockpit-health.v2"
 const MAX_REASON_LENGTH := 120
 
 static func parse_health(json_text: String) -> Dictionary:
-	var parsed: Variant = JSON.parse_string(json_text)
+	var parser := JSON.new()
+	if parser.parse(json_text) != OK:
+		return _invalid("malformed_json")
+	var parsed: Variant = parser.data
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return _invalid("malformed_json")
 	var body: Dictionary = parsed
@@ -20,9 +23,15 @@ static func parse_health(json_text: String) -> Dictionary:
 	var counts := {}
 	for key in ["awaiting", "running", "queued"]:
 		var value: Variant = missions.get(key, null)
-		if typeof(value) != TYPE_INT or value < 0:
+		# Godot JSON materializes numeric literals as floats. Counts are still
+		# integral quantities: accept 2.0, reject 2.5, NaN, negatives and
+		# unexpectedly enormous values before safely converting.
+		if typeof(value) != TYPE_INT and typeof(value) != TYPE_FLOAT:
 			return _invalid("invalid_mission_count_" + key)
-		counts[key] = value
+		var n := float(value)
+		if n < 0.0 or n > 1000000.0 or floorf(n) != n:
+			return _invalid("invalid_mission_count_" + key)
+		counts[key] = int(n)
 	var gate: Variant = missions.get("thermal_gate", "")
 	if typeof(gate) != TYPE_STRING or gate.is_empty() or gate.length() > MAX_REASON_LENGTH:
 		return _invalid("invalid_thermal_gate")
