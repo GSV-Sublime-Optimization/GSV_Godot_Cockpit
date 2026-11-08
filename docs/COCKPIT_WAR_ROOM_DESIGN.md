@@ -164,7 +164,11 @@ than a visualization is that ρ is the agent's own state, updated every frame.
 | **Status cards** | Registry + senses | LIVE for sensed data; UNKNOWN for spine-derived data | per source |
 | **Terminal layers (MSI / i3 / L9 / Xanadu)** | Broker — DOES NOT EXIST | PLANNED — "broker needed", never fake output | n/a |
 | **Agent-seat registry** | §1.2 verdicts | LIVE / degraded / away / awaiting per seat | per source |
-| **Ledger** | Mind status + layer states | LIVE (bounded, escaped via #5) | on observation |
+| **Rig · MSI** | Fleet snapshot (CIM + services + tasks) | LIVE — RAM free, CPU, 9 services, 4 tasks | snapshot 5 min / reader 30 s |
+| **Rig · i3** | Fleet snapshot (LAN SSH) | LIVE — RAM free, seats (Claude ×4, Ollama) | snapshot 5 min / reader 30 s |
+| **Rig · L9** | Fleet snapshot (LAN SSH) | LIVE — RAM free (CIM) | snapshot 5 min / reader 30 s |
+| **Rig · Xanadu** | Fleet snapshot (Icecast HTTP only) | LIVE — Icecast 2.4.4 | snapshot 5 min / reader 30 s |
+| **Ledger** | Mind status + layer states + fleet age | LIVE (bounded, escaped via #5) | on observation |
 | **Mind View (#12)** | PR #12 fleet map + transcript | INCOMING — desk marked, not built | n/a |
 
 Per-source timeout budgets: fast senses 4 s; slow senses (Dev-Mentor health) 12 s
@@ -203,7 +207,8 @@ A real interactive terminal tab needs a broker that provides, at minimum:
 - **Wired in Slice 4:** the holographic room + layer registry; the Mind's three
   senses + fleet bodies as layers; the Dev-Mentor game sense; the terminal-layer
   shells (honest PLANNED state); the agent-seat registry (verified seats only);
-  the density field from real senses; the semantic slice; the ledger.
+  the density field from real senses; the semantic slice; the ledger; the
+  fleet-telemetry snapshot reader + four rig layers (MSI / i3 / L9 / Xanadu).
 - **Planned (not Slice 4):** the terminal broker (§5); the Ash JSONL game-session
   client; service-level cards from an extended Studio projection; the Mind View
   (#12) layer; layout persistence beyond presets; harness adapters (Serena, Hermes,
@@ -235,7 +240,40 @@ A real interactive terminal tab needs a broker that provides, at minimum:
 7. **No Godot on the MSI while Furyline Phase B runs** — single-flight + 2,500 MB
    RAM gate; PHASE-B-DONE.md is the signal. Screenshot + FPS are queued behind it.
 
-## 8. Decisions Keath still owes
+## 8. Fleet telemetry — the competitive edge (full send, 2026-11-08 ~00:04 MST)
+
+Keath's full-send brief: the entry wires REAL fleet-wide observation data into
+the volume — the thing other entries cannot do from a single machine. The volume
+is the real fleet, live.
+
+**Pattern (the honest way):** the cockpit runs NO shell and holds NO credentials.
+A probe script on the MSI (`tools/fleet_feed/fleet_feed.ps1`, via mssh or the
+`MuseFleetFeed` scheduled task, every 5 min) writes ONE typed JSON snapshot
+(`C:\GSV\state\fleet-telemetry.json`, schema `kilocore.fleet-telemetry.v1`). The
+cockpit reads that file with caps (64 KB) + schema checks + age — the same pattern
+as Mind View's `mind_feed.py`. States: unknown / unavailable / live (age < 300 s) /
+stale (age ≥ 300 s). A rig with no live source is `unavailable`/`unknown` with a
+reason, never faked live.
+
+**Sources wired (verified at build time, 2026-11-08 ~00:09–00:11 MST — two probe
+runs; flapping is real and reported honestly):**
+
+| Rig / service | Source | Live state at build |
+|---|---|---|
+| MSI RAM/CPU | CIM `Win32_OperatingSystem` / `Win32_Processor` | LIVE — free 4,527–5,592 / 32,472 MB (13.9–17.2%), CPU 2–9% |
+| MSI services | HTTP GETs (3 s) + TCP :18789 | LIVE — Studio, gateway, Hub, router, dispatch, ChatDev, Ollama, OpenClaw up. **Studio flapped**: up at 07:09Z, `unknown` at 07:11Z (3 s probe timeout). **Dev-Mentor flapped**: `unknown` at 07:09Z (root timed out at 10 s in a separate check), up at 07:11Z. The entry reports each run honestly. |
+| MSI scheduled tasks | `Get-ScheduledTask` | LIVE — KiloCore-Public-Gateway Running; Studio-Backend, Mirror-Sync, Heartbeat-MSI Ready |
+| i3 | LAN SSH alias `i3` (10.0.0.193, user `studio cuckoo`), tailscale fallback | LIVE — RAM free 14,986 / 24,524 MB; seats: Claude ×4, Ollama. **Lesson:** the first probe failed (`ssh_empty_output`) because the remote command contained a pipe and the remote default shell is cmd — remote commands now contain NO shell metacharacters. Tailscale SSH hangs from session-0; LAN works. GameAttract director: no known endpoint — recorded as not-yet-probed. Dev-Mentor :7337 on i3: TCP unreachable (matches survey). |
+| L9 | LAN SSH alias `kilodesktop` (10.0.0.197, user `jacob`) via Git's bundled ssh.exe | LIVE — RAM free 5,993 / 16,329 MB (CIM — L9 is Windows). MSI Windows OpenSSH returns exit 255; Git's ssh.exe works. Off tailnet, LAN only. |
+| Xanadu | Icecast `status-json.xsl` on :8000, HTTP ONLY | LIVE — Icecast 2.4.4, started Sun, 08 Nov 2026 02:53:24 +0000. **Never SSH — the pause stands.** |
+
+**What full send does NOT change:** no merges (tap naming the item still required);
+no Godot runs while Furyline Phase B runs (single-flight + 2,500 MB RAM gate);
+no authority / actuators / secrets / POST / shell-from-Godot (fleet access is
+observation data, not command); Xanadu SSH pause still stands; never touch Keath's
+live session processes or live editor; never fake data.
+
+## 9. Decisions Keath still owes
 
 1. **Terminal broker** — approve the §5 contract as a later R0–R3 slice, or keep
    terminals brokered-only via mssh/scheduled-task lanes.
@@ -248,14 +286,14 @@ A real interactive terminal tab needs a broker that provides, at minimum:
 5. **Next modules after the first room** — Ash game-session client vs service-level
    cards vs harness adapters.
 6. **Bake-off bar** — the sibling bake-off coordinator owns the hub issue, registry,
-   rules, and invitations; this entry's first-shippable bar is §9.
+   rules, and invitations; this entry's first-shippable bar is §10.
 
-## 9. Slice 4 — first-shippable bar (Muse's bake-off entry)
+## 10. Slice 4 — first-shippable bar (Muse's bake-off entry)
 
 1. The room renders: the volume, the table, the companion, the layer stack (Mind's
-   three senses + fleet bodies + game + terminals + Mind View desk), the war-room
-   floor with one creature per verified seat (§1.2), the central monitor's web, the
-   bottom ledger.
+   three senses + fleet bodies + game + terminals + Mind View desk + four rig
+   layers), the war-room floor with one creature per verified seat (§1.2), the
+   central monitor's web, the bottom ledger.
 2. Every creature, card, and desk maps to a real source with an honest state
    (live / unavailable / planned / not detected). Nothing fabricated. ρ is real
    senses or explicitly SIMULATED.

@@ -30,6 +30,8 @@ func _run() -> void:
 	_check_billboard()
 	_check_density()
 	_check_registry()
+	_check_fleet_projection()
+	_check_fleet_reader()
 	await _check_holo_layer_pull()
 	await _check_holo_room_scene()
 	if OS.get_environment("GSV_STUDIO_LIVE") == "1":
@@ -321,6 +323,172 @@ func _check_registry() -> void:
 			_fail("seat %s has a dishonest state" % String(seat.get("id", "?")))
 
 
+func _check_fleet_projection() -> void:
+	# A valid snapshot parses: states, RAM, services, tasks all admitted.
+	var now_ms := int(Time.get_unix_time_from_system() * 1000.0)
+	var good := {
+		"schema": "kilocore.fleet-telemetry.v1",
+		"generated_at": "2026-11-08T07:11:24Z",
+		"generated_unix_ms": now_ms,
+		"probe_host": "MSI-KATANA",
+		"rigs": {
+			"msi": {
+				"state": "live", "ram_free_mb": 4527, "ram_total_mb": 32472,
+				"ram_free_pct": 13.9, "cpu_load_pct": 2,
+				"services": {"studio": "up", "gateway": "up", "devmentor": "unknown"},
+				"tasks": {"KiloCore-Public-Gateway": "Running"},
+				"seats": "", "note": "MSI-KATANA, probed locally",
+			},
+			"i3": {
+				"state": "live", "ram_free_mb": 14986, "ram_total_mb": 24524,
+				"services": {}, "tasks": {},
+				"seats": "claude,claude,claude,claude,ollama",
+				"note": "SSH session works",
+			},
+			"l9": {"state": "live", "ram_free_mb": 5993, "ram_total_mb": 16329},
+			"xanadu": {"state": "live", "services": {"icecast": "up"}},
+		},
+	}
+	var parsed := FleetTelemetryProjection.parse_telemetry(JSON.stringify(good))
+	if not bool(parsed.get("ok", false)):
+		_fail("valid fleet snapshot rejected: %s" % str(parsed.get("reason", "")))
+		return
+	var telemetry: Dictionary = parsed["telemetry"]
+	var rigs: Dictionary = telemetry["rigs"]
+	var msi: Dictionary = rigs["msi"]
+	if String(msi.get("state", "")) != "live":
+		_fail("MSI rig state was not 'live'")
+	if int(msi.get("ram_free_mb", -1)) != 4527:
+		_fail("MSI ram_free_mb not admitted")
+	var msi_services: Dictionary = msi["services"]
+	if String(msi_services.get("devmentor", "")) != "unknown":
+		_fail("MSI devmentor service state not admitted as unknown")
+	var msi_tasks: Dictionary = msi["tasks"]
+	if String(msi_tasks.get("KiloCore-Public-Gateway", "")) != "Running":
+		_fail("MSI task state not admitted")
+	var i3: Dictionary = rigs["i3"]
+	if String(i3.get("seats", "")) != "claude,claude,claude,claude,ollama":
+		_fail("i3 seat list not admitted")
+
+	# Negative controls: wrong schema, malformed JSON, oversized body, bad
+	# timestamp, missing rigs block.
+	var wrong_schema := good.duplicate(true)
+	wrong_schema["schema"] = "kilocore.fleet-telemetry.v99"
+	var rejected := FleetTelemetryProjection.parse_telemetry(JSON.stringify(wrong_schema))
+	if bool(rejected.get("ok", true)) or String(rejected.get("reason", "")) != "unknown_telemetry_schema":
+		_fail("wrong-schema snapshot was not rejected as unknown_telemetry_schema")
+	var malformed := FleetTelemetryProjection.parse_telemetry("{not json")
+	if bool(malformed.get("ok", true)) or String(malformed.get("reason", "")) != "malformed_json":
+		_fail("malformed snapshot was not rejected as malformed_json")
+	var big := "x".repeat(70000)
+	var oversized := FleetTelemetryProjection.parse_telemetry(big)
+	if bool(oversized.get("ok", true)) or String(oversized.get("reason", "")) != "telemetry_response_too_large":
+		_fail("oversized snapshot was not rejected as telemetry_response_too_large")
+	var bad_time := good.duplicate(true)
+	bad_time["generated_unix_ms"] = "soon"
+	var bad_time_parsed := FleetTelemetryProjection.parse_telemetry(JSON.stringify(bad_time))
+	if bool(bad_time_parsed.get("ok", true)) or String(bad_time_parsed.get("reason", "")) != "invalid_generated_at":
+		_fail("bad generated_unix_ms was not rejected as invalid_generated_at")
+	var no_rigs := good.duplicate(true)
+	no_rigs.erase("rigs")
+	var no_rigs_parsed := FleetTelemetryProjection.parse_telemetry(JSON.stringify(no_rigs))
+	if bool(no_rigs_parsed.get("ok", true)) or String(no_rigs_parsed.get("reason", "")) != "missing_rigs":
+		_fail("snapshot without rigs was not rejected as missing_rigs")
+
+	# Lenient on values, strict on shape: a weird service state becomes
+	# "unknown", never fatal; a missing rig reads as unknown, never invented.
+	var weird := good.duplicate(true)
+	var weird_rigs: Dictionary = weird["rigs"]
+	var weird_msi: Dictionary = weird_rigs["msi"]
+	var weird_services: Dictionary = weird_msi["services"]
+	weird_services["studio"] = "maybe"
+	var weird_parsed := FleetTelemetryProjection.parse_telemetry(JSON.stringify(weird))
+	if not bool(weird_parsed.get("ok", false)):
+		_fail("weird service value made the whole snapshot fail")
+	else:
+		var weird_rigs: Dictionary = (weird_parsed["telemetry"] as Dictionary)["rigs"]
+		var weird_services: Dictionary = (weird_rigs["msi"] as Dictionary)["services"]
+		if String(weird_services.get("studio", "")) != "unknown":
+			_fail("weird service value was not mapped to unknown")
+	var sparse := good.duplicate(true)
+	(sparse["rigs"] as Dictionary).erase("l9")
+	var sparse_parsed := FleetTelemetryProjection.parse_telemetry(JSON.stringify(sparse))
+	if not bool(sparse_parsed.get("ok", false)):
+		_fail("snapshot missing one rig was rejected")
+	else:
+		var sparse_rigs: Dictionary = (sparse_parsed["telemetry"] as Dictionary)["rigs"]
+		if String((sparse_rigs["l9"] as Dictionary).get("state", "")) != "unknown":
+			_fail("missing rig was not reported unknown")
+
+	# Over-long notes are truncated, not fatal.
+	var long_note := good.duplicate(true)
+	var long_rigs: Dictionary = long_note["rigs"]
+	var long_msi: Dictionary = long_rigs["msi"]
+	long_msi["note"] = "n".repeat(500)
+	var long_parsed := FleetTelemetryProjection.parse_telemetry(JSON.stringify(long_note))
+	if not bool(long_parsed.get("ok", false)):
+		_fail("over-long note made the snapshot fail")
+	else:
+		var long_rigs: Dictionary = (long_parsed["telemetry"] as Dictionary)["rigs"]
+		if String((long_rigs["msi"] as Dictionary).get("note", "")).length() > 200:
+			_fail("over-long note was not truncated to 200 chars")
+
+
+func _check_fleet_reader() -> void:
+	# The reader is a bounded file read: fresh -> live, old -> stale,
+	# malformed -> unavailable, missing -> unavailable. No shell, no network.
+	var path := "user://fleet-telemetry-test.json"
+	var now_ms := int(Time.get_unix_time_from_system() * 1000.0)
+	var snapshot := {
+		"schema": "kilocore.fleet-telemetry.v1",
+		"generated_at": "2026-11-08T07:11:24Z",
+		"generated_unix_ms": now_ms,
+		"probe_host": "MSI-KATANA",
+		"rigs": {"msi": {"state": "live", "ram_free_mb": 4527, "ram_total_mb": 32472}},
+	}
+	var reader := FleetTelemetryReader.new()
+	reader.snapshot_path = path
+	root.add_child(reader)
+
+	_write_text_file(path, JSON.stringify(snapshot))
+	reader.read_now()
+	var fresh := reader.current_telemetry()
+	if String(fresh.get("state", "")) != "live":
+		_fail("fresh snapshot did not read as live (state=%s error=%s)" % [str(fresh.get("state", "")), str(fresh.get("error", ""))])
+	if int(fresh.get("age_ms", -1)) < 0 or int(fresh.get("age_ms", 999999)) > 5000:
+		_fail("fresh snapshot age_ms out of range: %s" % str(fresh.get("age_ms", "")))
+
+	snapshot["generated_unix_ms"] = now_ms - 600000
+	_write_text_file(path, JSON.stringify(snapshot))
+	reader.read_now()
+	var stale := reader.current_telemetry()
+	if String(stale.get("state", "")) != "stale":
+		_fail("10-minute-old snapshot did not read as stale (state=%s)" % str(stale.get("state", "")))
+
+	_write_text_file(path, "{bad json")
+	reader.read_now()
+	var broken := reader.current_telemetry()
+	if String(broken.get("state", "")) != "unavailable":
+		_fail("malformed snapshot did not read as unavailable (state=%s)" % str(broken.get("state", "")))
+
+	DirAccess.remove_absolute(path)
+	reader.read_now()
+	var missing := reader.current_telemetry()
+	if String(missing.get("state", "")) != "unavailable":
+		_fail("missing snapshot did not read as unavailable (state=%s)" % str(missing.get("state", "")))
+
+	reader.queue_free()
+
+
+func _write_text_file(path: String, text: String) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		_fail("could not open %s for writing" % path)
+		return
+	f.store_string(text)
+	f.close()
+
+
 func _check_holo_layer_pull() -> void:
 	var camera := Camera3D.new()
 	camera.position = Vector3(0.0, 0.0, 5.0)
@@ -376,12 +544,14 @@ func _check_holo_room_scene() -> void:
 	await process_frame
 	if room.camera_node() == null:
 		_fail("HoloRoom has no camera")
-	if room.layer_count() != 10:
-		_fail("HoloRoom built %d layers, expected 10" % room.layer_count())
+	if room.layer_count() != 14:
+		_fail("HoloRoom built %d layers, expected 14" % room.layer_count())
 	if room.seat_count() != 16:
 		_fail("HoloRoom built %d seats, expected 16" % room.seat_count())
 	if room.get_session() == null:
 		_fail("HoloRoom did not mount the Mind (EntitySession)")
+	if room.get_node_or_null("FleetTelemetryReader") == null:
+		_fail("HoloRoom did not mount the fleet snapshot reader")
 	var density: Dictionary = room.density_state()
 	if not String(density.get("label", "")).contains("DENSITY"):
 		_fail("HoloRoom density state has no label: %s" % str(density.get("label", "")))

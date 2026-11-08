@@ -55,6 +55,18 @@ static func layer_defs() -> Array[Dictionary]:
 		{"id": "mind-view", "title": "MIND VIEW", "kind": "incoming",
 			"source": "PR #12 (Claude, unmerged) — fleet map + transcript",
 			"state": "incoming", "depth": 4.0, "pos": Vector3(0.0, 2.4, 2.6)},
+		{"id": "rig-msi", "title": "RIG · MSI", "kind": "rig",
+			"source": "fleet-telemetry snapshot (CIM + services + tasks)",
+			"state": "unknown", "depth": 4.2, "pos": Vector3(-3.4, 1.4, 2.8)},
+		{"id": "rig-i3", "title": "RIG · i3", "kind": "rig",
+			"source": "fleet-telemetry snapshot (LAN SSH)",
+			"state": "unknown", "depth": 4.4, "pos": Vector3(-1.1, 1.4, 2.8)},
+		{"id": "rig-l9", "title": "RIG · L9", "kind": "rig",
+			"source": "fleet-telemetry snapshot (LAN SSH)",
+			"state": "unknown", "depth": 4.6, "pos": Vector3(1.1, 1.4, 2.8)},
+		{"id": "rig-xanadu", "title": "RIG · XANADU", "kind": "rig",
+			"source": "fleet-telemetry snapshot (Icecast HTTP only — SSH pause stands)",
+			"state": "unknown", "depth": 4.8, "pos": Vector3(3.4, 1.4, 2.8)},
 	]
 
 

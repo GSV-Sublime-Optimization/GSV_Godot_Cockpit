@@ -31,6 +31,7 @@ const HOLO_LAYER_SCRIPT: Script = preload("res://scripts/holo/HoloLayer.gd")
 const SURFACE_SHADER: Shader = preload("res://shaders/holo_surface.gdshader")
 const VOLUME_SHADER: Shader = preload("res://shaders/holo_volume.gdshader")
 const DEV_MENTOR_BRIDGE: Script = preload("res://scripts/holo/DevMentorObservationBridge.gd")
+const FLEET_READER: Script = preload("res://scripts/holo/FleetTelemetryReader.gd")
 
 const SLICE_AXES: PackedStringArray = ["time", "sense", "age"]
 ## Slice sweep ranges, in world units of the volume's own data axes:
@@ -44,6 +45,8 @@ var _camera_base: Vector3 = Vector3(0.0, 9.5, 8.5)
 var _camera_target: Vector3 = Vector3(0.0, 1.0, 0.0)
 var _session: Node
 var _dev_mentor: Node
+var _fleet_reader: Node
+var _fleet: Dictionary = {}
 var _layers: Array = []
 var _layer_by_id: Dictionary = {}
 var _volume_mat: ShaderMaterial
@@ -72,6 +75,7 @@ func _ready() -> void:
 	_build_volume()
 	_mount_mind()
 	_mount_dev_mentor()
+	_mount_fleet_reader()
 	_rebuild_density()
 	_rebuild_web()
 	_refresh_layer_texts()
@@ -418,6 +422,8 @@ func _observe_after_paint() -> void:
 func _on_paint_timer() -> void:
 	if is_instance_valid(_dev_mentor):
 		_dev_mentor.observe()
+	if is_instance_valid(_fleet_reader):
+		_fleet_reader.read_now()
 
 
 # ── Per-frame ────────────────────────────────────────────────────────────────
@@ -451,6 +457,24 @@ func _update_slice_uniform() -> void:
 
 
 # ── Observations -> layers / density / web / ledger ──────────────────────────
+
+func _mount_fleet_reader() -> void:
+	# The fleet snapshot reader: a bounded file read, never a shell. The
+	# probe (fleet_feed.ps1, every 5 min) writes the snapshot; this room
+	# only reads it, with caps + schema + age.
+	_fleet_reader = FLEET_READER.new()
+	_fleet_reader.name = "FleetTelemetryReader"
+	add_child(_fleet_reader)
+	_fleet_reader.telemetry_changed.connect(_on_fleet_telemetry)
+	_fleet = _fleet_reader.current_telemetry()
+
+
+func _on_fleet_telemetry(_telemetry: Dictionary) -> void:
+	_fleet = _fleet_reader.current_telemetry()
+	_rebuild_web()
+	_refresh_layer_texts()
+	_emit_ledger()
+
 
 func _on_self_model(_model_dict: Dictionary) -> void:
 	_model = _session.self_model()
@@ -486,7 +510,9 @@ func _rebuild_web() -> void:
 		if typeof(entry) == TYPE_DICTIONARY and String(entry.get("state", "")) == "reported_fresh":
 			reported += 1
 	# Node states: senses are LIVE observations; seat nodes are registry
-	# verdicts (Lane B, 2026-11-07) — dated evidence, not live probes.
+	# verdicts (Lane B, 2026-11-07) — dated evidence, not live probes;
+	# rig nodes are snapshot states (fleet_feed.ps1, <= 5 min old).
+	var rigs: Dictionary = _fleet.get("rigs", {})
 	var node_states: Array = [
 		["STUDIO", String(sensor.get("state", "unknown"))],
 		["GATEWAY", String(gateway.get("state", "unknown"))],
@@ -496,6 +522,10 @@ func _rebuild_web() -> void:
 		["CHATDEV", "live"],
 		["OLLAMA", "live"],
 		["SKYCLAW", "degraded"],
+		["MSI", String((rigs.get("msi", {}) as Dictionary).get("state", "unknown"))],
+		["I3", String((rigs.get("i3", {}) as Dictionary).get("state", "unknown"))],
+		["L9", String((rigs.get("l9", {}) as Dictionary).get("state", "unknown"))],
+		["XANADU", String((rigs.get("xanadu", {}) as Dictionary).get("state", "unknown"))],
 	]
 	var center := Vector3(0.0, 2.6, -2.75)
 	var mat := StandardMaterial3D.new()
@@ -581,6 +611,10 @@ func _refresh_layer_texts() -> void:
 		"fleet map + transcript",
 		"not built here — coordinate",
 	]))
+	_set_layer("rig-msi", _rig_state("msi"), _rig_lines("msi", "MSI-KATANA"))
+	_set_layer("rig-i3", _rig_state("i3"), _rig_lines("i3", "DESKTOP-I3ANUVP"))
+	_set_layer("rig-l9", _rig_state("l9"), _rig_lines("l9", "DESKTOP-L9V3EMB"))
+	_set_layer("rig-xanadu", _rig_state("xanadu"), _rig_lines("xanadu", "Xanadu"))
 
 
 func _set_layer(layer_id: String, state: String, lines: PackedStringArray) -> void:
@@ -626,6 +660,52 @@ func _constellation_lines(constellation: Dictionary) -> PackedStringArray:
 	return PackedStringArray(["unknown — not yet observed"])
 
 
+func _rig_state(rig_id: String) -> String:
+	var rigs: Dictionary = _fleet.get("rigs", {})
+	var rig: Dictionary = rigs.get(rig_id, {})
+	return String(rig.get("state", "unknown"))
+
+
+## Rig card lines from the snapshot. Missing numbers stay "-" (UNKNOWN, never
+## zero); the probe's note carries the reason a rig is not live.
+func _rig_lines(rig_id: String, rig_name: String) -> PackedStringArray:
+	var rigs: Dictionary = _fleet.get("rigs", {})
+	var rig: Dictionary = rigs.get(rig_id, {})
+	var state := String(rig.get("state", "unknown"))
+	if _fleet.is_empty():
+		return PackedStringArray(["unknown — no snapshot yet"])
+	if state == "live":
+		var lines := PackedStringArray()
+		var free_mb := int(rig.get("ram_free_mb", -1))
+		var total_mb := int(rig.get("ram_total_mb", -1))
+		if free_mb >= 0 and total_mb > 0:
+			lines.append("RAM %d / %d MB free" % [free_mb, total_mb])
+		else:
+			lines.append("RAM -")
+		var cpu := int(rig.get("cpu_load_pct", -1))
+		lines.append("CPU %d%%" % cpu if cpu >= 0 else "CPU -")
+		var services: Dictionary = rig.get("services", {})
+		var up := 0
+		for key in services.keys():
+			if String(services.get(key, "")) == "up":
+				up += 1
+		if not services.is_empty():
+			lines.append("services %d/%d up" % [up, services.size()])
+		var seats := String(rig.get("seats", ""))
+		if not seats.is_empty():
+			lines.append("seats: " + seats)
+		var note := String(rig.get("note", ""))
+		if not note.is_empty():
+			lines.append(note)
+		return lines
+	if state == "unavailable" or state == "degraded":
+		var note := String(rig.get("note", ""))
+		if note.is_empty():
+			note = "no live source"
+		return PackedStringArray([state.to_upper(), note])
+	return PackedStringArray(["unknown — not yet observed"])
+
+
 func _mentor_lines() -> PackedStringArray:
 	var state := String(_mentor_observation.get("state", "unknown"))
 	if state == "live" or state == "stale":
@@ -645,5 +725,19 @@ func _emit_ledger() -> void:
 	if _session != null:
 		lines.append(_session.status_text())
 	lines.append("DENSITY " + String(_density.get("label", "—")))
+	lines.append(_fleet_line())
 	lines.append("TERMINALS broker needed (4) · MIND VIEW incoming (PR #12)")
 	ledger_changed.emit("\n".join(lines))
+
+
+func _fleet_line() -> String:
+	if _fleet.is_empty():
+		return "FLEET snapshot: no snapshot yet"
+	var state := String(_fleet.get("state", "unknown"))
+	var age_ms := int(_fleet.get("age_ms", -1))
+	var rigs: Dictionary = _fleet.get("rigs", {})
+	var parts: PackedStringArray = []
+	for rig_id in ["msi", "i3", "l9", "xanadu"]:
+		var rig: Dictionary = rigs.get(rig_id, {})
+		parts.append("%s %s" % [rig_id.to_upper(), String(rig.get("state", "unknown"))])
+	return "FLEET snapshot %s age %dms | %s" % [state, age_ms, " · ".join(parts)]
