@@ -8,6 +8,7 @@ const CATALOG = preload("res://scripts/workstation/WorkbenchCatalog.gd")
 const STUDIO_CLIENT = preload("res://scripts/workstation/WorkbenchStudioClient.gd")
 const SESSION_PANE = preload("res://scripts/workstation/WorkbenchSessionPane.gd")
 const MISSION_DESK = preload("res://scripts/workstation/WorkbenchMissionDesk.gd")
+const HYPERSPACE = preload("res://scripts/workstation/WorkbenchHyperspace.gd")
 const SKIN = preload("res://scripts/workstation/WorkbenchTheme.gd")
 
 @export var auto_refresh: bool = true
@@ -210,6 +211,11 @@ func _build_topbar(frame: VBoxContainer) -> void:
 	refresh.text = "OBSERVE  F5"
 	refresh.pressed.connect(_refresh_sources)
 	bar.add_child(refresh)
+	var space_btn := Button.new()
+	space_btn.text = "HYPERSPACE  3D"
+	space_btn.tooltip_text = "Explore actual fleet, project, mission and service observations as a navigable 3D graph"
+	space_btn.pressed.connect(func(): _open_resource({"kind": "hyperspace", "id": "hyperspace", "name": "Hyperspace"}))
+	bar.add_child(space_btn)
 	var factory_btn := Button.new()
 	factory_btn.text = "BUILD SOFTWARE"
 	factory_btn.tooltip_text = "Compose an owner-backed Studio mission, not a shell"
@@ -258,6 +264,7 @@ func _refresh_navigation() -> void:
 	var groups := [
 		{"name": "WORKSPACES", "entries": [
 			{"kind": "fleet", "id": "fleet", "name": "Fleet / bodies"},
+			{"kind": "hyperspace", "id": "hyperspace", "name": "Hyperspace / 3D source graph"},
 			{"kind": "factory", "id": "factory", "name": "Software factory / build"},
 			{"kind": "sessions", "id": "sessions", "name": "Observed missions"},
 			{"kind": "services", "id": "services", "name": "Colony services"},
@@ -313,6 +320,8 @@ func _open_resource(meta: Dictionary) -> void:
 	var title := String(meta.get("name", id))
 	var key := kind + ":" + id
 	match kind:
+		"hyperspace":
+			_open_tab(key, "HYPERSPACE", meta, _make_hyperspace)
 		"factory":
 			_open_tab(key, "FACTORY", meta, _make_factory)
 		"fleet":
@@ -390,6 +399,23 @@ func _tab_changed(idx: int) -> void:
 	var key := String(panel.get_meta("workstation_key", ""))
 	if _page_meta.has(key):
 		_select_inspector(_page_meta[key])
+
+func _make_hyperspace() -> Control:
+	var space: PanelContainer = HYPERSPACE.new()
+	space.resource_activated.connect(_open_resource)
+	space.compose_requested.connect(_compose_from_space)
+	_client.snapshot_changed.connect(space.set_snapshot)
+	space.set_snapshot(_snapshot)
+	return space
+
+func _compose_from_space(context: Dictionary) -> void:
+	_open_resource({"kind": "factory", "id": "factory", "name": "Software Factory"})
+	var page: Control = _pages.get("factory:factory", null)
+	if page == null or page.get_child_count() == 0:
+		return
+	var desk: Node = page.get_child(0)
+	desk.apply_context(context)
+	_note("Hyperspace sent source context to the Factory. Studio will requalify the selected project.")
 
 func _make_factory() -> Control:
 	var desk: PanelContainer = MISSION_DESK.new()

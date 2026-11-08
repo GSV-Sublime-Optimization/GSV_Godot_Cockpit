@@ -31,6 +31,7 @@ var _projects_busy := false
 var _post_busy := false
 var _expected_repo := ""
 var _expected_risk := ""
+var _pending_project := ""
 var _port := 7340
 
 func _ready() -> void:
@@ -161,6 +162,31 @@ func _build() -> void:
 	_reset_picker()
 	_update_submit()
 
+func apply_context(context: Dictionary) -> void:
+	## Context is a navigational hint only. Never bypasses fresh Project Constellation.
+	_pending_project = String(context.get("path", ""))
+	if _title != null and typeof(context.get("title")) == TYPE_STRING:
+		_title.text = String(context["title"]).substr(0, 120)
+	if _objective != null and typeof(context.get("objective")) == TYPE_STRING:
+		_objective.text = String(context["objective"]).substr(0, 6000)
+	if _acceptance != null and typeof(context.get("acceptance")) == TYPE_STRING:
+		_acceptance.text = String(context["acceptance"])
+	if _risk != null:
+		_risk.select(0 if context.get("risk", "R0") == "R0" else 1 if context.get("risk") == "R1" else 2)
+	_try_select_context()
+	_update_submit()
+
+func _try_select_context() -> void:
+	if _project_select == null or not _fresh() or _pending_project.is_empty():
+		return
+	for i in range(_projects.size()):
+		if String(_projects[i].get("path", "")) == _pending_project:
+			_project_select.select(i + 1)
+			_project_state.text = "SOURCE-VERIFIED PRESELECTION / %s. Review target before submitting." % _projects[i]["name"]
+			return
+	_project_select.select(0)
+	_project_state.text = "CONTEXT TARGET NOT IN FRESH STUDIO PROJECTS. Choose manually. NO POST."
+
 func _reset_picker() -> void:
 	if _project_select == null:
 		return
@@ -213,6 +239,7 @@ func _install_projects(incoming: Array) -> void:
 		_project_select.add_item("%s   [%s]" % [project["name"], project["branch"]], index + 1)
 	_project_state.text = ("%d eligible source-observed repositories. Explicitly select one; "
 		+ "the snapshot expires in 45 seconds.") % _projects.size()
+	_try_select_context()
 	_update_submit()
 
 func _fresh() -> bool:

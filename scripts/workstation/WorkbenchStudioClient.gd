@@ -8,6 +8,7 @@ signal snapshot_changed(snapshot: Dictionary)
 signal mission_log_received(mission_id: String, lines: PackedStringArray, error: String)
 
 const CATALOG = preload("res://scripts/workstation/WorkbenchCatalog.gd")
+const MISSION_CONTRACT = preload("res://scripts/workstation/WorkbenchMissionContract.gd")
 const BODY_PROJECTION = preload("res://scripts/entity/FleetBodiesProjection.gd")
 const HEALTH_PROJECTION = preload("res://scripts/entity/StudioHealthProjection.gd")
 const RESPONSE_LIMIT := 196608
@@ -18,6 +19,9 @@ var _log_id := ""
 var _bodies: Array[Dictionary] = []
 var _missions: Array[Dictionary] = []
 var _services: Array[Dictionary] = []
+var _projects: Array[Dictionary] = []
+var _projects_state := "unknown"
+var _projects_at_msec := 0
 var _health: Dictionary = {"state": "unknown", "error": "not_observed"}
 var _body_state := "unknown"
 var _mission_state := "unknown"
@@ -32,10 +36,10 @@ func _ready() -> void:
 		var value := int(supplied)
 		if value >= 1 and value <= 65535:
 			_port = value
-	for kind in ["health", "bodies", "missions", "log"]:
+	for kind in ["health", "bodies", "missions", "projects", "log"]:
 		var request := HTTPRequest.new()
 		request.name = kind.capitalize() + "Request"
-		request.timeout = 4.0
+		request.timeout = 12.0 if kind == "projects" else 4.0
 		add_child(request)
 		request.request_completed.connect(_on_request_completed.bind(kind))
 		_requests[kind] = request
@@ -45,6 +49,7 @@ func refresh() -> void:
 	_request("health", "/api/health")
 	_request("bodies", "/api/entity/bodies")
 	_request("missions", "/api/missions?limit=24")
+	_request("projects", "/api/projects")
 
 func request_mission_log(mission_id: String) -> bool:
 	if not CATALOG.valid_mission_id(mission_id):
@@ -76,6 +81,8 @@ func snapshot() -> Dictionary:
 		"missions": _missions.duplicate(true),
 		"mission_feed_state": _mission_state,
 		"services": _services.duplicate(true),
+		"projects": _projects.duplicate(true),
+		"project_feed_state": ("stale" if _projects_state == "observed" and (Time.get_ticks_msec() - _projects_at_msec > 45000) else _projects_state),
 		"service_feed_state": _service_state,
 		"endpoint_kind": "same_host_loopback",
 		"authorized_actuators": []
@@ -133,6 +140,14 @@ func _on_request_completed(result: int, status: int, _headers: PackedStringArray
 			return
 		_missions.assign(missions["missions"])
 		_mission_state = "observed"
+	elif kind == "projects":
+		var projects: Dictionary = MISSION_CONTRACT.parse_projects(data)
+		if not projects.get("ok", false):
+			_fail(kind, String(projects.get("reason", "invalid_project_contract")))
+			return
+		_projects.assign(projects["projects"])
+		_projects_state = "observed"
+		_projects_at_msec = Time.get_ticks_msec()
 	elif kind == "log":
 		var log: Dictionary = CATALOG.parse_mission_log(data, _log_id)
 		if not log.get("ok", false):
@@ -151,6 +166,8 @@ func _fail(kind: String, reason: String) -> void:
 			_body_state = "stale" if _last_observed_msec > 0 else "unknown"
 		"missions":
 			_mission_state = "stale" if not _missions.is_empty() else "unknown"
+		"projects":
+			_projects_state = "stale" if not _projects.is_empty() else "unknown"
 		"log":
 			mission_log_received.emit(_log_id, PackedStringArray(), reason)
 			return
