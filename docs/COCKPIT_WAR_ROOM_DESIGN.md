@@ -209,6 +209,9 @@ A real interactive terminal tab needs a broker that provides, at minimum:
   shells (honest PLANNED state); the agent-seat registry (verified seats only);
   the density field from real senses; the semantic slice; the ledger; the
   fleet-telemetry snapshot reader + four rig layers (MSI / i3 / L9 / Xanadu).
+- **Wired in Slice 5:** the Capability Atlas shelf (§9) — the static graded
+  atlas file + the fleet-snapshot live overlay + the slice/pull layer under
+  HoloRoom; the "Atlas" slice button on the HoloTab bar.
 - **Planned (not Slice 4):** the terminal broker (§5); the Ash JSONL game-session
   client; service-level cards from an extended Studio projection; the Mind View
   (#12) layer; layout persistence beyond presets; harness adapters (Serena, Hermes,
@@ -273,7 +276,79 @@ no authority / actuators / secrets / POST / shell-from-Godot (fleet access is
 observation data, not command); Xanadu SSH pause still stands; never touch Keath's
 live session processes or live editor; never fake data.
 
-## 9. Decisions Keath still owes
+## 9. Capability Atlas — Slice 5 (full send, 2026-11-08)
+
+**What it shows.** A "what can do what, where" shelf in the volume: one node
+per graded capability (75 entries at build time), each carrying its machine
+(MSI / i3 / L9 / Xanadu), its D/I/C/Q/U/M grade, its cost class
+(tokenless / cloud / mixed), and its honest live state (live / unavailable /
+planned / not_detected / degraded, with age). At rest the layer is its header
+card (counts + current slice); pulling it up (λ, the entry's pull-up) expands
+the shelf. The HoloTab "Atlas" button cycles the slice; "Pull all" pulls the
+atlas with the other layers; clicking the header toggles it. The shelf is a
+scene node under HoloRoom (`CapabilityAtlasLayer`), NOT a registry layer — the
+registry counts stay 14.
+
+**Slice axes (semantic, per Keath's brief).** Machine (msi / i3 / l9 / xanadu —
+one rig's bench); cost class (tokenless / cloud / mixed — the tokenless bench
+vs the cloud bench); grade (proven = Q/U/M — only the proven seats;
+unverified = D — the explicitly-unverified nodes). Slicing filters
+visibility; hidden entries still exist as nodes and return when the slice
+changes — the slice is a filter, never a deletion.
+
+**Data contract.** Static graded file `data/capability_atlas.json`, schema
+`kilocore.capability-atlas.v1` (entries: id, name, kind, machine, grade,
+cost_class, state, evidence, can_do; optional discrepancy + telemetry
+mapping), generated from the Slice 5 synthesis
+(`CAPABILITY-ATLAS-20261108.md` §1 + §5) — the file is the grade snapshot,
+never a live claim. Live-state overlay reuses the §8 fleet-feed pattern: the
+reader (`CapabilityAtlasReader`) reads the same
+`C:\GSV\state\fleet-telemetry.json` and, only while the snapshot is fresh
+(< 300 s), promotes a mapped entry to live (service "up", or its process name
+in the rig's seats list) or demotes it to unavailable (service "down");
+anything else keeps the static honest state. 13 entries carry a telemetry
+mapping. The parser (`CapabilityAtlasProjection`) is schema-pinned: exact
+schema string, ≤ 128 entries, bounded strings, rejects malformed /
+oversized / wrong-schema / unknown-grade-or-cost with fixed reasons — the
+StudioHealthProjection discipline. The reader is two bounded file reads, one
+read in flight (60 s poll), no HTTP (no redirect surface), no POST, no shell,
+no secrets.
+
+**Routing discipline (one paragraph).** Cheapest capable first, tokenless
+local before expensive cloud, always: a local model, a loopback service, a
+local CLI, or a stdlib script answers first, and cloud is the last resort,
+justified only by a proven capability gap, a measured local failure, sole
+access, or Keath explicitly asking. "Cheapest" means the lowest-cost seat
+that is qualified (grade Q or better, measured on the task) — a D-grade seat
+is not cheap, it is unproven, so a cloud seat at grade U beats a local seat
+at grade D; every route names its seat, grade, machine, and cost class, and
+a route that cannot name its cost is a guess. The full discipline — shared
+vs independent responsibilities, the rules, and how the atlas stays current
+(re-grade on change, never on a schedule) — lives in the synthesis §6, and
+the atlas's evidence column IS the receipt: never pay twice for the same
+answer.
+
+**What is real vs simulated.** Real: the grades + evidence (fresh probes
+2026-11-08, synthesis §1); the live-probe overlay (fleet snapshot, ≤ 5 min
+old, 13 mapped entries). Static: the grades themselves — a grade is a
+snapshot dated 2026-11-08, not a live claim; an entry with no live probe
+shows its static state. Unverified stays unverified: oh-my-pi (D, not
+installed), wrapper (D, ambiguous — 8 candidates, Keath to disambiguate),
+Soul Claw / MetaClaw (not detected — no nodes, no cards), and every
+synthesis §5 item appear as explicitly-unverified nodes (dimmed, labelled
+UNVERIFIED), never omitted, never dressed as live. The OpenClaw entry
+carries its discrepancy flag (both sides: hub #13 UNVERIFIED vs Lane B LIVE;
+entry follows Lane B — see §1.3). Nothing in this layer is simulated; there
+is no simulated mode for the atlas.
+
+**Slice 5 bar.** 1. The shelf renders 75 entry nodes + header under HoloRoom;
+header counts match the file. 2. Pull-up, slice cycling, and header click
+work (tests). 3. The overlay promotes/demotes only on fresh probes (tests).
+4. `gdparse` + headless tests at exact head (new `atlas` case in the smoke
+gate). 5. No Godot verification until Phase B writes PHASE-B-DONE.md — the
+same gate as Slice 4.
+
+## 10. Decisions Keath still owes
 
 1. **Terminal broker** — approve the §5 contract as a later R0–R3 slice, or keep
    terminals brokered-only via mssh/scheduled-task lanes.
@@ -286,9 +361,9 @@ live session processes or live editor; never fake data.
 5. **Next modules after the first room** — Ash game-session client vs service-level
    cards vs harness adapters.
 6. **Bake-off bar** — the sibling bake-off coordinator owns the hub issue, registry,
-   rules, and invitations; this entry's first-shippable bar is §10.
+   rules, and invitations; this entry's first-shippable bar is §11.
 
-## 10. Slice 4 — first-shippable bar (Muse's bake-off entry)
+## 11. Slice 4 — first-shippable bar (Muse's bake-off entry)
 
 1. The room renders: the volume, the table, the companion, the layer stack (Mind's
    three senses + fleet bodies + game + terminals + Mind View desk + four rig

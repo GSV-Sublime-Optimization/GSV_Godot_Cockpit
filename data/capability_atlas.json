@@ -1,0 +1,886 @@
+{
+  "schema": "kilocore.capability-atlas.v1",
+  "generated_at": "2026-11-08T08:02:01Z",
+  "source": "CAPABILITY-ATLAS-20261108.md (Slice 5 synthesis) §1 + §5",
+  "notes": "Generated from ~/workspace/colony-loop/atlas/CAPABILITY-ATLAS-20261108.md (Slice 5 synthesis, 2026-11-08): §1 graded inventory by machine + §5 open items as explicit unverified entries. Grades move only on fresh evidence; this file is the static grade snapshot — live-state honesty comes from the fleet-telemetry overlay at runtime (CapabilityAtlasReader), never from this file. Cost-class rule for D / not_detected rows: the contract has no 'unknown' cost, so the expected local class (tokenless) is recorded and the evidence says 'cost unproven'. OpenClaw carries its §3 discrepancy flag (hub #13 UNVERIFIED vs Lane B LIVE; entry follows Lane B). Routing discipline (cheapest-capable-first, tokenless local before cloud) lives in the synthesis §6, not in this file.",
+  "entries": [
+    {
+      "id": "ollama-server-msi",
+      "name": "Ollama server 0.40.15",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "Q",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "ollama.exe serve x2 (PIDs 19472, 13244, since 2026-11-07 17:58); TCP :11434 open; /api/version 200 (2026-11-08)",
+      "can_do": "Local LLM + embeddings serving, loopback :11434",
+      "telemetry": {
+        "rig": "msi",
+        "service": "ollama"
+      }
+    },
+    {
+      "id": "ollama-models-msi",
+      "name": "Ollama models resident (10)",
+      "kind": "model",
+      "machine": "msi",
+      "grade": "I",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "ollama list: qwen2.5-coder:14b, qwen3-8b-ctx32k, qwen3-vl:8b, qwen3.5-sage-64k, qwen3.5, qwen3.5-sage, gemma4, qwen2.5-coder:7b, qwen3:8b, nomic-embed-text (2026-11-08). Nothing loaded at probe time (ollama ps empty) — residency flips, per-task check only",
+      "can_do": "On-disk models; load on demand via Ollama"
+    },
+    {
+      "id": "openclaw-msi",
+      "name": "OpenClaw gateway :18789",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "mixed",
+      "state": "live",
+      "evidence": "node gateway PID 18788 since 2026-11-07 17:58 (1,951 s CPU) + broker/sqlite workers; TCP :18789 open; state live to 18:00 (2026-11-08). Local gateway; attached channels may be cloud-keyed — not inspected",
+      "can_do": "Agent gateway (WS/MCP)",
+      "telemetry": {
+        "rig": "msi",
+        "service": "openclaw"
+      },
+      "discrepancy": "Hub issue #13 lists OpenClaw UNVERIFIED ('no entry may list them as real'); Lane B 2026-11-07 23:21-23:35 MST + Fleet Probe 2026-11-08 00:25-01:45 MST say LIVE (process + TCP + state + Studio feed). Entry follows Lane B (fresher evidence); #13 stands until Keath or the bake-off coordinator rules. Liveness claimed ONLY via Studio feed + process presence, never GET / (WS/MCP gateway; GET times out at 8 s). Oct 28 silent-death mode (T8: revive + supervise) NOT retired by one probe."
+    },
+    {
+      "id": "serena-mcp-msi",
+      "name": "Serena MCP (stdio)",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "Q",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "serena.exe start-mcp-server PID 4180, since 2026-11-07 18:33 (2026-11-08)",
+      "can_do": "MCP server for coding agents"
+    },
+    {
+      "id": "serena-agent-msi",
+      "name": "Serena agent :3001",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": ":3001/ 200 {status:ok, agent:Serena, uptime_s:26896, ai_ok:false, redis_ok:false} (2026-11-08)",
+      "can_do": "Agent HTTP service/dashboard; ai/redis down, optional"
+    },
+    {
+      "id": "dev-mentor-msi",
+      "name": "Dev-Mentor :7337",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": ":7337/api/health 200 in 0.005 s, 335 active sessions (was ~7.3 s on 2026-11-07) (2026-11-08)",
+      "can_do": "Game/dev-mentor service",
+      "telemetry": {
+        "rig": "msi",
+        "service": "devmentor"
+      }
+    },
+    {
+      "id": "skyclaw-msi",
+      "name": "Skyclaw scanner",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "degraded",
+      "evidence": "skyclaw_scan.json fresh every ~5 min; cycles log 'database is locked' + false 'endpoint_down ollama' (probes host.docker.internal:11434, which ReadTimeouts; loopback Ollama is up) (2026-11-08)",
+      "can_do": "Fleet/service scanning, degraded verdicts"
+    },
+    {
+      "id": "chatdev-msi",
+      "name": "ChatDev :7338",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": ":7338/health 200, ai_ok:true, redis_ok:true (2026-11-08)",
+      "can_do": "Multi-agent dev service",
+      "telemetry": {
+        "rig": "msi",
+        "service": "chatdev"
+      }
+    },
+    {
+      "id": "jev-msi",
+      "name": "Jev / OpenJev :8090",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": ":8090/health 200 in 0.85 s (ModernBERT-large per baseline; model not re-verified tonight) (2026-11-08)",
+      "can_do": "Local judge/evaluator service"
+    },
+    {
+      "id": "codex-msi",
+      "name": "Codex app-server 0.167.0",
+      "kind": "agent",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "cloud",
+      "state": "live",
+      "evidence": "app-server daemon PID 8236 + cloud exec-server (codex-cloud-environments.chatgpt.com) + artifact host-daemon (2026-11-08)",
+      "can_do": "Codex agent server + cloud environments"
+    },
+    {
+      "id": "claude-msi",
+      "name": "Claude Code 2.1.319",
+      "kind": "agent",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "cloud",
+      "state": "live",
+      "evidence": "claude.exe PID 10280 live since 2026-11-07 18:33; auth/rate-limit NOT re-verified (no live call made) (2026-11-08). Stale 'rate-limited' reading superseded: use live processes, auth unverified",
+      "can_do": "Cloud coding agent (if auth healthy)"
+    },
+    {
+      "id": "copilot-msi",
+      "name": "Copilot CLI 1.0.107",
+      "kind": "agent",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "cloud",
+      "state": "unavailable",
+      "evidence": "copilot --version -> 1.0.107; quota-out state NOT re-verified tonight; no process running (2026-11-08)",
+      "can_do": "Cloud coding agent (if quota healthy)"
+    },
+    {
+      "id": "aider-msi",
+      "name": "Aider 0.86.2",
+      "kind": "agent",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Binary present; no process running. Prior 2026-10-28 Q (qwen3:8b only, gated on Ollama + adoption tap) is historical, not fresh (2026-11-08)",
+      "can_do": "Local coding agent via Ollama when run"
+    },
+    {
+      "id": "goose-msi",
+      "name": "Goose 1.54.0",
+      "kind": "agent",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Binary present (249 MB); no process running. Prior 2026-10-28 Q, same gates (2026-11-08)",
+      "can_do": "Local coding agent via Ollama when run"
+    },
+    {
+      "id": "pi-msi",
+      "name": "Pi 1.5.0",
+      "kind": "harness",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "pi --version -> 1.5.0; @earendil-works/pi-coding-agent, npm-installed 2026-11-05. No process running. Ollama provider tokenless; litellm routes depend on backend (2026-11-08). Colony standing: candidate harness only (Kilo_Core control-plane spec: PROPOSED/DISCOVERED)",
+      "can_do": "Coding agent CLI (BYOK multi-provider)"
+    },
+    {
+      "id": "hermes-agent-msi",
+      "name": "hermes-agent (wrapper onto Pi)",
+      "kind": "wrapper",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Two shims, both resolve to Pi: bash -> pi --provider ollama --model qwen3:8b; .ps1 -> pi --provider litellm --model ecosystem-coder-fast. DEFECT: the .ps1's system-prompt file does not exist (empty dir) — that route fails without HERMES_BARE=1. NOT Hermes (2026-11-08)",
+      "can_do": "Colony function-calling specialist front-end onto Pi"
+    },
+    {
+      "id": "hermes-msi",
+      "name": "Hermes 0.19.0",
+      "kind": "agent",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "hermes --version -> v0.19.0 (2026.7.20), pip; config home AppData\\Local\\hermes live (state.db 2026-11-05); model qwen3.5-sage-64k via Ollama; godot-ai MCP configured. NO process running (2026-11-08)",
+      "can_do": "Console-TUI agent (needs a real console); headless surface is hermes-acp.exe"
+    },
+    {
+      "id": "hermes-acp-msi",
+      "name": "hermes-acp.exe",
+      "kind": "software",
+      "machine": "msi",
+      "grade": "I",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Binary present in .local\\bin; not observed running (2026-11-08)",
+      "can_do": "ACP headless surface for Hermes"
+    },
+    {
+      "id": "studio-msi",
+      "name": "Studio :7340",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "/ 200; KiloCore-Studio .venv python processes live (2026-11-08). Snapshot flaps: up 07:09Z / unknown 07:11Z",
+      "can_do": "Studio frontend/static service",
+      "telemetry": {
+        "rig": "msi",
+        "service": "studio"
+      }
+    },
+    {
+      "id": "hub-msi",
+      "name": "NuSyQ-Hub :8000",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "/docs 200, FastAPI Swagger UI (2026-11-08)",
+      "can_do": "Hub API",
+      "telemetry": {
+        "rig": "msi",
+        "service": "hub"
+      }
+    },
+    {
+      "id": "gateway-msi",
+      "name": "Gateway :8001",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "/health 200 {status:ok} (2026-11-08)",
+      "can_do": "Public gateway",
+      "telemetry": {
+        "rig": "msi",
+        "service": "gateway"
+      }
+    },
+    {
+      "id": "router-msi",
+      "name": "Router :9001",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "/ 200, Terminal Depths Open Router 2.0.0 (2026-11-08)",
+      "can_do": "Request router",
+      "telemetry": {
+        "rig": "msi",
+        "service": "router"
+      }
+    },
+    {
+      "id": "dispatch-msi",
+      "name": "Dispatch :9002",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "/health 200; knows Pi launcher endpoints (MSI + L9 :7337/api/launcher/pi/run) (2026-11-08)",
+      "can_do": "Dispatch",
+      "telemetry": {
+        "rig": "msi",
+        "service": "dispatch"
+      }
+    },
+    {
+      "id": "mcporter-msi",
+      "name": "McPorter daemon",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "node daemon PID 24152 (new discovery, running) (2026-11-08)",
+      "can_do": "MCP daemon"
+    },
+    {
+      "id": "desktop-commander-msi",
+      "name": "Desktop Commander",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "2 node processes (new discovery, running) (2026-11-08)",
+      "can_do": "Desktop automation MCP"
+    },
+    {
+      "id": "gitnexus-msi",
+      "name": "GitNexus MCP",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "node MCP PID 20460 (new discovery, running) (2026-11-08)",
+      "can_do": "Git MCP"
+    },
+    {
+      "id": "vault-msi",
+      "name": "Vault (Obsidian colony vault)",
+      "kind": "vault",
+      "machine": "msi",
+      "grade": "I",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "No running vault service; artifacts: vault_bridge.py (zero-token stdlib refresh of the 'Colony Bridge' dashboard from real data), install_vault_bridge_task.ps1, vault manifest + Obsidian index. Task-install state NOT verified (2026-11-08)",
+      "can_do": "Knowledge vault + bridge refresh tool"
+    },
+    {
+      "id": "wrapper-msi",
+      "name": "Wrapper(s)",
+      "kind": "wrapper",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "No live wrapper service/process/task. Script candidates only (8 candidates, cross-ref §4); Keath to disambiguate. Cost unproven (2026-11-08)",
+      "can_do": "Unresolved — Keath to disambiguate"
+    },
+    {
+      "id": "llamacpp-msi",
+      "name": "llama.cpp standalone",
+      "kind": "software",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "No llama-server/llama-cli binary found. llama.cpp lives INSIDE Ollama (models report runner llamacpp). Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "whisper-msi",
+      "name": "Whisper / speech",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "No whisper binary found. Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "redis-msi",
+      "name": "Redis (local)",
+      "kind": "service",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "No redis-server process, no :6379 listener. ChatDev reports redis_ok:true — its Redis lives somewhere its context reaches; location NOT verified. Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "godot-msi",
+      "name": "Godot (MSI)",
+      "kind": "software",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "No Godot in Program Files, none on PATH. Not executed (Phase B running). Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "oh-my-pi-msi",
+      "name": "oh-my-pi",
+      "kind": "harness",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "NOT INSTALLED. Only 4 bench receipts (2026-10-13), each not_runnable / DID_NOT_MEASURE / 'oh-my-pi is not installed'; where omp -> not found. Can Boluk's maximalist Pi fork (omp) — a distinct thing, not a nickname for Pi. Cost unproven (2026-11-08)",
+      "can_do": "Bench-candidate label, not Pi"
+    },
+    {
+      "id": "msi-binaries-noted",
+      "name": "Other MSI binaries noted",
+      "kind": "software",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Present, not deeply probed: clawd.exe, fcc-claude/codex/server/init.exe, free-claude-code.exe, gitingest.exe, code-repo, actionlint.exe, goose-1.31.0.exe.bak, goose-package/ dir (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "ollama-i3",
+      "name": "Ollama (tailnet :11434)",
+      "kind": "service",
+      "machine": "i3",
+      "grade": "Q",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "Listener 100.102.251.35:11434 PID 14496 (since 2026-11-07 23:28); loopback :11434 closed by design; MSI->i3 TCP 11434 = False (firewall) (2026-11-08)",
+      "can_do": "Local LLM serving on the tailnet",
+      "telemetry": {
+        "rig": "i3",
+        "seat": "ollama"
+      }
+    },
+    {
+      "id": "ollama-models-i3",
+      "name": "Ollama models resident (3)",
+      "kind": "model",
+      "machine": "i3",
+      "grade": "I",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "qwen3:8b, qwen2.5-coder:14b, qwen2.5:0.5b. ollama ps empty — nothing loaded (2026-11-08)",
+      "can_do": "On-disk models"
+    },
+    {
+      "id": "dev-mentor-i3",
+      "name": "Dev-Mentor :7337",
+      "kind": "service",
+      "machine": "i3",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "On-i3 health 200, ~50 h uptime, 0 sessions. MSI->i3 TCP 7337 = False (firewall) — live locally, unreachable from MSI (2026-11-08)",
+      "can_do": "Dev-mentor service"
+    },
+    {
+      "id": "serena-agent-i3",
+      "name": "Serena agent :3001",
+      "kind": "service",
+      "machine": "i3",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "On-i3 200, ~50 h uptime, same ai_ok/redis_ok:false flags as MSI (2026-11-08)",
+      "can_do": "Serena agent service"
+    },
+    {
+      "id": "claude-i3",
+      "name": "Claude Code 2.1.319",
+      "kind": "agent",
+      "machine": "i3",
+      "grade": "C",
+      "cost_class": "cloud",
+      "state": "live",
+      "evidence": "4 claude processes (since 2026-11-06/07); auth/rate-limit NOT re-verified (2026-11-08)",
+      "can_do": "Cloud coding seat",
+      "telemetry": {
+        "rig": "i3",
+        "seat": "claude"
+      }
+    },
+    {
+      "id": "codex-i3",
+      "name": "Codex",
+      "kind": "agent",
+      "machine": "i3",
+      "grade": "C",
+      "cost_class": "cloud",
+      "state": "live",
+      "evidence": "3 codex processes (since 2026-11-05/06) (2026-11-08)",
+      "can_do": "Cloud coding seat"
+    },
+    {
+      "id": "gameattract-i3",
+      "name": "GameAttract director",
+      "kind": "service",
+      "machine": "i3",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "pythonw.exe ...\\GameAttract\\director.py PID 2792 live (no known HTTP endpoint — process only) (2026-11-08)",
+      "can_do": "GameAttract director",
+      "telemetry": {
+        "rig": "i3",
+        "seat": "GameAttract"
+      }
+    },
+    {
+      "id": "pi-i3",
+      "name": "Pi",
+      "kind": "harness",
+      "machine": "i3",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "pi --version prints nothing; not on PATH. Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "godot-i3",
+      "name": "Godot",
+      "kind": "software",
+      "machine": "i3",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "No godot command, no Godot dir in Program Files. Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "ollama-l9",
+      "name": "Ollama :11435, 0.24.0",
+      "kind": "service",
+      "machine": "l9",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "OLLAMA_HOST=0.0.0.0:11435; /api/version 200; /api/ps showed qwen3:4b-l9fast loaded (100% GPU) at 01:39 and qwen2.5-coder:7b loaded (2.27 GB VRAM) at ~01:41 — the loaded model changed within ~2 min: something on L9 is actively using Ollama right now. (:11434 is the wrong port on L9) (2026-11-08)",
+      "can_do": "Local LLM serving on GPU, actively used — the ONLY rig with a model loaded tonight"
+    },
+    {
+      "id": "ollama-models-l9",
+      "name": "Ollama models resident (5)",
+      "kind": "model",
+      "machine": "l9",
+      "grade": "I",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "qwen3:4b-l9fast, qwen3:4b, qwen2.5-coder:7b, qwen3:8b, nomic-embed-text (2026-11-08)",
+      "can_do": "On-disk models"
+    },
+    {
+      "id": "dev-mentor-l9",
+      "name": "Dev-Mentor :7337",
+      "kind": "service",
+      "machine": "l9",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "degraded",
+      "evidence": "TCP 7337 open, but /api/health timed out TWICE (15 s, then 20 s). Listening but not answering HTTP — degraded, needs investigation, not a down verdict (2026-11-08)",
+      "can_do": "Degraded/unresponsive"
+    },
+    {
+      "id": "l9-listeners-8000-9001",
+      "name": ":8000 / :9001 listeners",
+      "kind": "service",
+      "machine": "l9",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "degraded",
+      "evidence": "TCP open on both; HTTP / timed out (8 s). Service identity NOT established. Cost unproven (2026-11-08)",
+      "can_do": "Unidentified listeners"
+    },
+    {
+      "id": "godot-l9",
+      "name": "Godot 4.6.3",
+      "kind": "software",
+      "machine": "l9",
+      "grade": "I",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "WinGet link -> C:\\dev\\tools\\godot\\4.6.2\\Godot_v4.6.3-stable_win64.exe. Binary NOT executed (Phase B rule). Godot 4.3 (baseline) NOT re-located; no 4.7.1 seen (2026-11-08)",
+      "can_do": "Godot engine install"
+    },
+    {
+      "id": "pi-l9",
+      "name": "Pi 0.75.3",
+      "kind": "harness",
+      "machine": "l9",
+      "grade": "C",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "pi --version -> 0.75.3 (older than MSI's 1.5.0). No Pi process running (2026-11-08)",
+      "can_do": "Coding agent CLI"
+    },
+    {
+      "id": "claude-l9",
+      "name": "Claude Code 2.1.152",
+      "kind": "agent",
+      "machine": "l9",
+      "grade": "C",
+      "cost_class": "cloud",
+      "state": "unavailable",
+      "evidence": "claude --version -> 2.1.152 (older than MSI/i3 2.1.319). No process state recorded (2026-11-08)",
+      "can_do": "Cloud coding seat"
+    },
+    {
+      "id": "icecast-xanadu",
+      "name": "Icecast 2.4.4",
+      "kind": "service",
+      "machine": "xanadu",
+      "grade": "U",
+      "cost_class": "tokenless",
+      "state": "live",
+      "evidence": "status-json.xsl 200; server_start: 2026-11-08 02:53:24Z; no active sources. HTTP only; never SSH (2026-11-08)",
+      "can_do": "Audio streaming server, featherweight, no streams live",
+      "telemetry": {
+        "rig": "xanadu",
+        "service": "icecast"
+      }
+    },
+    {
+      "id": "soulclaw",
+      "name": "Soul Claw",
+      "kind": "agent",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "NOT DETECTED under every reading. Only traces: a VS Code extension name + a 2026-10-30 audit note about a scratch dir. No node, no card — empty desk with an 'awaiting' sign. Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "metaclaw",
+      "name": "MetaClaw",
+      "kind": "agent",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "NOT DETECTED. Zero hits anywhere. No node, no card. Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "local-sage",
+      "name": "local-sage",
+      "kind": "model",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "A label in atlas_emit.py + a model name only; no further code home established (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "spine-snapshot",
+      "name": "Spine snapshot / constellation data",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Honestly UNKNOWN/UNAVAILABLE (Mind Slices 0-1). Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "terminal-broker",
+      "name": "Terminal broker",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "planned",
+      "evidence": "Does not exist (all four terminal tabs honestly PLANNED) (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "mind-view-desk",
+      "name": "Mind View #12 desk",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "planned",
+      "evidence": "Incoming (PR #12 unmerged) (2026-11-08)",
+      "can_do": "Fleet map + transcript"
+    },
+    {
+      "id": "gameattract-endpoint",
+      "name": "GameAttract director endpoint",
+      "kind": "capability",
+      "machine": "i3",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "No known endpoint (process only, i3). Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "onnx-rl-research",
+      "name": "ONNX / RL / KV handoff / speculative decoding",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "planned",
+      "evidence": "Planned / RESEARCH only: ONNX/RL policy, llama.cpp KV handoff, control vectors, speculative decoding (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "gpt6-ops",
+      "name": "GPT-6 operations / skills (1,369 / 224)",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Attested, not re-enumerated by this seat. Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "chatgpt-gateway",
+      "name": "ChatGPT-side Gateway recovery",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "cloud",
+      "state": "unavailable",
+      "evidence": "Still unqualified (catalog frozen at 16, server proves 51) (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "kilocore-admission",
+      "name": "Kilo_Core admission as enforced",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "A doc gate, not a runtime gate (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "claude-auth-state",
+      "name": "Claude auth / rate-limit state",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "cloud",
+      "state": "unavailable",
+      "evidence": "Not re-verified on MSI, i3, or L9 (no live calls made) (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "copilot-quota-state",
+      "name": "Copilot quota state",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "cloud",
+      "state": "unavailable",
+      "evidence": "Not re-verified (no live calls made) (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "jev-pids-msi",
+      "name": "Jev / Dev-Mentor owning PIDs (MSI)",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "PID resolution returns 0 in the mssh session context; graded on HTTP evidence only (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "chatdev-redis",
+      "name": "ChatDev Redis location",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "not_detected",
+      "evidence": "redis_ok:true from ChatDev's context; no local redis-server/:6379 on MSI. Cost unproven (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "l9-open-questions",
+      "name": "L9 open questions",
+      "kind": "capability",
+      "machine": "l9",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "L9 :8000/:9001 identities unknown; L9 Dev-Mentor unresponsiveness cause unknown; L9 Godot 4.3 not re-located (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "vault-task-state",
+      "name": "Vault bridge task install state",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Installer exists; running state not checked (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "hermes-skills",
+      "name": "Hermes skills/ contents",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Dir exists, not enumerated this pass (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "openclaw-ws",
+      "name": "OpenClaw WebSocket handshake",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Not attempted (process + TCP + config + state evidence used instead) (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "xanadu-hardware",
+      "name": "Xanadu hardware",
+      "kind": "capability",
+      "machine": "xanadu",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "HTTP only by rule; no CPU/RAM/GPU probe (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "gh-wrapper-search",
+      "name": "gh search code 'wrapper'",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "BLOCKED by GitHub API rate limit (HTTP 403, 2026-11-08 07:27:02 UTC); no retry per hard-stop; re-run owed after reset (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "hermes-agent-origin",
+      "name": "hermes-agent file-origin check",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Why .local/bin/hermes-agent resolves to Pi — owed since 2026-10-24, still open (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "devmentor-endpoints",
+      "name": "Unprobed Dev-Mentor endpoints",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "unavailable",
+      "evidence": "Repo-documented only (/api/models, /api/route, lattice, etc.) (2026-11-08)",
+      "can_do": "—"
+    },
+    {
+      "id": "four-rigs-live",
+      "name": "'All four rigs live' as a standing state",
+      "kind": "capability",
+      "machine": "msi",
+      "grade": "D",
+      "cost_class": "tokenless",
+      "state": "degraded",
+      "evidence": "A snapshot with flapping (Studio :7340 up 07:09Z / unknown 07:11Z; Dev-Mentor :7337 unknown 07:09Z / up 07:11Z) — not a standing state (2026-11-08)",
+      "can_do": "—"
+    }
+  ]
+}

@@ -16,8 +16,10 @@ extends Node3D
 ## Presentation / observation ONLY. No authority, no actuators, no secrets,
 ## no POST, no shell from Godot. The Mind (EntitySession) is mounted from
 ## scenes/EntitySession.tscn; the Dev-Mentor game sense is a read-only GET
-## bridge in the same pattern. Terminal layers are honest PLANNED shells:
-## they report "broker needed" and never fake output.
+## bridge in the same pattern. The Capability Atlas shelf (Slice 5) is a
+## read-only graded inventory (static file + fleet-snapshot overlay).
+## Terminal layers are honest PLANNED shells: they report "broker needed"
+## and never fake output.
 ##
 ## Mounted by HoloTab (a lazy Main.gd tab): the room builds on first visit
 ## (paint-first-then-probe); senses start after first paint. The volume mesh
@@ -32,6 +34,8 @@ const SURFACE_SHADER: Shader = preload("res://shaders/holo_surface.gdshader")
 const VOLUME_SHADER: Shader = preload("res://shaders/holo_volume.gdshader")
 const DEV_MENTOR_BRIDGE: Script = preload("res://scripts/holo/DevMentorObservationBridge.gd")
 const FLEET_READER: Script = preload("res://scripts/holo/FleetTelemetryReader.gd")
+const ATLAS_READER: Script = preload("res://scripts/holo/CapabilityAtlasReader.gd")
+const ATLAS_LAYER_SCRIPT: Script = preload("res://scripts/holo/CapabilityAtlasLayer.gd")
 
 const SLICE_AXES: PackedStringArray = ["time", "sense", "age"]
 ## Slice sweep ranges, in world units of the volume's own data axes:
@@ -47,6 +51,9 @@ var _session: Node
 var _dev_mentor: Node
 var _fleet_reader: Node
 var _fleet: Dictionary = {}
+var _atlas_reader: Node
+var _atlas_layer: CapabilityAtlasLayer
+var _atlas: Dictionary = {}
 var _layers: Array = []
 var _layer_by_id: Dictionary = {}
 var _volume_mat: ShaderMaterial
@@ -76,6 +83,8 @@ func _ready() -> void:
 	_mount_mind()
 	_mount_dev_mentor()
 	_mount_fleet_reader()
+	_mount_atlas_layer()
+	_mount_atlas_reader()
 	_rebuild_density()
 	_rebuild_web()
 	_refresh_layer_texts()
@@ -88,6 +97,8 @@ func _process(delta: float) -> void:
 	_update_camera_parallax()
 	for layer in _layers:
 		(layer as HoloLayer).update_frame(delta, _camera)
+	if _atlas_layer != null:
+		_atlas_layer.update_frame(delta, _camera)
 	_update_slice_uniform()
 	if _skyclaw_desk_mat != null:
 		# The degraded desk flickers: honest about Skyclaw's state.
@@ -119,6 +130,45 @@ func is_simulated_density() -> bool:
 func pull_all(pulled: bool) -> void:
 	for layer in _layers:
 		(layer as HoloLayer).pull_target = 1.0 if pulled else 0.0
+	if _atlas_layer != null:
+		_atlas_layer.set_pulled(pulled)
+
+
+func cycle_atlas_slice() -> String:
+	if _atlas_layer == null:
+		return "all"
+	var view := _atlas_layer.cycle_slice_view()
+	_emit_ledger()
+	return view
+
+
+func current_atlas_slice() -> String:
+	if _atlas_layer == null:
+		return "all"
+	return _atlas_layer.slice_view
+
+
+func pull_atlas(pulled: bool) -> void:
+	if _atlas_layer != null:
+		_atlas_layer.set_pulled(pulled)
+
+
+func atlas_entry_count() -> int:
+	if _atlas_layer == null:
+		return 0
+	return _atlas_layer.entry_count()
+
+
+func atlas_visible_count() -> int:
+	if _atlas_layer == null:
+		return 0
+	return _atlas_layer.visible_count()
+
+
+func atlas_state() -> Dictionary:
+	if _atlas_reader == null:
+		return {"state": "unknown", "entries": []}
+	return (_atlas_reader as CapabilityAtlasReader).current_atlas()
 
 
 func pointer_moved(screen_pos: Vector2) -> void:
@@ -133,14 +183,19 @@ func pointer_clicked(screen_pos: Vector2) -> void:
 	for i in _layers.size():
 		var layer := _layers[i] as HoloLayer
 		entries.append({"node": layer, "render_priority": layer.render_priority, "index": i})
+	if _atlas_layer != null and _atlas_layer.header_node() != null:
+		entries.append({"node": _atlas_layer.header_node(), "render_priority": 20, "index": _layers.size()})
 	var ordered: Array = HoloCoordinateStack.sort_layers_by_depth(_camera, entries)
 	for entry in ordered:
-		var layer := entry["node"] as HoloLayer
+		var node := entry["node"] as Node3D
 		var hit: Dictionary = HoloCoordinateStack.hit_layer(
-			_camera, screen_pos, layer, HoloLayer.CARD_SIZE * 0.5
+			_camera, screen_pos, node, HoloLayer.CARD_SIZE * 0.5
 		)
 		if bool(hit.get("hit", false)):
-			layer.toggle_pull()
+			if _atlas_layer != null and node == _atlas_layer.header_node():
+				_atlas_layer.toggle_pull()
+			else:
+				(node as HoloLayer).toggle_pull()
 			return
 
 
@@ -424,6 +479,8 @@ func _on_paint_timer() -> void:
 		_dev_mentor.observe()
 	if is_instance_valid(_fleet_reader):
 		_fleet_reader.read_now()
+	if is_instance_valid(_atlas_reader):
+		_atlas_reader.read_now()
 
 
 # ── Per-frame ────────────────────────────────────────────────────────────────
@@ -467,6 +524,32 @@ func _mount_fleet_reader() -> void:
 	add_child(_fleet_reader)
 	_fleet_reader.telemetry_changed.connect(_on_fleet_telemetry)
 	_fleet = _fleet_reader.current_telemetry()
+
+
+func _mount_atlas_layer() -> void:
+	# The Capability Atlas shelf: one node per graded entry, mounted under
+	# the room (not a registry layer — the registry counts stay 14).
+	_atlas_layer = ATLAS_LAYER_SCRIPT.new() as CapabilityAtlasLayer
+	_atlas_layer.name = "CapabilityAtlasLayer"
+	add_child(_atlas_layer)
+
+
+func _mount_atlas_reader() -> void:
+	# The atlas reader: the static graded file + the fleet-snapshot overlay,
+	# bounded file reads with caps + schema + age. Same pattern as the fleet
+	# reader; no shell, no network, no POST.
+	_atlas_reader = ATLAS_READER.new()
+	_atlas_reader.name = "CapabilityAtlasReader"
+	add_child(_atlas_reader)
+	_atlas_reader.atlas_changed.connect(_on_atlas_changed)
+	_atlas = _atlas_reader.current_atlas()
+
+
+func _on_atlas_changed(_atlas_dict: Dictionary) -> void:
+	_atlas = _atlas_reader.current_atlas()
+	if _atlas_layer != null:
+		_atlas_layer.build_from(_atlas.get("entries", []))
+	_emit_ledger()
 
 
 func _on_fleet_telemetry(_telemetry: Dictionary) -> void:
@@ -726,6 +809,7 @@ func _emit_ledger() -> void:
 		lines.append(_session.status_text())
 	lines.append("DENSITY " + String(_density.get("label", "—")))
 	lines.append(_fleet_line())
+	lines.append(_atlas_line())
 	lines.append("TERMINALS broker needed (4) · MIND VIEW incoming (PR #12)")
 	ledger_changed.emit("\n".join(lines))
 
@@ -741,3 +825,15 @@ func _fleet_line() -> String:
 		var rig: Dictionary = rigs.get(rig_id, {})
 		parts.append("%s %s" % [rig_id.to_upper(), String(rig.get("state", "unknown"))])
 	return "FLEET snapshot %s age %dms | %s" % [state, age_ms, " · ".join(parts)]
+
+
+func _atlas_line() -> String:
+	if _atlas.is_empty():
+		return "ATLAS: no atlas yet"
+	var state := String(_atlas.get("state", "unknown"))
+	var entries: Array = _atlas.get("entries", [])
+	var slice := current_atlas_slice()
+	return "ATLAS %s %d entries · slice: %s · live-probe: %d · unverified: %d" % [
+		state, entries.size(), slice,
+		int(_atlas.get("live_probe_entries", 0)), int(_atlas.get("unverified_entries", 0)),
+	]
