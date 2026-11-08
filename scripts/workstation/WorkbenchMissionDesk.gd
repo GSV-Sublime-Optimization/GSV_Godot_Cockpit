@@ -14,12 +14,14 @@ const FRESH_MS := 45000
 
 var _project_http: HTTPRequest
 var _post_http: HTTPRequest
+var _index_http: HTTPRequest
 var _project_select: OptionButton
 var _project_state: Label
 var _title: LineEdit
 var _objective: TextEdit
 var _acceptance: TextEdit
 var _risk: OptionButton
+var _validator: LineEdit
 var _submit: Button
 var _view_mission: Button
 var _guard_action: Button
@@ -33,8 +35,12 @@ var _post_busy := false
 # An acknowledged or ambiguous POST is a one-shot boundary.
 # A retry requires a separate deliberate operator interaction.
 var _submission_guard := "draft"
+var _index_state := "not_checked"
+var _index_busy := false
 var _expected_repo := ""
 var _expected_risk := ""
+var _expected_title := ""
+var _expected_objective := ""
 var _pending_project := ""
 var _port := 7340
 
@@ -54,6 +60,11 @@ func _ready() -> void:
 	_post_http.max_redirects = 0
 	add_child(_post_http)
 	_post_http.request_completed.connect(_on_post_finished)
+	_index_http = HTTPRequest.new()
+	_index_http.timeout = 12.0
+	_index_http.max_redirects = 0
+	add_child(_index_http)
+	_index_http.request_completed.connect(_on_index_finished)
 	_build()
 	var clock := Timer.new()
 	clock.wait_time = 1.0
@@ -124,6 +135,15 @@ func _build() -> void:
 	_acceptance.placeholder_text = "Godot import exits 0 with no engine errors\nFeature test passes on exact commit\nNo unrelated workspace files touched"
 	_acceptance.text_changed.connect(_update_submit)
 	column.add_child(_acceptance)
+	var validator_label := Label.new()
+	validator_label.text = "R2 VALIDATOR   /   predeclared command, independently executed by Studio after approval"
+	validator_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(validator_label)
+	_validator = LineEdit.new()
+	_validator.placeholder_text = "python -m pytest tests/test_feature.py -q  (required for R2 only)"
+	_validator.max_length = 400
+	_validator.text_changed.connect(func(_value): _update_submit())
+	column.add_child(_validator)
 
 	var controls := HBoxContainer.new()
 	controls.add_theme_constant_override("separation", 14)
@@ -158,7 +178,7 @@ func _build() -> void:
 	_guard_action.modulate = Color("#f3ad91")
 	_guard_action.tooltip_text = ("Before retrying, inspect Studio's canonical mission index. "
 		+ "An ambiguous POST may already have created a mission.")
-	_guard_action.pressed.connect(_release_submission_guard)
+	_guard_action.pressed.connect(_on_guard_pressed)
 	column.add_child(_guard_action)
 
 	_response = RichTextLabel.new()
@@ -268,19 +288,30 @@ func _selected_project() -> Dictionary:
 func _risk_code() -> String:
 	return ["R0", "R1", "R2"][_risk.selected] if _risk != null and _risk.selected >= 0 and _risk.selected <= 2 else "R3"
 
+func _validator_for_risk() -> String:
+	return _validator.text if _validator != null and _risk_code() == "R2" else ""
+
 func _update_submit() -> void:
 	if _submit == null:
 		return
 	if _guard_action != null:
 		_guard_action.visible = _submission_guard in ["uncertain", "acknowledged"]
-		_guard_action.text = ("CHECK STUDIO, THEN AUTHORIZE RETRY (DUPLICATE RISK)"
-			if _submission_guard == "uncertain" else
-			"START A NEW MISSION DRAFT")
+		if _submission_guard == "acknowledged":
+			_guard_action.text = "START A NEW MISSION DRAFT"
+		elif _index_state == "observed_clear":
+			_guard_action.text = "AUTHORIZE RETRY AFTER INDEX CHECK (DUPLICATE RISK)"
+		elif _index_state == "conflict":
+			_guard_action.text = "EXISTING MISSION FOUND / START A DIFFERENT DRAFT"
+		else:
+			_guard_action.text = "CHECK LIVE STUDIO MISSION INDEX BEFORE RETRY"
+		_guard_action.disabled = _index_busy
 	var valid_source := _fresh()
+	if _validator != null:
+		_validator.editable = _risk_code() == "R2"
 	if _projects_state == "observed" and not valid_source and _project_state != null:
 		_project_state.text = "PROJECT SOURCE STALE / rescan before submitting. NO POST."
 	var spec: Dictionary = CONTRACT.make_spec(_selected_project(),
-		_title.text, _objective.text, _acceptance.text, _risk_code())
+		_title.text, _objective.text, _acceptance.text, _risk_code(), _validator_for_risk())
 	_submit.disabled = (_projects_busy or _post_busy or _submission_guard != "draft"
 		or not valid_source or not spec.get("ok", false))
 	_submit.tooltip_text = ("Ready for explicit Studio submission" if not _submit.disabled
@@ -288,8 +319,99 @@ func _update_submit() -> void:
 		_submission_guard != "draft" else
 		String(spec.get("reason", "Project source is not fresh")))
 
+func _on_guard_pressed() -> void:
+	if _submission_guard != "uncertain":
+		_release_submission_guard()
+		return
+	if _index_state == "conflict":
+		# A matching mission exists. This action abandons the draft; it is NOT retry.
+		_ack_id = ""
+		_view_mission.visible = false
+		_title.clear()
+		_objective.clear()
+		_acceptance.clear()
+		_validator.clear()
+		_project_select.select(0)
+		_submission_guard = "draft"
+		_index_state = "not_checked"
+		_response.text = "NEW DRAFT / previous matching mission was found in Studio. Choose a different task."
+		_update_submit()
+	elif _index_state == "observed_clear":
+		_release_submission_guard()
+	else:
+		_scan_mission_index()
+
+func _scan_mission_index() -> void:
+	if _submission_guard != "uncertain" or _index_busy:
+		return
+	_index_busy = true
+	_index_state = "checking"
+	_response.text = "RECONCILING / GET latest 500 missions from owner-backed Studio. No POST."
+	_update_submit()
+	var err := _index_http.request("http://127.0.0.1:%d/api/missions?limit=500" % _port,
+		PackedStringArray(["Accept: application/json"]), HTTPClient.METHOD_GET)
+	if err != OK:
+		_index_busy = false
+		_index_state = "not_checked"
+		_response.text = "INDEX UNAVAILABLE / no retry admitted; inspect the Studio mission list."
+		_update_submit()
+
+func _on_index_finished(result: int, status: int, _headers: PackedStringArray,
+		bytes: PackedByteArray) -> void:
+	_index_busy = false
+	if _submission_guard != "uncertain":
+		return
+	_index_state = "not_checked"
+	if result != HTTPRequest.RESULT_SUCCESS or status != 200 or bytes.size() > 1048576:
+		_response.text = "INDEX NOT VERIFIED / Studio unavailable or oversized response. Retry remains locked."
+		_update_submit()
+		return
+	var parser := JSON.new()
+	if parser.parse(bytes.get_string_from_utf8()) != OK or typeof(parser.data) != TYPE_DICTIONARY:
+		_response.text = "INDEX NOT VERIFIED / invalid Studio response. Retry remains locked."
+		_update_submit()
+		return
+	var rows: Variant = parser.data.get("missions")
+	if typeof(rows) != TYPE_ARRAY or rows.size() >= 500:
+		_response.text = "INDEX INCOMPLETE / invalid or potentially truncated list. Retry remains locked."
+		_update_submit()
+		return
+	for record in rows:
+		if (typeof(record) != TYPE_DICTIONARY
+				or not CONTRACT._mission_id(String(record.get("id", "")))
+				or typeof(record.get("posted_by")) != TYPE_STRING
+				or typeof(record.get("title")) != TYPE_STRING
+				or typeof(record.get("objective")) != TYPE_STRING
+				or typeof(record.get("risk")) != TYPE_STRING
+				or not CONTRACT._same_repo_path(record.get("repo"), String(record.get("repo", "")))):
+			_response.text = "INDEX INCOMPLETE / missing or invalid mission identity. Retry remains locked."
+			_update_submit()
+			return
+		if (record.get("posted_by") == "godot-workstation"
+				and CONTRACT._same_repo_path(record.get("repo"), _expected_repo)
+				and record.get("risk") == _expected_risk
+				and record.get("title") == _expected_title
+				and record.get("objective") == _expected_objective):
+			_index_state = "conflict"
+			var found_id: String = String(record.get("id", ""))
+			if CONTRACT._mission_id(found_id):
+				_ack_id = found_id
+				_view_mission.visible = true
+			_response.text = "EXISTING MISSION FOUND / %s. No retry: inspect the source mission." % found_id
+			_update_submit()
+			return
+	# This is a bounded index observation, not an atomic idempotency guarantee.
+	_index_state = "observed_clear"
+	_response.text = ("INDEX CHECK COMPLETE / %d records, no matching task seen. "
+		+ "An earlier POST could still race this read. Only explicit operator retry is allowed.") % rows.size()
+	_update_submit()
+
 func _release_submission_guard() -> void:
 	if _post_busy or _submission_guard == "draft":
+		return
+	if _submission_guard == "uncertain" and _index_state != "observed_clear":
+		_response.text = "RETRY BLOCKED / live Studio index reconciliation required first."
+		_update_submit()
 		return
 	if _submission_guard == "acknowledged":
 		_ack_id = ""
@@ -297,12 +419,14 @@ func _release_submission_guard() -> void:
 		_title.clear()
 		_objective.clear()
 		_acceptance.clear()
+		_validator.clear()
 		_project_select.select(0)
 		_response.text = "NEW DRAFT / select a fresh observed repository and write a new objective."
 	else:
 		_response.text = ("RETRY UNLOCKED BY OPERATOR / verify in Studio first: "
 			+ "a previous POST may already have created a mission.")
 	_submission_guard = "draft"
+	_index_state = "not_checked"
 	_update_submit()
 
 func _submit_mission() -> void:
@@ -310,7 +434,7 @@ func _submit_mission() -> void:
 		return
 	var project := _selected_project()
 	var spec: Dictionary = CONTRACT.make_spec(project, _title.text,
-		_objective.text, _acceptance.text, _risk_code())
+		_objective.text, _acceptance.text, _risk_code(), _validator_for_risk())
 	if not spec.get("ok", false):
 		_response.text = "NOT SUBMITTED / " + String(spec.get("reason", "invalid_envelope"))
 		return
@@ -319,6 +443,9 @@ func _submit_mission() -> void:
 	_view_mission.visible = false
 	_expected_repo = String(project["path"])
 	_expected_risk = _risk_code()
+	_expected_title = _title.text.strip_edges()
+	_expected_objective = _objective.text.strip_edges()
+	_index_state = "not_checked"
 	_response.text = "SUBMITTING TO LOCAL STUDIO / awaiting exact HTTP acknowledgement..."
 	_update_submit()
 	var err := _post_http.request("http://127.0.0.1:%d/api/missions" % _port,
@@ -334,15 +461,22 @@ func _on_post_finished(result: int, status: int, _headers: PackedStringArray,
 	_post_busy = false
 	if result != HTTPRequest.RESULT_SUCCESS or bytes.size() > 65536:
 		_submission_guard = "uncertain"
+		_index_state = "not_checked"
 		_response.text = "NOT ACKNOWLEDGED / Studio may have created the mission. Verify in Studio before retrying."
 		_update_submit()
 		return
 	var ack: Dictionary = CONTRACT.parse_post_result(
 		status, bytes.get_string_from_utf8(), _expected_repo, _expected_risk)
 	if not ack.get("ok", false):
-		_submission_guard = "uncertain"
-		_response.text = ("NOT ACKNOWLEDGED / " + String(ack.get("reason", "invalid_result"))
-			+ ". Submission is locked until you verify Studio and explicitly unlock retry.")
+		if status == 400 and String(ack.get("reason", "")).begins_with("studio_rejected"):
+			# Studio rejected the input BEFORE store.create; this is not an ambiguous write.
+			_submission_guard = "draft"
+			_response.text = "REJECTED BY STUDIO / " + String(ack["reason"]) + ". Correct the draft and resubmit."
+		else:
+			_submission_guard = "uncertain"
+			_index_state = "not_checked"
+			_response.text = ("NOT ACKNOWLEDGED / " + String(ack.get("reason", "invalid_result"))
+				+ ". Submission is locked until you verify Studio and explicitly unlock retry.")
 		_update_submit()
 		return
 	var mission_id := String(ack["id"])

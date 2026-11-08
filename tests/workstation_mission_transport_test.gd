@@ -30,6 +30,7 @@ func _run() -> void:
 		desk._title.text = "Build fixture mission from Godot"
 		desk._objective.text = "Implement the authorized fixture mission and verify exact evidence."
 		desk._acceptance.text = "Exact-head import passes\nFixture acceptance passes"
+		desk._validator.text = "python -m pytest tests/test_feature.py -q"
 		desk._risk.select(2)
 		desk._update_submit()
 		_expect(not desk._submit.disabled, "operator-filled R2 envelope enabled")
@@ -58,7 +59,9 @@ func _run() -> void:
 			await create_timer(0.05).timeout
 		_expect(pane._terminal.text.contains("rcpt_fixture_ack_0001"),
 			"same mission receipt inspected through real HTTP GET")
-		_expect(pane._terminal.text.contains("1/1 acceptance criteria met"),
+		_expect(pane._terminal.text.contains("VALIDATOR        BLOCKED"),
+			"Studio owner BLOCKED is visible even with executor exit 0")
+		_expect(pane._terminal.text.contains("executor self-report: 1/1 claimed met"),
 			"source result is presented as evidence, not a fabricated terminal")
 		pane.queue_free()
 	desk.queue_free()

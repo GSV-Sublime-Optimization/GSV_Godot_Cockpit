@@ -12,9 +12,11 @@ func _run() -> void:
 	var sample := {
 		"id": id, "risk": "R2", "status": "succeeded", "repo": "C:/dev/active/safe", "review": true,
 		"mergeable": false, "secret": "DO_NOT_SHOW",
+		"validator_admission": {"state": "BLOCKED", "reason": "no predeclared validator"},
 		"result": {
 			"receipt_id": "rcpt_123456789012", "secret_key": "DO_NOT_SHOW",
 			"validator": {"exit_code": 0, "timed_out": false, "command": "DO_NOT_SHOW"},
+			"acceptance_audit": {"status": "incomplete"},
 			"report": {"raw_ok": true, "acceptance": [
 				{"criterion": "smoke", "met": true},
 				{"criterion": "playtest", "met": false}
@@ -27,8 +29,10 @@ func _run() -> void:
 	_check(parsed.get("ok", false), "canonical evidence accepted")
 	if parsed.get("ok", false):
 		var text: String = EVIDENCE.format(parsed["proof"])
-		_check(text.contains("1/2 acceptance criteria met"), "partial acceptance visible")
-		_check(text.contains("PASS (exit 0)"), "validator exit accurately labelled")
+		_check(text.contains("executor self-report: 1/2 claimed met"), "self-report cannot masquerade as owner acceptance")
+		_check(text.contains("ACCEPTANCE AUDIT INCOMPLETE"), "owner reconciled audit is shown separately")
+		_check(text.contains("VALIDATOR        BLOCKED"), "owner BLOCKED overrides raw executor exit 0")
+		_check(not text.contains("PASS (exit 0)"), "executor exit cannot mint independent PASS")
 		_check(text.contains("rcpt_123456789012"), "receipt ID projected")
 		_check(text.contains("MERGE ELIGIBLE   NO"), "unmerged is not green")
 		_check(parsed["proof"]["repo"] == "C:/dev/active/safe", "source repo visible for a grounded diagnosis")
@@ -37,9 +41,17 @@ func _run() -> void:
 		"cross-mission swap refused")
 	sample["result"]["validator"]["exit_code"] = 1
 	var failed: Dictionary = EVIDENCE.parse(JSON.stringify(sample), id)
-	_check(failed.get("ok", false) and
-		EVIDENCE.format(failed["proof"]).contains("FAILED or TIMED OUT"),
-		"failed validator cannot be green")
+	_check(failed.get("ok", false) and failed["proof"]["validator"].begins_with("BLOCKED"),
+		"raw executor failure does not override blocked owner gate")
+	sample["result"]["validator"]["exit_code"] = 0
+	sample["validator_admission"] = {"state": "PASS", "reason": "predeclared validator succeeded on recorded commit"}
+	var passed: Dictionary = EVIDENCE.parse(JSON.stringify(sample), id)
+	_check(passed.get("ok", false) and passed["proof"]["validator"].begins_with("PASS"),
+		"owner PASS shown only when reported by Studio")
+	sample.erase("validator_admission")
+	var absent_gate: Dictionary = EVIDENCE.parse(JSON.stringify(sample), id)
+	_check(absent_gate.get("ok", false) and absent_gate["proof"]["validator"] == "NOT REPORTED",
+		"missing Studio gate stays unknown even if executor exit was zero")
 	sample["repo"] = "../traversal"
 	var bad_repo: Dictionary = EVIDENCE.parse(JSON.stringify(sample), id)
 	_check(bad_repo.get("ok", false) and bad_repo["proof"]["repo"].is_empty(), "unsafe source repo cannot enable an action")
