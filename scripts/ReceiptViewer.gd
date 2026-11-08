@@ -14,6 +14,29 @@ var _label: RichTextLabel
 var _refresh_btn: Button
 var _tail_lines: int = 30
 
+static func receipt_dirs() -> Array[String]:
+	var paths: Array[String] = []
+	var sprint := OS.get_environment("GSV_SPRINT_CURRENT_DIR").strip_edges()
+	var reports := OS.get_environment("GSV_KILOCORE_REPORTS_DIR").strip_edges()
+	if not sprint.is_empty():
+		paths.append(sprint)
+	elif OS.has_feature("windows"):
+		paths.append(RECEIPT_PATHS[0])
+	if not reports.is_empty():
+		paths.append(reports)
+	elif OS.has_feature("windows"):
+		paths.append(RECEIPT_PATHS[1])
+	return paths
+
+static func sprint_index_path() -> String:
+	var configured := OS.get_environment("GSV_SPRINT_INDEX").strip_edges()
+	if not configured.is_empty():
+		return configured
+	var sprint := OS.get_environment("GSV_SPRINT_CURRENT_DIR").strip_edges()
+	if not sprint.is_empty():
+		return sprint.path_join("latest.json")
+	return SPRINT_INDEX if OS.has_feature("windows") else ""
+
 func _ready() -> void:
 	var root := VBoxContainer.new()
 	add_child(root)
@@ -43,7 +66,10 @@ func refresh() -> void:
 	_label.clear()
 
 	# Sprint index
-	var f := FileAccess.open(SPRINT_INDEX, FileAccess.READ)
+	var index_path := sprint_index_path()
+	var f: FileAccess = null
+	if not index_path.is_empty() and FileAccess.file_exists(index_path):
+		f = FileAccess.open(index_path, FileAccess.READ)
 	if f:
 		var raw := f.get_as_text()
 		f.close()
@@ -59,12 +85,16 @@ func refresh() -> void:
 				_append("  next: " + str(d.get("next_best", "")))
 				_append("")
 
-	# Scan for receipts.jsonl files
+	# Track source availability independently of an empty receipt set.
 	var found_any := false
-	for dir_path in RECEIPT_PATHS:
+	var source_available := false
+	for dir_path in receipt_dirs():
+		if not DirAccess.dir_exists_absolute(dir_path):
+			continue
 		var dir := DirAccess.open(dir_path)
 		if not dir:
 			continue
+		source_available = true
 		dir.list_dir_begin()
 		var fname := dir.get_next()
 		while fname != "":
@@ -89,7 +119,10 @@ func refresh() -> void:
 			dir.list_dir_end()
 
 	if not found_any:
-		_append("[color=gray](no receipts found yet)[/color]")
+		if source_available:
+			_append("[color=gray](no receipts found yet)[/color]")
+		else:
+			_append("[color=orange](receipt sources unavailable or unconfigured)[/color]")
 
 func _read_jsonl(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.READ)

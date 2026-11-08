@@ -112,7 +112,10 @@ func _poll() -> void:
 	f.close()
 
 func _append_event(line: String) -> void:
-	var parsed = JSON.parse_string(line)
+	var parser := JSON.new()
+	var parsed: Variant = null
+	if parser.parse(line) == OK:
+		parsed = parser.data
 	if typeof(parsed) != TYPE_DICTIONARY:
 		_box.append_text("[color=gray]" + line.substr(0, 120) + "[/color]\n")
 		return

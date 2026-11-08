@@ -31,6 +31,7 @@ var _route_input: LineEdit
 var _route_output: RichTextLabel
 var _steer_output: RichTextLabel
 var _flight_output: RichTextLabel
+var _last_bridge_ok: bool = false
 
 ## tab index -> Callable(Control), dropped once that tab has been built.
 var _lazy_fillers: Dictionary = {}
@@ -213,15 +214,15 @@ func refresh_status() -> void:
 	var raw := _bridge("status", "")
 	_append_status("\n[color=cyan]=== STATUS ===[/color]")
 	_append_status(_parse_status(raw))
-	_status_bar.text = "● live"
-	_status_bar.modulate = Color(0.4, 1.0, 0.4)
+	_status_bar.text = "● live" if _last_bridge_ok else "● bridge unavailable"
+	_status_bar.modulate = Color(0.4, 1.0, 0.4) if _last_bridge_ok else Color(1.0, 0.4, 0.4)
 
 func run_proof() -> void:
 	_status_bar.text = "● proving..."
 	var text := _bridge("proof", "")
 	_append_status("\n[color=yellow]=== PROOF ===[/color]")
 	_append_status(text)
-	_status_bar.text = "● proof done"
+	_status_bar.text = "● proof done" if _last_bridge_ok else "● proof unavailable"
 
 func _do_route(obj: String = "") -> void:
 	if obj.is_empty():
@@ -232,22 +233,22 @@ func _do_route(obj: String = "") -> void:
 	_route_output.append_text("\n[color=white]>>> %s[/color]\n" % obj)
 	_status_bar.text = "● routing..."
 	var text := _bridge("route", obj)
-	_route_output.append_text("[color=green]=== ROUTE RESULT ===[/color]\n%s\n" % text)
-	_status_bar.text = "● routed"
+	_route_output.append_text(("[color=green]=== ROUTE RESULT ===[/color]\n%s\n" if _last_bridge_ok else "[color=red]=== ROUTE UNAVAILABLE ===[/color]\n%s\n") % text)
+	_status_bar.text = "● routed" if _last_bridge_ok else "● route unavailable"
 
 func _refresh_steering() -> void:
 	_status_bar.text = "● steering..."
 	var raw := _bridge("steer", "")
 	_append_steer("\n[color=cyan]=== STEERING MAP ===[/color]")
 	_append_steer(_parse_steer(raw))
-	_status_bar.text = "● steering ready"
+	_status_bar.text = "● steering ready" if _last_bridge_ok else "● steering unavailable"
 
 func _fcc_smoke() -> void:
 	_status_bar.text = "● FCC..."
 	var text := _bridge("fcc-smoke", "")
 	_append_steer("\n[color=yellow]=== FCC SMOKE ===[/color]")
 	_append_steer(text)
-	_status_bar.text = "● FCC done"
+	_status_bar.text = "● FCC done" if _last_bridge_ok else "● FCC unavailable"
 
 func _steer_memory() -> void:
 	var text := _bridge("memory", "")
@@ -259,7 +260,7 @@ func _refresh_flight() -> void:
 	var raw := _bridge("flight", "")
 	_append_flight("\n[color=cyan]=== AUTONOMOUS FLIGHT ===[/color]")
 	_append_flight(_parse_flight(raw))
-	_status_bar.text = "● flight read"
+	_status_bar.text = "● flight read" if _last_bridge_ok else "● flight unavailable"
 
 # ── BRIDGE ────────────────────────────────────────────────────────────────────
 
@@ -267,6 +268,9 @@ func _bridge(mode: String, objective: String) -> String:
 	var args: Array[String] = ["-NoProfile","-ExecutionPolicy","Bypass","-File",BRIDGE,"-Mode",mode]
 	if not objective.is_empty():
 		args.append_array(["-Objective", objective])
+	_last_bridge_ok = false
+	if not OS.has_feature("windows"):
+		return "(bridge unavailable: Windows PowerShell host required)"
 	var output: Array = []
 	var code := OS.execute("pwsh", args, output, true, false)
 	if code != 0:
@@ -275,7 +279,8 @@ func _bridge(mode: String, objective: String) -> String:
 	var text := ""
 	for item in output:
 		text += str(item)
-	return text if not text.strip_edges().is_empty() else "(no output — exit %d)" % code
+	_last_bridge_ok = code == 0 and not text.strip_edges().is_empty()
+	return text if _last_bridge_ok else "(bridge unavailable: exit %d)" % code
 
 func _parse_status(raw: String) -> String:
 	var json := JSON.new()
