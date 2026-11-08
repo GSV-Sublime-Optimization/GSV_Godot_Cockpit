@@ -186,13 +186,21 @@ def flush_acks() -> None:
 SPEAKERS = {"claude": "claude (msi seat)", "mind": "mind", "all": "all"}
 
 
-def say(text: str, to: str) -> dict:
-    """Append Keath's words from CHORUS to the shared cockpit channel on xanadu (the one write CHORUS makes)."""
+# Who may speak through CHORUS. The page itself always speaks as Keath; an agent that posts
+# through /say must name its own seat, so nothing an agent writes is ever signed as Keath.
+SEATS = {"keath": "keath (chorus)", "claude (msi seat)": "claude (msi seat)",
+         "claude (i3 seat)": "claude (i3 seat)", "i3-mind": "i3-mind"}
+
+
+def say(text: str, to: str, sender: str = "keath") -> dict:
+    """Append a message to the shared cockpit channel on xanadu (the one write CHORUS makes)."""
     text = " ".join(str(text).split())[:600]
     if not text:
         raise ValueError("empty message")
-    msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": "keath (chorus)",
-           "to": SPEAKERS.get(to, "claude (msi seat)"), "text": text}
+    if sender not in SEATS:
+        raise ValueError(f"unknown seat {sender!r}; use one of {sorted(SEATS)}")
+    msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": SEATS[sender],
+           "to": SPEAKERS.get(to, to if to in SEATS.values() else "claude (msi seat)"), "text": text, "via": "chorus"}
     r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
                         "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
                        input=json.dumps(msg) + "\n", capture_output=True, text=True, timeout=30)
@@ -209,7 +217,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         try:
             n = min(int(self.headers.get("Content-Length", 0)), 4096)
             body = json.loads(self.rfile.read(n) or b"{}")
-            msg = say(body.get("text", ""), body.get("to", "claude"))
+            # the page sends no "from" (it is Keath at the keyboard); agents must send their own seat
+            msg = say(body.get("text", ""), body.get("to", "claude"), body.get("from", "keath"))
             out, code = json.dumps({"ok": True, "message": msg}).encode(), 200
         except (ValueError, RuntimeError, subprocess.SubprocessError, OSError) as e:
             out, code = json.dumps({"ok": False, "error": str(e)}).encode(), 400
