@@ -35,7 +35,7 @@ When nothing needs you, it says so.
 CHORUS is also where you talk to the colony, and where the MSI Claude shows its own mind.
 - **Conversation** (inside *What needs you*): the shared cockpit channel on xanadu (`~/steward/cockpit/channel.jsonl`), the same one the i3's HOLOMIND uses. You see the MSI Claude, the i3 Claude and the i3 Mind in their rig colours; a Mind's words are set in italic so they never pass for a person's.
 - **Write to a seat:** pick *MSI Claude*, *the Minds* or *everyone*, type, press Send. The MSI Claude sees your message at the top of your next prompt in the CLI (the `chorus_inbox.py` hook), so the CLI and the cockpit are one conversation.
-- **Ask Claude** on any *What needs you* item starts that message for you ("About 'Docker can't start on the i3': ").
+- **Send…** on any *What needs you* item or rig card opens the smart composer (below) with that item attached.
 - **MSI Claude's mind:** a bright satellite orbits MSI and glows harder the more steps it took in the last two minutes. Top right, a ticker shows its last three steps (tool and a short label).
 - **The spine:** one small moon per colony service orbits MSI, read from Dev-Mentor's live spine (`/api/spine/services`, cached 60 s). Teal is up, red is down, dim grey is down but expected (trueform-forge, rimapi, desktop-ollama). Unexpected downs become a *What needs you* item with the next move.
 
@@ -86,11 +86,24 @@ Look down into the colony; every light is a fact from `feed.json`, and every nod
 - **Orders and actions.** A packet waits on Keath's console, rides the drone of the seat that takes it, and bursts into a ring when done. Action receipts are shockwaves on their target. Every channel message travels sender → xanadu (where the channel lives) → recipient.
 - **Knowledge ring** (outer rim): the steward atlas as a capability constellation (red stars = dead lanes), one GitNexus nebula per indexed repo (orange = commits behind), the vault's recent notes as spines, the decisions obelisk, and the rival cockpits as distant stations. A source that answers `{error}` shows as a dim offline node.
 - **Time (4th dimension).** The bottom track holds thoughts, messages, orders, actions, agent steps and PRs. Drag to replay; Play runs at 60x. Orders, agents and messages are re-folded at that moment; heartbeats, disks and the spine only exist as now-values and are marked ≈. A Mind's thought rises as a column of its own letters over the rig it is about.
-- **Act on anything.** Click (or Tab, or `/` to search) any node: the camera flies there and a card opens with facts, the doctor's evidence and real verbs: *Act now* (propose → in-page 60 s countdown → confirm), *hand it to a seat* (an action order), *Make this an order*, *Ask Claude*, *Suggest an improvement* (POST /suggest), *Open PR*. A rotating **Next move** ribbon nudges the top three needs; **What this did** lists the last real effects (`impact`).
+- **Act on anything.** Click (or Tab, or `/` to search) any node: the camera flies there and a card opens with facts, the doctor's evidence and real verbs: *Act now* (propose → in-page 60 s countdown → confirm), *hand it to a seat* (an action order), *Send…* (the smart composer), *Open PR*. `holo.html?compose=rig:i3` (or `svc:<name>`, `pr:<n>`, `console`) opens the composer on that node. A rotating **Next move** ribbon nudges the top three needs; **What this did** lists the last real effects (`impact`).
 - **Honest states:** LIVE / SNAPSHOT (file) / MOCK badges, feed age (amber > 60 s, red STALE > 3 min), ≈ REPLAY chip. `?mock=1` fakes every POST.
 - **Keys:** 1-4 rigs, W work at risk, O new order, T or Space play time, Tab cycle nodes, / search, 0 overview, F fullscreen, Esc closes.
 - **Budget:** three.js r160 vendored (`vendor/`, sha256 in its README), no other library; 30 fps cap, 15 fps after 20 s idle, nothing while hidden; DPR cap 1.5; instanced meshes and single-draw-call glow, glyph and light-stream layers (94 draw calls). `holo.html?perf` (warm, headless Edge on the MSI GPU, 1600x900): scene 0.3 ms + draw submit 0.75 ms CPU per frame = about 3% of one core at 30 fps (0.1% of MSI's 32 threads); about 18 ms per frame in software raster.
 - Receipts: `receipts/holo-live-1600x900.png`, `receipts/holo-timeline.png` (a replay 2.5 h back), `receipts/holo-mock-order.png`, `receipts/holo-mock-act-confirm.png`.
+
+## Smart composer: one Send for every node (`composer.js`, `router.py`)
+"Ask Claude", "Make this an order" and "Suggest an improvement" are one **Send…** button on Sky, Forge and HOLO. It opens a composer with the node attached and the router's draft already written, never a blank box.
+- **Router** (`router.py`, also `POST /route`, `chorus.py route`, MCP `chorus_route`; no side effects) reads the words and the node:
+  - **kind**: a failing check or down service is an *order*; a PR waiting is a *review request*; an idea about the view is a *suggestion*; "what/why/how" is an *ask*; "status:" or a line to everyone is a *status*; "hand off" is a *hand-off*; restart words on a node with an allowlisted action make an *action order*.
+  - **who**: the seat that owns the rig (i3 → i3 Claude; MSI, L9, xanadu, spine, cockpit → MSI Claude); summaries go to a local model first (cost); a Claude-authored PR is never routed to a Claude (second actor: GPT-6, Codex or Muse); "everyone" fans out to all. The i3 Mind is ranked down while it says it is in a playtest; a seat unseen for 3 h is ranked down. The Steward atlas's top lanes are shown and nudge the score. "send to l9 local: …" or a named target always wins.
+  - **where / when / why**: channel, local model, GitHub comment, review queue (dev#431), Studio, ChatDev; now, next hourly cycle, "after #424 merges" or "at 14:30" (stored as `due` on the order); why = the doctor's verdict, the check, the PR's wait.
+- **Composer**: editable draft; chips for Kind, Who (with each alternative's reason), Where, When; a Why line; templates (status update, review request, fix this, explain this, hand off); a one-line preview ("Send to i3 Claude as an order, now, because docker is failing on i3 (doctor: VT-x is off…)"). Enter sends, Shift+Enter is a new line, Esc closes, Tab cycles chips and fields.
+- **`POST /send`** (same loopback/same-origin/JSON guards) checks kind, target and where against the registry, and every send writes a channel line:
+  - **live**: seats on the channel (orders keep `due` and `why`; action orders only from Keath and only on the actions allowlist); local models answer in the composer (MSI `ecosystem-qwen35` and i3 `ecosystem-desktop-qwen` via LiteLLM :4000, L9 `qwen3:4b-l9fast` via the :11435 tunnel; 45 s timeout, a failure is shown, not swallowed).
+  - **prepared only**: GitHub comments come back as a `gh … comment` command (the feeder comments itself only with `CHORUS_ALLOW_GH_COMMENT=1`; `@` is never sent); Studio missions as the `POST /api/missions` payload (Studio's approve step stays yours); ChatDev as a queue entry (the shared queue file is not edited).
+- Measured 2026-11-08: L9 drone answered a /send in a few seconds; MSI LiteLLM timed out at 45 s and the composer said so.
+- Receipt: `receipts/composer-holo-i3.png` (HOLO, i3 selected, `?compose=rig:i3`, live feeder on :8768, headless Edge 1600x900).
 
 ## Bakeoff hard rules
 - **Windowed:** an ordinary browser tab. It is never topmost and never takes the screen; fullscreen is opt-in.
@@ -117,4 +130,4 @@ Register it, setting `CHORUS_SEAT` to your seat:
 claude mcp add chorus -e CHORUS_SEAT="claude (msi seat)" -- python K:/dev/worktrees/cockpit/mindview-msiclaude/chorus/chorus_mcp.py
 ```
 
-The same tools exist as a CLI: `python chorus/chorus.py brief|rig|work|doctor|orders|take|working|done|decline|say`.
+The same tools exist as a CLI: `python chorus/chorus.py brief|rig|work|doctor|orders|take|working|done|decline|say|route|send`. `chorus_route` and `chorus_send` let agents route too (`--node check:i3/docker`, `pr:dev#429`, `rig:i3`, `svc:litellm` or JSON).

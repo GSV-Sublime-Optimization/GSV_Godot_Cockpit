@@ -257,6 +257,7 @@ canvas#sky.pointing { cursor: pointer; }
   </footer>
 </div>
 
+<script src="composer.js"></script>
 <script>
 "use strict";
 // ---------- data: the shared bakeoff fixture (real, frozen 2026-11-08 06:48 UTC) ----------
@@ -909,8 +910,8 @@ function renderNeeds() {
     li.innerHTML = `<div class="need-head"><span class="need-what">${esc(it.what)}</span><span class="sev" style="--c: var(${LEVEL[it.level].color})">${LEVEL[it.level].word}</span></div>
       <div class="need-meta">${esc(it.meta || "")} · owner: ${esc(it.owner)}</div>
       <div class="need-why">${esc(it.why)}</div>${doctorHTML(it.doctor)}
-      <div class="move"><code>${esc(it.move)}</code><button type="button">Copy</button><button type="button" class="ask">Ask Claude</button></div>`;
-    li.querySelector(".ask").onclick = () => askClaude(it.what);
+      <div class="move"><code>${esc(it.move)}</code><button type="button">Copy</button><button type="button" class="ask" title="Compose a message about this: the router suggests who, where, when and why">Send…</button></div>`;
+    li.querySelector(".ask").onclick = () => compose({kind: "need", title: it.what, detail: it.why, verdict: it.doctor?.verdict || "", failing: it.level !== "routine", url: it.list?.[0]?.url || ""});
     if (it.list) { const ul = document.createElement("ul"); for (const p of it.list) { const a = document.createElement("li"); a.innerHTML = `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.repo)}#${p.number}</a> ${esc(p.title)}`; ul.append(a); } li.append(ul); }
     const btn = li.querySelector("button");
     btn.onclick = () => navigator.clipboard?.writeText(it.move).then(() => { btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy", 1500); }, () => { btn.textContent = "Select it"; });
@@ -1077,11 +1078,12 @@ document.getElementById("talk-form").addEventListener("submit", async e => {
     extras.channel.push(d.message); input.value = ""; renderTalk(); note.textContent = to === "claude" ? "Sent. MSI Claude sees it on your next prompt." : "Sent.";
   } catch (err) { note.textContent = `Not sent: ${err.message || "the feeder isn't running"}. Start chorus/mindview_feed.py.`; }
 });
-function askClaude(subject) {
-  document.getElementById("needs").open = true;
-  document.getElementById("talk-to").value = "claude";
-  const input = document.getElementById("talk-text"); input.value = `What should I do about "${subject}"? `; input.focus();
-}
+// the smart composer (composer.js): one Send flow; the feeder's router suggests who/where/when/why
+window.ChorusComposer.config = {
+  canSend: () => live && location.protocol.startsWith("http"),
+  onSent: (res) => { if (res.message && res.message.text) { extras.channel.push(res.message); renderTalk(); } },
+};
+function compose(node) { window.ChorusComposer.open({node}); }
 
 // ---------- rig card: click a star ----------
 const sky = document.getElementById("sky"), card = document.getElementById("rig-card");
@@ -1112,8 +1114,11 @@ function openRig(r) {
   for (const e of said) rows.push(`<div class="row">${esc(hm(e.at))} ${esc(e.mind)}: <span class="said">${esc(e.line)}</span></div>`);
   card.style.setProperty("--c", `var(${r.color})`);
   card.innerHTML = `<h3>${esc(r.name)} <small>${esc(r.role)} · ${st.silent ? "silent" : st.checks.some(c => !c.ok) ? "out of tune" : "in tune"}</small></h3>${rows.join("")}
-    <div class="acts"><button type="button" data-a="ask">Ask Claude</button><button type="button" data-a="close">Close</button></div>`;
-  card.querySelector('[data-a="ask"]').onclick = () => askClaude(`${r.name}`);
+    <div class="acts"><button type="button" data-a="ask">Send…</button><button type="button" data-a="close">Close</button></div>`;
+  card.querySelector('[data-a="ask"]').onclick = () => { const bad = (st.checks || []).filter(c => !c.ok);
+    compose({kind: "rig", id: r.id, rig: r.id, name: r.name, failing: bad.length > 0 || st.silent,
+      detail: st.silent ? "silent" : bad.map(c => `${c.name} failing`).join("; "),
+      verdict: (extras.doctor || []).find(x => bad.some(c => x.key === `${r.id}:${c.name}`))?.verdict || ""}); };
   card.querySelector('[data-a="close"]').onclick = () => { card.hidden = true; };
   card.hidden = false;
   const w = card.offsetWidth, h = card.offsetHeight;

@@ -123,6 +123,8 @@ def node_label(node: dict) -> str:
     k = _s(node.get("kind"), 20)
     if k == "pr" and node.get("repo"):
         return f"{_s(node.get('repo'), 40)}#{_s(node.get('number'), 8)}"
+    if k == "check" and node.get("check") and not node.get("name"):
+        return f"{node_rig(node)} {_s(node.get('check'), 40)}".strip()
     return _s(node.get("name") or node.get("title") or node.get("id"), 80) or k
 
 
