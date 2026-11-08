@@ -743,7 +743,7 @@ func _build_palette() -> void:
 	]
 	_palette = PopupPanel.new()
 	_palette.name = "CommandPalette"
-	_palette.custom_minimum_size = Vector2(475, 350)
+	_palette.min_size = Vector2i(475, 350)
 	add_child(_palette)
 	var content := VBoxContainer.new()
 	content.add_theme_constant_override("separation", 10)
