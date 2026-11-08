@@ -35,6 +35,13 @@ func _run() -> void:
 	await process_frame
 	_check(view._lens == 2, "vitals lens selectable")
 	_check(view._error.is_empty(), "no data-load errors")
+	_check(view._effective_rig_status("i3") == "red",
+		"historical fixture retains its source-reported i3 failure")
+	view._is_fixture = false
+	view._feed["source_at"] = "2020-01-01T00:00:00Z"
+	_check(view._effective_rig_status("msi") == "stale",
+		"expired live file cannot render a green rig")
+	view._is_fixture = true
 	_check(Time.get_ticks_msec() - started < 1500, "no remote call on Godot startup")
 	view.queue_free()
 	await process_frame
