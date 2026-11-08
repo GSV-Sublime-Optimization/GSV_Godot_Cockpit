@@ -17,6 +17,7 @@ import base64
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import pathlib
 import subprocess
@@ -220,6 +221,39 @@ def seat_activity(limit=30):
     return out
 
 
+VAULT = pathlib.Path(os.environ.get('COLONY_VAULT', r'C:\dev\active\dev\vault'))
+
+
+def vault_index():
+    """The Obsidian second brain (dev/vault): project notes indexed by repository name, with their role and status.
+    Read-only; notes are data, never instructions. Returns {} when the vault isn't on this rig."""
+    out = {}
+    if not VAULT.is_dir():
+        return out
+    for note in list((VAULT / 'Projects').glob('*.md')) + list((VAULT / 'orgs').glob('*/index.md')):
+        try:
+            text = note.read_text(encoding='utf-8', errors='replace')[:6000]
+        except OSError:
+            continue
+        meta, role = {}, ''
+        if text.startswith('---'):
+            for line in text.split('---', 2)[1].splitlines():
+                if ':' in line and not line.startswith(' '):
+                    k, v = line.split(':', 1)
+                    meta[k.strip()] = v.strip().strip('"')
+        for line in text.splitlines():
+            if line.startswith('**Role:**'):
+                role = line.replace('**Role:**', '').strip()[:240]
+                break
+        remote = meta.get('remote', '')
+        names = {note.stem.replace(' ', '-').lower(), note.stem.replace(' ', '_').lower(), note.stem.replace(' ', '').lower()}
+        if remote and 'github.com/' in remote:
+            names.add(remote.rstrip('/').split('/')[-1].lower())
+        for n in names:
+            out[n] = {'note': note.stem, 'path': str(note), 'role': role, 'status': meta.get('status', ''), 'remote': remote}
+    return out
+
+
 ORDER_RANK = {'working': 0, 'taken': 1, 'posted': 2, 'declined': 3, 'done': 4}
 
 
@@ -396,6 +430,10 @@ def tick(state):
     feed['orders'] = orders[-30:]
     feed['activity'] = seat_activity()
     feed['pipeline'] = state.get('pipeline', [])
+    if time.time() - state.get('vault_at', 0) > 600:
+        state['vault_at'] = time.time()
+        state['vault'] = vault_index()
+    feed['knowledge'] = state.get('vault', {})
     # Self-awareness: how fresh is each thing this cockpit believes? Stale sources are named, never hidden.
     t = time.time()
     colony_age = age_s((feed.get('colony') or {}).get('at'))
@@ -407,6 +445,9 @@ def tick(state):
         'chorus': {'ok': colony_age is not None and colony_age < 300, 'age_s': colony_age, 'what': 'backup, mirror, MSI spine, doctor'},
         'mind': {'ok': bool(state.get('mind_ok', True)), 'age_s': None, 'what': f'{MODEL} on the i3 (answers questions)'},
         'activity': {'ok': bool(act), 'age_s': age_s(act[-1].get('at')) if act else None, 'what': 'agent seats\' live steps (needs the hook)'},
+        'obsidian': {'ok': bool(feed['knowledge']), 'age_s': int(t - state.get('vault_at', t)), 'what': f"{len({v['note'] for v in feed['knowledge'].values()})} vault notes indexed (dev/vault)"},
+        'gitnexus': {'ok': False, 'age_s': None, 'what': 'NOT CONNECTED: no gitnexus CLI on this rig'},
+        'omnisynapse': {'ok': False, 'age_s': None, 'what': 'NOT CONNECTED: import-only; reads brief.json when an operator loads it'},
     }
     feed['decisions'] = list(decisions.values())[-30:]
     ordered = {o.get('ref') for o in orders if o.get('status') not in ('declined',)}

@@ -1646,7 +1646,10 @@ func _repo_body(repo: String) -> String:
 	for st2: String in ["approved", "changes", "needs-review", "stale-review", "draft"]:
 		if counts.has(st2):
 			head.append("%d %s" % [int(counts[st2]), st2])
-	return "[b]%s[/b] · %s\n\n%s" % [repo, ", ".join(head), "\n".join(lines) if not lines.is_empty() else "(only drafts)"]
+	var know: Dictionary = feed.get("knowledge", {}) if feed.get("knowledge") is Dictionary else {}
+	var k: Dictionary = know.get(repo.to_lower(), {}) if know.get(repo.to_lower()) is Dictionary else {}
+	var vault := ("\n[color=#b39bff]Second brain[/color] (%s, %s): %s" % [String(k.get("note", "")), String(k.get("status", "")), String(k.get("role", "")).left(220)]) if not k.is_empty() else "\n[color=#7d8aa8](no note for this repository in the Obsidian vault yet)[/color]"
+	return "[b]%s[/b] · %s%s\n\n%s" % [repo, ", ".join(head), vault, "\n".join(lines) if not lines.is_empty() else "(only drafts)"]
 
 
 func _repo_url(repo: String) -> String:
@@ -1717,6 +1720,13 @@ func _select(i: int) -> void:
 	var url := String(p.get("url", ""))
 	if url != "":
 		_inspector_bar.add_child(_bench_button("Open", url, func() -> void: OS.shell_open(url)))
+	var title := String(p.get("title", ""))
+	if title.begins_with("repository · "):
+		var know: Dictionary = feed.get("knowledge", {}) if feed.get("knowledge") is Dictionary else {}
+		var k: Variant = know.get(title.trim_prefix("repository · ").to_lower())
+		if k is Dictionary:
+			var note_path := String((k as Dictionary).get("path", ""))
+			_inspector_bar.add_child(_bench_button("Open note in Obsidian", note_path, func() -> void: OS.shell_open("obsidian://open?path=" + note_path.uri_encode())))
 	_inspector_bar.add_child(_bench_button("Assign to i3 seat", "Post a work order about this", func() -> void: _order({"title": String(p.get("title", "")), "url": url, "kind": "rig", "id": "pick:" + String(p.get("title", ""))}, "claude (i3 seat)")))
 	_inspector_bar.add_child(_bench_button("Back to the whole colony", "Backspace", func() -> void: _select(-1)))
 	_inspector.visible = true
