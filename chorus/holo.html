@@ -154,7 +154,7 @@ kbd { font: 700 10px var(--f-body); border: 1px solid var(--hair-2); border-bott
 .find li { padding: 5px 8px; border-radius: 6px; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
 .find li small { color: var(--ink-dim); font: 10px var(--f-data); text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
 .find li[aria-selected=true], .find li:hover { background: rgba(127, 231, 255, .14); }
-.hint { position: fixed; top: 100px; left: 380px; right: 460px; margin: 0 auto; max-width: 640px; padding: 7px 12px; display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.hint { position: fixed; bottom: 100px; right: 16px; width: min(560px, calc(100% - 32px)); padding: 7px 12px; display: flex; gap: 10px; align-items: center; font-size: 13px; }
 .hint .n { font: 700 10px var(--f-data); color: var(--warn); letter-spacing: .14em; white-space: nowrap; }
 .hint .tx { flex: 1; min-width: 0; }
 .hint .tx b { color: var(--warn); }
@@ -163,7 +163,7 @@ kbd { font: 700 10px var(--f-body); border: 1px solid var(--hair-2); border-bott
 .rivals h3 { margin: 0 0 3px; font-size: 14px; }
 .rivals p { margin: 3px 0; font-size: 12.5px; color: #cfe2ea; }
 .rivals img { width: 100%; border-radius: 8px; border: 1px solid var(--hair-2); margin-top: 6px; }
-@media (max-width: 1100px) { .did, .key { display: none; } .hint { left: 16px; right: 16px; } }
+@media (max-width: 1100px) { .did, .key { display: none; } .hint { left: 16px; right: 16px; bottom: 96px; } }
 @media (max-width: 720px) {
   .panel { left: 16px; right: 16px; width: auto; top: auto; bottom: 96px; max-height: 50%; }
   .mark p { display: none; }
@@ -355,8 +355,8 @@ renderer.setPixelRatio(DPR);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#03060b');
 const camera = new THREE.PerspectiveCamera(42, 1, 0.5, 600);
-const cam = { target: V(0, 4, 13), r: 138, theta: 0, phi: 0.8, tween: null };
-const HOME = { target: V(0, 4, 13), r: 138, theta: 0, phi: 0.8 };
+const cam = { target: V(0, 0, -3), r: 172, theta: 0, phi: 0.76, tween: null };
+const HOME = { target: V(0, 0, -3), r: 172, theta: 0, phi: 0.76 };
 function placeCamera() {
   const s = Math.sin(cam.phi);
   camera.position.set(cam.target.x + cam.r * s * Math.sin(cam.theta), cam.target.y + cam.r * Math.cos(cam.phi), cam.target.z + cam.r * s * Math.cos(cam.theta));
@@ -953,8 +953,13 @@ function labelFrame() {
   const open = m.orders.filter((o) => !['done', 'declined'].includes(o.status)).length;
   const zc = label('z:console', 'console', `Keath's console · ${open} order${open === 1 ? '' : 's'} open`, null, 70); zc.p.copy(CONSOLE).setY(0.6); zc.dx = -70; zc.dy = 10; pickAttr(zc, { kind: 'console' });
   if ([...drone.values()].some((d) => d.s.rig === 'cloud' && d.s.station !== 'pegs')) { const zk = label('z:cloud', 'zone', 'cloud seats (GitHub)'); zk.p.copy(CLOUD).add(V(0, 3, 0)); }
-  for (const k of KNOW.slice(0, 40)) { const L = label('k:' + k.id, 'tag', `${esc(k.name)}${k.n > 1 ? ' · ' + k.n : ''}`, k.color, 25); L.p.copy(k.p).add(V(0, 1.2, 0)); pickAttr(L, { kind: 'know', id: k.id }); }
-  if (!KNOW.length) { const L = label('k:none', 'zone', 'knowledge ring: atlas · gitnexus · vault · decisions (not in this feed yet)', null, 20); L.p.set(0, 1, -TABLE_R - 3); L.dx = -200; }
+  for (const k of KNOW) {
+    const txt = k.kind === 'capabilities' ? `${esc(k.name)} ${k.n}${k.dead?.length ? ` <span class="bad">· ${k.dead.length} dead</span>` : ''}`
+      : k.kind === 'code graph' ? `${esc(k.name)} ${kn(k.n)}${k.detail.commits_behind ? ` <span class="warn">· ${k.detail.commits_behind} behind</span>` : k.stale ? ' <span class="dim">· old index</span>' : ''}`
+      : esc(k.name);
+    const L = label('k:' + k.id, k.kind === 'decision' ? 'tag' : 'tag', txt, k.color, k.kind === 'decision' ? 18 : k.station ? 22 : 28); L.p.copy(k.p).add(V(0, k.kind === 'code graph' ? 2.5 : 1.4, 0)); L.dx = k.kind === 'decision' ? 12 : -20; pickAttr(L, { kind: 'know', id: k.id });
+  }
+  const zk = label('z:know', 'zone', 'knowledge ring · capabilities · code graphs · vault · decisions', null, 19); zk.p.copy(arcPos(Math.PI * 1.5, ARC_R + 4, 0)); zk.dx = -200; zk.dy = -48;
   const e = m.thoughts.at(-1);
   if (e) { const L = label('th', 'thought', `<b style="font-style:normal">${esc(displayName(e.mind))}</b> <span class="dim">${esc(agoAt(e.at, m.T))} · ${esc(e.level)}</span><br>“${esc(e.line)}”`, LEVELC[e.level], 80); L.p.copy(rigTop(thoughtRig(e))).add(V(0, 14, 0)); L.dx = 16; pickAttr(L, { kind: 'thought', at: e.at }); }
   for (const [k, L] of labels) if (!L.used) { L.el.remove(); labels.delete(k); }
@@ -968,6 +973,7 @@ const PICKABLE = () => [svcMesh, droneMesh, cryMesh, pktMesh, consoleMesh, ...PR
 function pickAt(x, y) {
   mouse.set((x / W) * 2 - 1, -(y / H) * 2 + 1); ray.setFromCamera(mouse, camera);
   const hits = ray.intersectObjects(PICKABLE(), false);
+  if (!hits.length) { let best = null, bd = 22; for (const k of KNOW) { _v.copy(k.p).project(camera); const sx = (_v.x * 0.5 + 0.5) * W, sy = (-_v.y * 0.5 + 0.5) * H, d = Math.hypot(sx - x, sy - y); if (_v.z < 1 && d < bd) { bd = d; best = k; } } if (best) return { kind: 'know', id: best.id }; }
   for (const h of hits) {
     const p = h.object.userData.pick; if (!p) continue;
     if (p.kind === 'svc') { const s = M.services[h.instanceId]; if (s) return { kind: 'svc', name: s.name }; continue; }
@@ -1017,6 +1023,7 @@ function tipCore(p) {
   if (p.kind === 'order') { const o = M.orders.find((x) => x.id === p.id); return o ? `<b>${esc(o.id)} · ${esc(o.status)}</b>${esc(o.text.slice(0, 140))}` : ''; }
   if (p.kind === 'pr') { const r = M.prs[p.i]; return r ? `<b>${esc(r.repo)}#${r.number}</b>${esc(r.title)}<br><span class="note">${r.waiting ? 'waiting for a review' : esc(r.state) + ' · ' + esc(r.agent || '')}</span>` : ''; }
   if (p.kind === 'console') return '<b>Keath\'s console</b>Every order starts here. Click to write one.';
+  if (p.kind === 'know') { const k = KNOW.find((x) => x.id === p.id); return k ? `<b>${esc(k.name)}</b>${esc(k.kind)}${k.detail?.commits_behind ? ` · <span style="color:var(--warn)">index ${k.detail.commits_behind} commits behind</span>` : ''}` : ''; }
   return '';
 }
 const tip = $('#tip'); let hoverPick = null, downAt = null, dragMode = null, lastMove = 0;
@@ -1038,7 +1045,7 @@ canvas.addEventListener('pointerup', (e) => { const d = downAt; downAt = null; i
 canvas.addEventListener('dblclick', (e) => { const p = pickAt(e.clientX, e.clientY); if (p) flyToPick(p); else flyTo(HOME.target, HOME.r, HOME.phi); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerleave', () => { tip.hidden = true; });
-canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.tween = null; cam.r = clamp(cam.r * Math.exp(e.deltaY * 0.0012), 16, 200); placeCamera(); lastInput = performance.now(); }, { passive: false });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); cam.tween = null; cam.r = clamp(cam.r * Math.exp(e.deltaY * 0.0012), 16, 240); placeCamera(); lastInput = performance.now(); }, { passive: false });
 
 // ================================================================ the focus panel: facts, the doctor, and real verbs
 const panel = $('#panel'); let openKey = null;
@@ -1158,7 +1165,17 @@ function panelHtml(p) {
   if (p.kind === 'know') {
     const k = KNOW.find((x) => x.id === p.id); if (!k) return '';
     panelVerbs = { order: `Look at ${k.kind} "${k.name}" and report what needs doing`, station: 'anvil', to: 'any', ask: `About ${k.kind} ${k.name}: ` };
-    return head(esc(k.name), esc(k.kind), k.color) + `<pre style="white-space:pre-wrap;font:11px var(--f-data);color:#cfe2ea">${esc(JSON.stringify(k.detail, null, 1).slice(0, 900))}</pre>` + verbs(panelVerbs);
+    const d = k.detail || {}; let body = '';
+    if (k.kind === 'capabilities') body = dl([['count', `${d.count} of ${d.of_total} capabilities`], ['dead', d.dead.length ? `<span style="color:var(--bad)">${d.dead.map(esc).join(', ')}</span>` : 'none'], ['atlas probed', esc(d.probed_at ? agoAt(d.probed_at, now()) : '?')], ['all states', esc(Object.entries(d.by_status || {}).map(([a, b]) => a + ' ' + b).join(' · '))]]);
+    else if (k.kind === 'code graph') { body = dl([['symbols', kn(d.symbols)], ['relations', kn(d.relations)], ['files', kn(d.files)], ['communities', d.communities], ['flows', d.flows], ['indexed', `${d.days_old} days ago`], ['behind', d.commits_behind ? `<b style="color:var(--warn)">${d.commits_behind} commits</b>` : 'up to date']]);
+      panelVerbs.order = d.commits_behind ? `Re-index ${d.repo} in GitNexus: its code graph is ${d.commits_behind} commits behind` : `Check ${d.repo}'s GitNexus index`; }
+    else if (k.kind === 'vault') body = `<p class="note">${kn(d.notes)} notes in the Obsidian second brain. The spines are its most recent notes; taller = newer.</p><ul class="list">${(d.recent || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
+    else if (k.kind === 'decisions') body = `<ul class="list">${(d.recent || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
+    else if (k.kind === 'decision') body = dl([['question', esc(d.q)], ['repo', esc(d.repo)], ['when', esc(agoAt(d.at, now()))], ['tags', esc((d.tags || []).join(', '))], ['id', esc(d.id)]]);
+    else if (k.kind === 'rival cockpit') { body = dl([['title', esc(d.title)], ['updated', esc(agoAt(d.updated, now()))]]) + (d.receipts || []).slice(0, 3).map((u) => `<img alt="receipt" src="${esc(u)}" style="width:100%;border-radius:8px;border:1px solid var(--hair-2);margin-top:6px">`).join('') + ((d.receipts || []).length ? '' : '<p class="note">No receipt image on its branch yet.</p>');
+      panelVerbs = { order: `Compare ${k.name} with HOLO and list one idea worth taking`, station: 'anvil', to: 'claude (msi seat)', ask: `About rival ${k.name}: `, link: d.url, linkLabel: 'Open the PR' }; }
+    else body = `<pre style="white-space:pre-wrap;font:11px var(--f-data);color:#cfe2ea">${esc(JSON.stringify(d, null, 1).slice(0, 900))}</pre>`;
+    return head(esc(k.name), esc(k.kind) + ' · knowledge ring', k.color) + body + verbs(panelVerbs);
   }
   if (p.kind === 'thought') {
     const e = (feed.events || []).find((x) => x.at === p.at); if (!e) return '';
@@ -1213,10 +1230,12 @@ async function suggest(what, node, note) {
   what = String(what || '').trim(); if (!what) return;
   const text = `SUGGEST: ${what} — ${node} (from HOLO)`.slice(0, 600);
   if (!canWrite()) { note.className = 'note bad'; note.textContent = 'Needs the live table (or ?mock=1).'; return; }
-  if (MOCK) { mockLines.push({ at: new Date(now()).toISOString(), from: 'keath (chorus)', to: 'claude (msi seat)', text: 'MOCK: ' + text }); note.className = 'note ok'; note.textContent = 'MOCK: not sent.'; apply(); return; }
+  if (MOCK) { mockPost({ text: `MOCK SUGGEST [${node}]: ${what}`, to: 'claude (msi seat)', station: 'cockpit' }); note.className = 'note ok'; note.textContent = 'MOCK: not sent. Its packet is on your console.'; apply(); return; }
   try {
-    if (Array.isArray(feed.suggestions)) await postJSON('suggest', { text: what, node, view: 'holo' }); else await postJSON('say', { text, to: 'claude' });
-    note.className = 'note ok'; note.textContent = 'Sent. The MSI Claude sees it on its next prompt.'; setTimeout(poll, 2500);
+    let r = await fetch('suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: what, node }) });
+    if (r.status === 404) await postJSON('say', { text, to: 'claude' });
+    else { const j = await r.json(); if (!j.ok) throw new Error(j.error || 'refused'); }
+    note.className = 'note ok'; note.textContent = 'Sent as a suggestion order to the MSI Claude: watch its packet leave your console.'; setTimeout(poll, 2000);
   } catch (err) { note.className = 'note bad'; note.textContent = 'Not sent: ' + err.message; }
 }
 let pendingAct = null, modalTimer = 0;
@@ -1412,6 +1431,8 @@ function buildHints() {
   if (hot) L.push({ w: 55, t: `<b>${esc(hot.label)} holds ${hot.ahead} unpushed commit${hot.ahead === 1 ? '' : 's'}.</b> One click saves them to a new branch on GitHub.`, p: { kind: 'crystal', path: hot.path } });
   const b = feed.backup; if (b && b.age_h > 36) L.push({ w: 80, t: `<b>The off-box backup is ${hrs(b.age_h)} old.</b> Run it from xanadu's card.`, p: { kind: 'rig', id: 'xanadu' } });
   const posted = m.orders.filter((o) => o.status === 'posted' && m.T - ts(o.at) > 30 * 60e3); if (posted.length) L.push({ w: 50, t: `<b>${posted.length} order${posted.length === 1 ? '' : 's'} nobody has taken for 30 min.</b> Address one to a seat.`, p: { kind: 'console' } });
+  for (const k of KNOW) if (k.detail?.commits_behind > 50) L.push({ w: 45, t: `<b>GitNexus index for ${esc(k.name)} is ${k.detail.commits_behind} commits behind.</b> Agents searching its code graph see an old ${esc(k.name)}.`, p: { kind: 'know', id: k.id } });
+  for (const k of KNOW) if (k.dead?.length) L.push({ w: 30, t: `<b>${k.dead.length} dead ${esc(k.name)}${k.dead.length === 1 ? '' : 's'} in the atlas:</b> ${esc(k.detail.dead.join(', '))}. Prune or revive.`, p: { kind: 'know', id: k.id } });
   hints = L.sort((a, b) => b.w - a.w).slice(0, 3); hintI = hintI % Math.max(1, hints.length); showHint();
 }
 function showHint() {
@@ -1434,7 +1455,9 @@ const RIVALS = [
 ];
 function openRivals() {
   closePanel(); const r = $('#rivals');
-  $('#rivals-b').innerHTML = RIVALS.map((x) => `<article><h3>#${x.n} ${esc(x.name)} <span class="note">· ${esc(x.who)}</span></h3><p>${esc(x.pitch)}</p>
+  const live = (feed.knowledge?.rivals || []);
+  const list = live.length ? live.map((r) => { const k = RIVALS.find((x) => x.n === r.number) || {}; return { n: r.number, who: k.who || '', name: k.name || r.title, pitch: k.pitch || r.title, img: (r.receipts || [])[0] || k.img }; }) : RIVALS;
+  $('#rivals-b').innerHTML = list.map((x) => `<article><h3>#${x.n} ${esc(x.name)} <span class="note">· ${esc(x.who)}</span></h3><p>${esc(x.pitch)}</p>
     <p><a href="https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/${x.n}" target="_blank" rel="noopener">Open PR #${x.n} ↗</a>${x.img ? '' : ' <span class="note">· no receipt image on its branch yet</span>'}</p>${x.img ? `<img alt="${esc(x.name)} receipt" src="${x.img}">` : ''}</article>`).join('');
   r.hidden = false; frameView();
 }
@@ -1442,21 +1465,84 @@ $('#b-rivals').addEventListener('click', () => { if ($('#rivals').hidden) openRi
 $('#rivals-x').addEventListener('click', () => { $('#rivals').hidden = true; frameView(); });
 
 // ================================================================ the knowledge ring: what the colony knows, round the table's rim
-// Slots for feed fields that may or may not be present; a missing one is shown as missing, never invented.
-let KNOW = [];
+// capability constellation (one cluster per kind, red stars = dead lanes), a code-graph nebula per GitNexus repo
+// (size = symbols, orange fog = commits behind), the vault's memory shelf (recent notes as spines), the decisions
+// obelisk, and the rival cockpits as distant stations. A source that answered {error} is a dim "offline" node.
+let KNOW = [], KNOW_KEY = '';
+const ARC_R = TABLE_R + 7;
+function arcPos(a, r = ARC_R, y = 3) { return V(Math.cos(a) * r, y, Math.sin(a) * r); }
+function rnd(seed) { let s = 0; for (const ch of String(seed)) s = (s * 31 + ch.charCodeAt(0)) >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+function cloud(center, n, rad, seed, flat = 0.6) { const r = rnd(seed), L = []; for (let i = 0; i < n; i++) { const u = r() * Math.PI * 2, v = Math.acos(2 * r() - 1), d = Math.cbrt(r()) * rad; L.push(center.clone().add(V(Math.sin(v) * Math.cos(u) * d, Math.cos(v) * d * flat, Math.sin(v) * Math.sin(u) * d))); } return L; }
+const kn = (x) => (x >= 1e6 ? (x / 1e6).toFixed(1) + 'M' : x >= 1e3 ? Math.round(x / 1e3) + 'k' : String(x));
 function buildKnow() {
-  const f = feed, L = [];
-  const atlas = f.atlas || f.knowledge?.atlas, gn = f.gitnexus || f.knowledge?.gitnexus, vault = f.vault || f.knowledge?.vault, dec = f.decisions || f.knowledge?.decisions;
-  if (atlas) { const by = atlas.by_kind || atlas.kinds || {}; for (const [k, v] of Object.entries(by)) L.push({ id: 'atlas:' + k, kind: 'capabilities', name: `${k}`, n: typeof v === 'number' ? v : v.count ?? 0, color: '#7fe7ff', detail: v }); }
-  if (gn) for (const r of (gn.repos || gn)) if (r && r.name) L.push({ id: 'gn:' + r.name, kind: 'code graph', name: r.name, n: r.nodes ?? r.symbols ?? 1, stale: r.stale_h ?? r.age_h, color: (r.stale_h ?? r.age_h ?? 0) > 72 ? '#5a6872' : '#a9e094', detail: r });
-  if (vault) for (const v of (vault.recent || vault.notes || []).slice(0, 14)) L.push({ id: 'vault:' + (v.path || v.title), kind: 'vault note', name: v.title || v.path, n: 1, color: '#c9a6ff', detail: v });
-  if (dec) for (const d of (dec.recent || dec).slice?.(0, 10) || []) L.push({ id: 'dec:' + (d.id || d.q || d.question), kind: 'decision', name: String(d.question || d.q || d.id).slice(0, 60), n: 1, color: '#ffe08a', detail: d });
-  const R = TABLE_R + 9;
-  L.forEach((k, i) => { const a = Math.PI * 0.18 + (i / Math.max(1, L.length)) * Math.PI * 1.64; k.p = V(Math.cos(a + Math.PI) * R, 4 + (i % 3) * 1.6, Math.sin(a + Math.PI) * R * 0.92 - 4); });
+  const K = feed.knowledge || {}, L = [];
+  const key = JSON.stringify([K.atlas?.total, K.atlas?.dead?.length, (K.codegraph || []).length, K.codegraph?.error, K.vault?.notes, (K.vault?.recent || []).length, (K.decisions || []).length, (K.rivals || []).length]);
+  if (key === KNOW_KEY) return; KNOW_KEY = key;
+  const offline = (id, name, a, why) => L.push({ id, kind: 'offline', name: name + ' · source offline', n: 1, color: '#5a6872', p: arcPos(a), stars: [arcPos(a)], detail: { error: why } });
+  // capabilities: the steward's atlas
+  const at = K.atlas;
+  if (at && !at.error) {
+    const kinds = Object.entries(at.by_kind || {}).sort((a, b) => b[1] - a[1]), a0 = Math.PI * 0.98, a1 = Math.PI * 1.3;
+    kinds.forEach(([kind, n], i) => {
+      const a = a0 + (i + 0.5) / kinds.length * (a1 - a0), c = arcPos(a, ARC_R, 3 + (i % 2) * 2.5);
+      const dead = (at.dead || []).filter((d) => String(d.id).split(':')[0] === kind);
+      L.push({ id: 'cap:' + kind, kind: 'capabilities', name: kind, n, color: '#7fe7ff', p: c, stars: cloud(c, clamp(Math.round(Math.sqrt(n) * 2.2), 4, 40), 1 + Math.sqrt(n) * 0.16, kind), dead: dead.map((d, j) => c.clone().add(V(Math.cos(j * 2.4) * 1.4, 1.6 + j * 0.5, Math.sin(j * 2.4) * 1.4))), detail: { kind, count: n, dead: dead.map((d) => d.name), of_total: at.total, by_status: at.by_status, probed_at: at.probed_at } });
+    });
+  } else offline('cap:off', 'capability atlas', Math.PI * 1.08, at?.error || 'not in this feed');
+  // code graphs: GitNexus, one nebula per indexed repo
+  const cg = K.codegraph;
+  if (Array.isArray(cg)) {
+    const a0 = Math.PI * 1.33, a1 = Math.PI * 1.7;
+    cg.forEach((r, i) => {
+      const a = a0 + (i + 0.5) / cg.length * (a1 - a0), c = arcPos(a, ARC_R + (i % 2) * 4, 5 + (i % 3) * 1.5), days = (now() - ts(r.indexed_at)) / 864e5;
+      const stale = r.commits_behind > 0, col = stale ? '#ff9a5a' : days > 30 ? '#6f8f86' : '#a9e094';
+      L.push({ id: 'cg:' + r.repo + ':' + i, kind: 'code graph', name: r.repo, n: r.symbols, color: col, stale: stale || days > 30, p: c, stars: cloud(c, clamp(Math.round(Math.log2(r.symbols + 1) * 2.2), 8, 42), 1 + Math.log10(r.symbols + 10) * 0.8, r.repo + i, 0.45),
+        detail: { repo: r.repo, files: r.files, symbols: r.symbols, relations: r.relations, communities: r.communities, flows: r.flows, indexed: r.indexed_at, days_old: Math.round(days), commits_behind: r.commits_behind } });
+    });
+  } else offline('cg:off', 'GitNexus code graph', Math.PI * 1.5, cg?.error || 'not in this feed');
+  // the vault: Obsidian second brain, recent notes as spines on a shelf
+  const va = K.vault;
+  if (va && !va.error) {
+    const rec = (va.recent || []).slice(0, 16), a0 = Math.PI * 1.72, a1 = Math.PI * 1.88, c = arcPos((a0 + a1) / 2, ARC_R, 1);
+    const spines = rec.map((v, i) => { const a = a0 + (i + 0.5) / Math.max(1, rec.length) * (a1 - a0), b = arcPos(a, ARC_R, 0.5); return { b, h: 2 + (1 - Math.min(v.age_h, 48) / 48) * 5, note: v.note, age_h: v.age_h }; });
+    L.push({ id: 'vault', kind: 'vault', name: 'vault · ' + kn(va.notes) + ' notes', n: va.notes, color: '#c9a6ff', p: c.clone().setY(6), spines, detail: { notes: va.notes, recent: rec.map((v) => `${v.note} (${hrs(v.age_h)} ago)`) } });
+  } else offline('vault:off', 'Obsidian vault', Math.PI * 1.84, va?.error || 'not in this feed');
+  // decisions: an obelisk with the newest questions on it
+  const de = K.decisions;
+  if (Array.isArray(de)) {
+    const c = arcPos(Math.PI * 1.96, ARC_R, 0);
+    L.push({ id: 'dec', kind: 'decisions', name: `decisions · ${de.length}`, n: de.length, color: '#ffe08a', p: c.clone().setY(12), obelisk: c, detail: { recent: de.slice(0, 8).map((d) => `${hhmm(d.at)} ${d.repo}: ${d.q}`) } });
+    de.slice(0, 4).forEach((d, i) => L.push({ id: 'dec:' + d.id, kind: 'decision', name: String(d.q).slice(0, 56), n: 1, color: '#ffe08a', p: c.clone().setY(3 + i * 2.2), detail: d }));
+  } else offline('dec:off', 'decision log', Math.PI * 2.04, de?.error || 'not in this feed');
+  // rivals: distant stations beyond the rim
+  const rv = Array.isArray(K.rivals) ? K.rivals : [];
+  rv.slice(0, 8).forEach((r, i) => {
+    const a = Math.PI * 1.2 + (i + 0.5) / Math.max(1, Math.min(8, rv.length)) * Math.PI * 0.6, c = arcPos(a, ARC_R + 26, 16 + (i % 2) * 4);
+    const mine = r.number === 16, known = RIVALS.find((x) => x.n === r.number);
+    L.push({ id: 'rival:' + r.number, kind: 'rival cockpit', name: `#${r.number} ${known ? known.name : r.title.slice(0, 26)}`, n: 1, color: mine ? '#e2b25a' : '#93b6ff', p: c, station: true,
+      detail: { title: r.title, url: r.url, updated: r.updated, receipts: (r.receipts || []).concat(known?.img && !(r.receipts || []).length ? [known.img] : []) } });
+  });
   KNOW = L;
 }
+const obeliskMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.6, 1, 4, 1, true).translate(0, 0.5, 0), holoMat('#ffe08a', { body: 0.3, scan: 4 }));
+obeliskMesh.visible = false; scene.add(obeliskMesh);
+const stationGeo = new THREE.TorusGeometry(2.2, 0.12, 6, 40); stationGeo.rotateX(Math.PI / 2);
+const stationMesh = new THREE.InstancedMesh(stationGeo, holoMat('#ffffff', { body: 0.8 }), 10); stationMesh.count = 0; stationMesh.setColorAt(0, C('#fff')); scene.add(stationMesh);
 function knowFrame(sec) {
-  for (const k of KNOW) { const c = C(k.color); glow.add(k.p, c, 2.5 + Math.min(9, Math.sqrt(k.n || 1) * 1.2), k.stale > 72 ? 0.3 : 0.75 + 0.2 * Math.sin(sec + k.p.x)); flow.seg(k.p, k.p.clone().setY(0), c, 0.18, 0); }
+  let si = 0; obeliskMesh.visible = false;
+  for (const k of KNOW) {
+    const c = C(k.color), tw = (i) => 0.55 + 0.35 * Math.sin(sec * 1.3 + i * 2.1);
+    if (k.stars) { const sz = k.kind === 'code graph' ? 2.4 : 1.5; k.stars.forEach((s, i) => glow.add(s, c, sz, (k.stale ? 0.28 : 0.6) * tw(i))); if (k.kind === 'code graph') glow.add(k.p, c, 8 + Math.log10(k.n + 10) * 3, k.stale ? 0.22 : 0.3); }
+    if (k.dead) k.dead.forEach((s, i) => { glow.add(s, RED, 2.6, 0.6 + 0.4 * Math.sin(sec * 4 + i)); flow.seg(s, k.p, RED, 0.3, 0); });
+    if (k.spines) for (const s of k.spines) { flow.seg(s.b, s.b.clone().setY(s.b.y + s.h), c, 0.8, 0); glow.add(s.b.clone().setY(s.b.y + s.h), c, 2, 0.6); }
+    if (k.obelisk) { obeliskMesh.visible = true; obeliskMesh.position.copy(k.obelisk); obeliskMesh.scale.set(1, 13, 1); }
+    if (k.station) { stationMesh.setMatrixAt(si, _m.compose(k.p, _q.setFromAxisAngle(V(0, 1, 0), sec * 0.3 + si), V(1, 1, 1))); stationMesh.setColorAt(si, c); si++; glow.add(k.p, c, 5, 0.6); flow.seg(k.p, k.p.clone().setY(0), c, 0.12, 0); }
+    if (k.kind === 'offline') glow.add(k.p, c, 4, 0.35);
+    if (k.kind === 'decision') glow.add(k.p, c, 2.2, 0.8);
+  }
+  stationMesh.count = si; stationMesh.instanceMatrix.needsUpdate = true; if (stationMesh.instanceColor) stationMesh.instanceColor.needsUpdate = true;
+  // the ring itself: a faint rail joining the clusters
+  for (let i = 0; i < 48; i++) { const a1 = Math.PI * 0.96 + (i / 48) * Math.PI * 1.04, a2 = Math.PI * 0.96 + ((i + 1) / 48) * Math.PI * 1.04; flow.seg(arcPos(a1, ARC_R, 0.2), arcPos(a2, ARC_R, 0.2), C('#3ac8ff'), 0.25, 0.3, i / 48, (i + 1) / 48); }
 }
 
 // ================================================================ data: poll the feeder; keep the last good feed
