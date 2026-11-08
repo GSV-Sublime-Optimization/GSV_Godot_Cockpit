@@ -41,7 +41,7 @@ static func parse(text: String, expected_id: String) -> Dictionary:
 		if typeof(gate_state) == TYPE_STRING and ["PASS", "BLOCKED", "NOT_REQUIRED"].has(gate_state):
 			var gate_reason := ""
 			if typeof(gate.get("reason")) == TYPE_STRING:
-				gate_reason = String(gate["reason"]).replace("\\n", " ").replace("\\r", " ").substr(0, 180)
+				gate_reason = String(gate["reason"]).replace("\n", " ").replace("\r", " ").substr(0, 180)
 			proof["validator"] = String(gate_state) + (" / " + gate_reason if not gate_reason.is_empty() else "")
 	var result: Variant = raw.get("result")
 	if typeof(result) != TYPE_DICTIONARY:
