@@ -1,0 +1,418 @@
+<title>Chorus</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;1,6..96,400;1,6..96,500&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a full-height night sky (canvas) with the fleet as four singing stars; the latest thought is
+   engraved bottom-centre like a score marking; a memory river of past thoughts runs along the foot.
+   One committed dark world (an observatory at night), so no light theme by design. */
+:root {
+  color-scheme: dark;
+  --sky: #070b16;          /* deep observatory blue, not black */
+  --sky-2: #0d1426;
+  --ink: #e9e4d6;          /* starlight parchment */
+  --ink-dim: #9aa3b8;
+  --hair: #26304a;
+  --msi: #e2b25a;          /* brass: the workshop */
+  --i3: #ec7348;           /* ember: the engine room */
+  --l9: #63cbdb;           /* glacier: the drone */
+  --xanadu: #b9a2f0;       /* lilac: the librarian */
+  --tranquillo: #5fc4b0;   /* routine */
+  --attento: #e8b34a;      /* notable */
+  --agitato: #ef4f5a;      /* alarm */
+  --f-display: "Bodoni Moda", "Didot", "Bodoni 72", Georgia, serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-data: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--sky); color: var(--ink); font-family: var(--f-body);
+  overflow: hidden; -webkit-font-smoothing: antialiased;
+}
+#sky { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.ui {
+  position: fixed; inset: 0; pointer-events: none; display: grid;
+  grid-template-rows: auto 1fr auto auto; grid-template-columns: minmax(0, 1fr);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(14px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-bottom, 0px));
+}
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.mark { display: grid; gap: 2px; }
+.mark h1 {
+  margin: 0; font-family: var(--f-display); font-weight: 500; font-size: clamp(22px, 3.2vw, 34px);
+  letter-spacing: 0.32em; text-transform: uppercase; line-height: 1;
+}
+.mark p { margin: 0; color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; }
+.status { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.chip {
+  font-family: var(--f-data); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 4px 9px; border: 1px solid var(--hair); border-radius: 999px; color: var(--ink-dim);
+  background: color-mix(in srgb, var(--sky-2) 80%, transparent);
+}
+.chip.live { color: var(--tranquillo); border-color: color-mix(in srgb, var(--tranquillo) 45%, var(--hair)); }
+.chip.rehearsal { color: var(--attento); border-color: color-mix(in srgb, var(--attento) 50%, var(--hair)); }
+.controls { display: flex; gap: 8px; pointer-events: auto; }
+button {
+  font: 600 12px var(--f-body); letter-spacing: 0.06em; color: var(--ink); cursor: pointer;
+  background: color-mix(in srgb, var(--sky-2) 85%, transparent); border: 1px solid var(--hair);
+  border-radius: 999px; padding: 7px 13px;
+}
+button:hover { border-color: var(--ink-dim); }
+button:focus-visible { outline: 2px solid var(--l9); outline-offset: 2px; }
+button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento); }
+
+.thought { justify-self: center; text-align: center; max-width: min(62ch, 100%); display: grid; gap: 10px; padding-bottom: 14px; }
+.marking {
+  font-family: var(--f-display); font-style: italic; font-size: clamp(15px, 1.8vw, 19px);
+  letter-spacing: 0.06em; color: var(--lvl, var(--tranquillo));
+}
+.marking::before, .marking::after { content: ""; display: inline-block; width: 28px; height: 1px; background: currentColor; opacity: 0.5; vertical-align: middle; margin: 0 12px; }
+.line {
+  margin: 0; font-family: var(--f-display); font-weight: 400; font-style: italic;
+  font-size: clamp(22px, 3.4vw, 40px); line-height: 1.18; text-wrap: balance; color: var(--ink);
+  text-shadow: 0 2px 24px rgba(0,0,0,0.6);
+}
+.meta { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; align-items: center; }
+.reason {
+  font-family: var(--f-data); font-size: 12px; padding: 3px 9px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--lvl, var(--tranquillo)) 40%, var(--hair));
+  color: var(--ink); background: color-mix(in srgb, var(--sky) 70%, transparent);
+}
+.who { font-family: var(--f-data); font-size: 12px; color: var(--ink-dim); }
+.who b { color: var(--ink); font-weight: 600; }
+
+.river { pointer-events: auto; display: grid; gap: 6px; }
+.river-head { display: flex; justify-content: space-between; font-family: var(--f-data); font-size: 11px; color: var(--ink-dim); letter-spacing: 0.08em; text-transform: uppercase; }
+.river-track {
+  position: relative; height: 34px; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--sky-2) 90%, transparent) 12%, color-mix(in srgb, var(--sky-2) 90%, transparent) 88%, transparent);
+}
+.drop {
+  position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  border: 0; padding: 0; background: var(--c); box-shadow: 0 0 10px var(--c); cursor: pointer;
+}
+.drop.synthetic { background: transparent; border: 1.5px dashed var(--c); box-shadow: none; }
+.drop[aria-current="true"] { outline: 2px solid var(--ink); outline-offset: 3px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); padding-top: 6px; }
+.legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin-right: 6px; vertical-align: 1px; }
+.river-head { flex-wrap: wrap; gap: 4px 12px; }
+.controls { flex-wrap: wrap; }
+@media (max-width: 520px) {
+  .mark p { display: none; }
+  .top { flex-direction: column; align-items: stretch; gap: 8px; }
+  .status { justify-content: flex-start; }
+  .chip { font-size: 10px; letter-spacing: 0.04em; }
+  .controls button { padding: 6px 10px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) { .line { text-shadow: none; } }
+</style>
+
+<canvas id="sky" aria-label="The fleet drawn as four stars: MSI, i3, L9 and xanadu, with their minds' thoughts as comets"></canvas>
+<div class="ui">
+  <header class="top">
+    <div class="mark">
+      <h1>Chorus</h1>
+      <p>The colony's minds, seen and heard</p>
+    </div>
+    <div class="status">
+      <span class="chip" id="source">Snapshot 2026-11-08 06:48 UTC</span>
+      <div class="controls">
+        <button id="sound" aria-pressed="false" title="Each rig sings one note; thoughts play chords">Sound off</button>
+        <button id="rehearse" aria-pressed="false" title="Play labelled demo thoughts through every state">Rehearse</button>
+        <button id="full" title="Fullscreen (F). Esc leaves.">Fullscreen</button>
+      </div>
+    </div>
+  </header>
+  <div></div>
+  <section class="thought" aria-live="polite">
+    <div class="marking" id="marking">tranquillo</div>
+    <p class="line" id="line">The fleet is quiet.</p>
+    <div class="meta" id="meta"></div>
+  </section>
+  <footer class="river">
+    <div class="river-head"><span>Memory</span><span id="span"></span></div>
+    <div class="river-track" id="track"></div>
+    <div class="legend">
+      <span style="--c: var(--msi)">MSI · workshop · C</span>
+      <span style="--c: var(--i3)">i3 · engine room · E</span>
+      <span style="--c: var(--l9)">L9 · drone · G</span>
+      <span style="--c: var(--xanadu)">xanadu · librarian · B</span>
+    </div>
+  </footer>
+</div>
+
+<script>
+"use strict";
+// ---------- data: the shared bakeoff fixture (real, frozen 2026-11-08 06:48 UTC) ----------
+const FIXTURE_NOW = Date.parse("2026-11-08T06:48:00Z");
+const FIXTURE = {
+  events: [
+    {at:"2026-11-08T05:35:16+00:00",mind:"l9-triage-drone",model:"qwen3:4b-l9fast",level:"alarm",reasons:["i3 failing: docker","msi failing: dev-mentor","off-box backup 109 h old (alarm > 36 h)"],line:"Critical backups overdue (109h old) and multiple system failures: i3 and msi failing, with insufficient RAM and no green status.",ms:3055},
+    {at:"2026-11-08T06:16:16+00:00",mind:"l9-triage-drone",model:"qwen3:4b-l9fast",level:"notable",reasons:["i3 failing: docker"],line:"i3 failing: docker",ms:1794,focus:"i3"},
+    {at:"2026-11-08T06:21:04+00:00",mind:"l9-triage-drone",model:"qwen3:4b-l9fast",level:"notable",reasons:["i3 failing: docker"],line:"i3 failing: docker",ms:1711,focus:"i3"},
+    {at:"2026-11-08T06:36:20+00:00",mind:"l9-triage-drone",model:"qwen3:4b-l9fast",level:"notable",reasons:["i3 failing: docker"],line:"i3 failing: docker",ms:16578,focus:"i3"}
+  ],
+  heartbeats: {
+    msi:{at:"2026-11-08T06:45:03Z",green:true,ram_avail_mb:5473,checks:[{name:"litellm",ok:true},{name:"dev-mentor",ok:true},{name:"i3-tunnel",ok:true},{name:"docker",ok:true}]},
+    i3:{at:"2026-11-08T06:46:42Z",green:false,ram_avail_mb:14786,checks:[{name:"ollama",ok:true},{name:"gameattract",ok:true},{name:"docker",ok:false}]},
+    l9:{at:"2026-11-08T06:36:20Z",green:true,checks:[{name:"ollama-mind",ok:true}]}
+  }
+};
+// Rehearsal: clearly labelled demo thoughts that walk every state. Never mixed into real memory.
+const REHEARSAL = [
+  {mind:"l9-triage-drone",level:"routine",reasons:[],line:"The fleet is quiet. Every rig reporting, nothing failing.",synthetic:true},
+  {mind:"culture-ship",level:"notable",reasons:["msi failing: i3-tunnel"],focus:"msi",line:"The workshop has lost its line to the engine room's models.",synthetic:true},
+  {mind:"l9-triage-drone",level:"alarm",reasons:["msi heartbeat SILENT 60 min"],focus:"msi",line:"MSI has been silent for an hour.",synthetic:true,silence:"msi"},
+  {mind:"i3-engine-mind",level:"notable",reasons:["i3 failing: docker"],focus:"i3",line:"Docker still waits on the BIOS switch. Games play on.",synthetic:true},
+  {mind:"culture-ship",level:"routine",reasons:[],line:"All voices back in tune.",synthetic:true}
+];
+const RIGS = [
+  {id:"msi", name:"MSI", role:"workshop", color:"--msi", note:261.63, pos:[0.27,0.40], r:30},
+  {id:"i3", name:"i3", role:"engine room", color:"--i3", note:329.63, pos:[0.73,0.36], r:28},
+  {id:"l9", name:"L9", role:"drone", color:"--l9", note:392.00, pos:[0.62,0.62], r:20},
+  {id:"xanadu", name:"xanadu", role:"librarian", color:"--xanadu", note:493.88, pos:[0.38,0.64], r:24}
+];
+const MIND_HOME = {"l9-triage-drone":"l9","culture-ship":"msi","i3-engine-mind":"i3"};
+const LEVEL = {
+  routine:{word:"tranquillo", color:"--tranquillo"},
+  notable:{word:"attento", color:"--attento"},
+  alarm:{word:"agitato", color:"--agitato"}
+};
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// ---------- state ----------
+let events = FIXTURE.events.slice(), heartbeats = structuredClone(FIXTURE.heartbeats);
+let nowFn = () => FIXTURE_NOW, live = false, rehearsing = false, rehearsalTimer = null;
+let current = events[events.length - 1], silenceOverride = null;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---------- canvas sky ----------
+const cv = document.getElementById("sky"), cx = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1, stars = [], comets = [], ripples = [];
+function resize() {
+  DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR; cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  stars = Array.from({length: Math.round(W * H / 2600)}, () => ({x: Math.random() * W, y: Math.random() * H, z: Math.random(), p: Math.random() * 6.28}));
+}
+addEventListener("resize", resize); resize();
+const rigXY = id => { const r = RIGS.find(q => q.id === id); return [r.pos[0] * W, r.pos[1] * H * (W < 520 ? 0.9 : 1)]; };
+const ageMin = hb => hb ? (nowFn() - Date.parse(hb.at)) / 60000 : Infinity;
+function rigState(id) {
+  if (id === "xanadu") return {silent: false, host: true, checks: []};   // xanadu holds the record itself
+  const hb = heartbeats[id];
+  const silent = silenceOverride === id || !hb || ageMin(hb) > 15;
+  return {silent, hb, age: silenceOverride === id ? 60 : ageMin(hb), checks: hb ? hb.checks : []};
+}
+
+let lastDraw = 0;
+function frame(t) {
+  // Budget (bakeoff rule: <= 5% of one core idle): draw at most 30 fps; browsers pause hidden tabs.
+  if (t - lastDraw < 33) { requestAnimationFrame(frame); return; }
+  lastDraw = t;
+  const lvl = LEVEL[current?.level || "routine"];
+  const tint = css(lvl.color);
+  // sky + mood: a soft glow from below, tinted by the current marking
+  cx.fillStyle = css("--sky"); cx.fillRect(0, 0, W, H);
+  const g = cx.createRadialGradient(W / 2, H * 1.05, 10, W / 2, H * 1.05, Math.max(W, H) * 0.9);
+  const pulse = current?.level === "alarm" && !reduced ? 0.10 + 0.06 * Math.sin(t / 380) : 0.09;
+  g.addColorStop(0, hexA(tint, pulse)); g.addColorStop(1, "transparent");
+  cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+  // stars
+  for (const s of stars) {
+    const a = 0.25 + 0.55 * s.z * (reduced ? 1 : 0.6 + 0.4 * Math.sin(t / 900 + s.p));
+    cx.fillStyle = `rgba(233,228,214,${a})`; cx.fillRect(s.x, s.y, s.z > 0.92 ? 1.6 : 1, s.z > 0.92 ? 1.6 : 1);
+  }
+  // heartbeat threads: every rig reports to the librarian
+  const [xx, xy] = rigXY("xanadu");
+  for (const r of RIGS) {
+    if (r.id === "xanadu") continue;
+    const st = rigState(r.id), [x, y] = rigXY(r.id);
+    cx.strokeStyle = hexA(css(r.color), st.silent ? 0.08 : 0.18); cx.setLineDash(st.silent ? [3, 7] : []);
+    cx.lineWidth = 1; cx.beginPath(); cx.moveTo(x, y); cx.lineTo(xx, xy); cx.stroke(); cx.setLineDash([]);
+    if (!st.silent && !reduced) {           // a pulse travels the thread, faster when the beat is fresh
+      const k = ((t / (2600 + 120 * st.age)) + RIGS.indexOf(r) * 0.27) % 1;
+      cx.fillStyle = hexA(css(r.color), 0.9);
+      cx.beginPath(); cx.arc(x + (xx - x) * k, y + (xy - y) * k, 2, 0, 6.28); cx.fill();
+    }
+  }
+  // the rigs
+  for (const r of RIGS) drawRig(r, t);
+  // ripples and comets
+  ripples = ripples.filter(p => t - p.t0 < 2400);
+  for (const p of ripples) {
+    const k = (t - p.t0) / 2400;
+    cx.strokeStyle = hexA(p.c, 0.6 * (1 - k)); cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(p.x, p.y, 20 + k * 120, 0, 6.28); cx.stroke();
+  }
+  comets = comets.filter(c => t - c.t0 < c.dur + 300);
+  for (const c of comets) drawComet(c, t);
+  requestAnimationFrame(frame);
+}
+function drawRig(r, t) {
+  const st = rigState(r.id), [x, y] = rigXY(r.id), col = css(r.color);
+  const breathe = reduced || st.silent ? 1 : 1 + 0.045 * Math.sin(t / (st.host ? 1800 : 1100 + 40 * Math.min(st.age || 0, 15)));
+  const rad = r.r * breathe * (W < 520 ? 0.75 : 1);
+  const halo = cx.createRadialGradient(x, y, rad * 0.2, x, y, rad * 3.2);
+  halo.addColorStop(0, hexA(col, st.silent ? 0.06 : 0.32)); halo.addColorStop(1, "transparent");
+  cx.fillStyle = halo; cx.beginPath(); cx.arc(x, y, rad * 3.2, 0, 6.28); cx.fill();
+  cx.fillStyle = st.silent ? hexA(col, 0.18) : col; cx.beginPath(); cx.arc(x, y, rad * 0.62, 0, 6.28); cx.fill();
+  // check ring: one arc per health check, gap between them
+  const checks = st.checks || [], n = checks.length;
+  for (let i = 0; i < n; i++) {
+    const a0 = -1.57 + i * 6.283 / n + 0.12, a1 = -1.57 + (i + 1) * 6.283 / n - 0.12;
+    cx.strokeStyle = st.silent ? hexA(css("--ink-dim"), 0.35) : checks[i].ok ? hexA(css("--tranquillo"), 0.85) : css("--agitato");
+    cx.lineWidth = checks[i].ok ? 2 : 3.5; cx.beginPath(); cx.arc(x, y, rad + 9, a0, a1); cx.stroke();
+  }
+  // label, set like a staff annotation
+  cx.textAlign = "center"; cx.fillStyle = st.silent ? css("--ink-dim") : css("--ink");
+  cx.font = `600 ${W < 520 ? 12 : 14}px ${css("--f-data")}`; cx.fillText(r.name, x, y + rad + 30);
+  cx.font = `italic 400 ${W < 520 ? 12 : 14}px ${css("--f-display")}`; cx.fillStyle = css("--ink-dim");
+  const sub = st.host ? "keeps the record" : st.silent ? `silent ${Math.round(st.age)} min` :
+    checks.filter(c => !c.ok).map(c => c.name).join(", ") ? `${checks.filter(c => !c.ok).map(c => c.name).join(", ")} failing` : `${r.role} · ${Math.max(0, Math.round(st.age))} min ago`;
+  cx.fillText(sub, x, y + rad + 48);
+}
+function drawComet(c, t) {
+  const k = Math.min(1, (t - c.t0) / c.dur), e = 1 - Math.pow(1 - k, 3);
+  const x = c.x0 + (c.x1 - c.x0) * e, y = c.y0 + (c.y1 - c.y0) * e - Math.sin(e * 3.14) * 60;
+  c.trail.push([x, y]); if (c.trail.length > 26) c.trail.shift();
+  for (let i = 1; i < c.trail.length; i++) {
+    cx.strokeStyle = hexA(c.c, i / c.trail.length * 0.8); cx.lineWidth = i / c.trail.length * 4;
+    cx.beginPath(); cx.moveTo(...c.trail[i - 1]); cx.lineTo(...c.trail[i]); cx.stroke();
+  }
+  cx.fillStyle = "#fff"; cx.beginPath(); cx.arc(x, y, 3, 0, 6.28); cx.fill();
+  if (k >= 1 && !c.landed) { c.landed = true; ripples.push({x: c.x1, y: c.y1, c: c.c, t0: t}); }
+}
+function hexA(hex, a) {
+  const h = hex.replace("#", ""), n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+}
+
+// ---------- the thought ----------
+const focusOf = ev => ev.focus || (ev.reasons || []).map(r => r.split(/[ :]/)[0].toLowerCase()).find(w => RIGS.some(q => q.id === w)) || null;
+function show(ev, animate = true) {
+  current = ev; const lv = LEVEL[ev.level] || LEVEL.routine;
+  document.documentElement.style.setProperty("--lvl", `var(${lv.color})`);
+  document.getElementById("marking").textContent = ev.synthetic ? `${lv.word} · rehearsal` : lv.word;
+  document.getElementById("line").textContent = ev.line || "(no words)";
+  const meta = document.getElementById("meta"); meta.replaceChildren();
+  const who = document.createElement("span"); who.className = "who";
+  const when = ev.at ? ago(Date.parse(ev.at)) : "now";
+  who.innerHTML = `<b>${esc(ev.mind)}</b> · ${esc(ev.model || "")}${ev.ms ? ` · thought in ${(ev.ms / 1000).toFixed(1)} s` : ""} · ${esc(when)}`;
+  meta.append(who);
+  for (const r of ev.reasons || []) { const s = document.createElement("span"); s.className = "reason"; s.textContent = r; meta.append(s); }
+  if (animate && !reduced) {
+    const home = MIND_HOME[ev.mind] || "l9", f = focusOf(ev);
+    const [x0, y0] = rigXY(home), [x1, y1] = f ? rigXY(f) : [W / 2, H * 0.5];
+    comets.push({x0, y0, x1, y1, c: css(lv.color), t0: performance.now(), dur: 1500, trail: []});
+  }
+  sing(ev);
+  markCurrent();
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function ago(ms) {
+  const m = Math.round((nowFn() - ms) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
+}
+
+// ---------- memory river ----------
+function drawRiver() {
+  const track = document.getElementById("track"); track.replaceChildren();
+  const real = events.filter(e => e.at), times = real.map(e => Date.parse(e.at));
+  const t0 = Math.min(...times), t1 = Math.max(nowFn(), ...times), span = Math.max(1, t1 - t0);
+  document.getElementById("span").textContent = `${real.length} thoughts · last ${Math.max(1, Math.round(span / 60000))} min`;
+  real.forEach((ev, i) => {
+    const b = document.createElement("button"); b.className = "drop";
+    b.style.left = `${4 + 92 * (Date.parse(ev.at) - t0) / span}%`;
+    b.style.setProperty("--c", `var(${(LEVEL[ev.level] || LEVEL.routine).color})`);
+    b.setAttribute("aria-label", `${ev.level} at ${new Date(ev.at).toISOString().slice(11, 16)} UTC: ${ev.line}`);
+    b.title = `${new Date(ev.at).toISOString().slice(11, 16)} UTC · ${ev.line}`;
+    b.onclick = () => { stopRehearsal(); silenceOverride = null; show(ev); };
+    b.dataset.i = i; track.append(b);
+  });
+  markCurrent();
+}
+function markCurrent() {
+  document.querySelectorAll(".drop").forEach(d => d.setAttribute("aria-current", events[d.dataset.i] === current ? "true" : "false"));
+}
+
+// ---------- sound: each rig a note of Cmaj7; thoughts play chords by marking ----------
+let ac = null, master = null, soundOn = false;
+function ensureAudio() {
+  if (ac) return; ac = new (window.AudioContext || window.webkitAudioContext)();
+  master = ac.createGain(); master.gain.value = 0.12;
+  const verb = ac.createConvolver(); verb.buffer = impulse(2.6); const wet = ac.createGain(); wet.gain.value = 0.45;
+  master.connect(ac.destination); master.connect(verb); verb.connect(wet); wet.connect(ac.destination);
+}
+function impulse(sec) {
+  const len = ac.sampleRate * sec, b = ac.createBuffer(2, len, ac.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.4); }
+  return b;
+}
+function tone(f, start, dur, gain, type = "sine", trem = 0) {
+  const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = f;
+  g.gain.setValueAtTime(0, start); g.gain.linearRampToValueAtTime(gain, start + 0.35); g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  if (trem) { const l = ac.createOscillator(), lg = ac.createGain(); l.frequency.value = trem; lg.gain.value = gain * 0.6; l.connect(lg); lg.connect(g.gain); l.start(start); l.stop(start + dur); }
+  o.connect(g); g.connect(master); o.start(start); o.stop(start + dur + 0.05);
+}
+function sing(ev) {
+  if (!soundOn || !ac) return;
+  const t = ac.currentTime + 0.05, C = 130.81, f = focusOf(ev), fn = RIGS.find(r => r.id === f)?.note;
+  if (ev.level === "alarm") {                          // agitato: root and tritone, trembling
+    [C, C * Math.SQRT2, C * 2].forEach((x, i) => tone(x, t + i * 0.04, 3.2, 0.22, "triangle", 6));
+  } else if (ev.level === "notable") {                 // attento: a suspended chord that wants to resolve
+    [C, C * 4 / 3, C * 3 / 2, C * 2].forEach((x, i) => tone(x, t + i * 0.09, 3.6, 0.16, "sine"));
+  } else {                                             // tranquillo: Cmaj7, the whole fleet in tune
+    RIGS.forEach((r, i) => tone(r.note / 2, t + i * 0.12, 4.6, 0.12, "sine"));
+  }
+  if (fn) tone(fn, t + 0.5, 2.4, 0.2, "sine");         // the rig in focus sings its own note on top
+}
+
+// ---------- controls ----------
+const btnSound = document.getElementById("sound"), btnReh = document.getElementById("rehearse");
+btnSound.onclick = () => {
+  ensureAudio(); ac.resume(); soundOn = !soundOn;
+  btnSound.setAttribute("aria-pressed", soundOn); btnSound.textContent = soundOn ? "Sound on" : "Sound off";
+  if (soundOn) sing(current);
+};
+btnReh.onclick = () => rehearsing ? stopRehearsal() : startRehearsal();
+function startRehearsal() {
+  rehearsing = true; btnReh.setAttribute("aria-pressed", "true"); btnReh.textContent = "Stop rehearsal";
+  setSource(); let i = 0;
+  const step = () => {
+    const ev = REHEARSAL[i++]; if (!ev) return stopRehearsal();
+    silenceOverride = ev.silence || null; show(ev); rehearsalTimer = setTimeout(step, 5200);
+  };
+  step();
+}
+function stopRehearsal() {
+  if (!rehearsing) return; rehearsing = false; clearTimeout(rehearsalTimer); silenceOverride = null;
+  btnReh.setAttribute("aria-pressed", "false"); btnReh.textContent = "Rehearse"; setSource();
+  show(events[events.length - 1], false);
+}
+document.getElementById("full").onclick = toggleFull;
+function toggleFull() { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.().catch(() => {}); }
+addEventListener("keydown", e => {
+  if (e.key === "f" || e.key === "F") toggleFull();
+  if (e.key === "Escape" && rehearsing) stopRehearsal();
+});
+function setSource() {
+  const s = document.getElementById("source");
+  s.className = "chip" + (rehearsing ? " rehearsal" : live ? " live" : "");
+  s.textContent = rehearsing ? "Rehearsal · demo thoughts" : live ? "Live · xanadu" : "Snapshot 2026-11-08 06:48 UTC";
+}
+
+// ---------- live mode: served by mindview_feed.py, which writes feed.json from xanadu ----------
+async function poll() {
+  try {
+    const r = await fetch("feed.json", {cache: "no-store"}); if (!r.ok) throw 0;
+    const d = await r.json(); const fresh = d.events.length && d.events[d.events.length - 1].at !== events[events.length - 1]?.at;
+    events = d.events; heartbeats = d.heartbeats; live = true; nowFn = () => Date.now(); setSource(); drawRiver();
+    if (fresh && !rehearsing) show(events[events.length - 1]);
+  } catch { /* no feeder: stay on the snapshot */ }
+}
+if (location.protocol.startsWith("http") && !location.hostname.endsWith("claude.ai")) { poll(); setInterval(poll, 15000); }
+
+drawRiver(); show(current, false); requestAnimationFrame(frame);
+</script>
