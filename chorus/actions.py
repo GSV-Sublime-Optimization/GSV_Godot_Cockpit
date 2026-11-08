@@ -18,6 +18,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import portable
+
 TASKS = {  # scheduled tasks Keath may run now
     "heartbeat-msi": ("\\KiloCore-Heartbeat-MSI", "Take MSI's heartbeat now"),
     "mirror-sync": ("\\KiloCore-Mirror-Sync", "Sync the git mirrors now"),
@@ -26,7 +28,8 @@ TASKS = {  # scheduled tasks Keath may run now
 }
 CONTAINERS = {"kilocore-dev-mentor", "kilocore-model-router", "kilocore-culture-ship", "kilocore-dispatch",
               "kilocore-gordon", "kilocore-serena", "kilocore-nusyq-hub", "kilocore-simulatedverse", "kilocore-skyclaw"}
-ROOTS = [Path("C:/dev/active"), Path("K:/dev/worktrees")]
+ROOTS = portable.roots()            # CHORUS_ROOTS overrides
+WINDOWS = portable.WINDOWS
 _pending: dict[str, dict] = {}
 
 
@@ -82,6 +85,8 @@ def confirm(token: str) -> dict:
 def _run(action: str, target: str) -> tuple[bool, str]:
     try:
         if action == "task":
+            if not WINDOWS:
+                return False, "scheduled tasks are Windows-only (they live on the MSI); nothing ran"
             r = subprocess.run(["schtasks", "/run", "/tn", TASKS[target][0]], capture_output=True, text=True, timeout=30)
             return r.returncode == 0, (r.stdout or r.stderr).strip()
         if action == "restart":
@@ -96,6 +101,8 @@ def _run(action: str, target: str) -> tuple[bool, str]:
             return _preserve(_checkout(target))
     except subprocess.TimeoutExpired:
         return False, "timed out"
+    except OSError as e:            # schtasks, docker or git missing on this rig
+        return False, f"could not run: {e.__class__.__name__}: {e}"[:300]
     return False, "unknown action"
 
 

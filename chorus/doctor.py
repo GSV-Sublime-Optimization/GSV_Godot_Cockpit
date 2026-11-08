@@ -16,6 +16,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+import portable
+
 HERE = Path(__file__).resolve().parent
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "LogLevel=ERROR"]
 
@@ -47,7 +49,7 @@ def i3_docker() -> dict:
           "$s=(Get-Service com.docker.service -EA SilentlyContinue).Status; "
           "\"vtx=$($p.VirtualizationFirmwareEnabled) hypervisor=$($c.HypervisorPresent) docker_service=$s\"")
     enc = base64.b64encode(ps.encode("utf-16-le")).decode()      # no quoting survives ssh -> cmd -> powershell; this does
-    r = subprocess.run(SSH + ["i3", f"powershell -NoProfile -EncodedCommand {enc}"], capture_output=True, text=True, timeout=40)
+    r = subprocess.run(SSH + [portable.I3_SSH, f"powershell -NoProfile -EncodedCommand {enc}"], capture_output=True, text=True, timeout=40)
     line = (r.stdout or "").strip().splitlines()[-1:] or ["no answer"]
     ev = [f"i3 says: {line[0]}"]
     if "vtx=False" in line[0]:
@@ -58,7 +60,7 @@ def i3_docker() -> dict:
 
 
 def i3_ollama() -> dict:
-    code, ms = _http_ms("http://100.102.251.35:11434/api/version", 10)
+    code, ms = _http_ms(f"{portable.I3_OLLAMA}/api/version", 10)
     return {"verdict": "confirmed: Ollama on the i3 is unreachable from MSI" if code is None else "not confirmed: Ollama answers",
             "evidence": [f"/api/version: {code or 'no answer'} in {ms} ms"]}
 
@@ -71,9 +73,11 @@ def msi_docker() -> dict:
     except subprocess.TimeoutExpired:
         ok, out = False, "no answer in 20 s"
     ms = round((time.perf_counter() - t) * 1000)
-    builds = subprocess.run(["powershell", "-NoProfile", "-Command",
-                             "(Get-CimInstance Win32_Process -Filter \"Name='docker.exe'\" | ? CommandLine -match ' build ').Count"],
-                            capture_output=True, text=True, timeout=20).stdout.strip() or "0"
+    builds = "n/a (not Windows)"
+    if portable.WINDOWS:
+        builds = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                 "(Get-CimInstance Win32_Process -Filter \"Name='docker.exe'\" | ? CommandLine -match ' build ').Count"],
+                                capture_output=True, text=True, timeout=20).stdout.strip() or "0"
     ev = [f"docker version: {out} ({ms} ms)", f"docker builds running: {builds}"]
     if ok:
         return {"verdict": "not confirmed: the Docker engine answers", "evidence": ev}
