@@ -32,20 +32,44 @@ var _route_output: RichTextLabel
 var _steer_output: RichTextLabel
 var _flight_output: RichTextLabel
 var _last_bridge_ok: bool = false
+var _status_probed: bool = false
 
 ## tab index -> Callable(Control), dropped once that tab has been built.
 var _lazy_fillers: Dictionary = {}
 
 func _ready() -> void:
+	# Slice 7 idle-CPU discipline (Loom #23: 12.6% -> 0.15% idle; HOLOMIND
+	# kit: 0.0% idle): cap the frame rate and let the engine sleep when
+	# idle. The room's own _process early-outs when nothing is animating,
+	# so the cap is the ceiling and the early-out is the floor.
+	Engine.max_fps = 30
+	OS.low_processor_usage_mode = true
 	_build_ui()
-	_status_bar.text = "● online"
-	_status_bar.modulate = Color(0.4, 1.0, 0.4)
+	# Slice 7: the room-first boot must not leave "● online" on the bar when
+	# nothing was probed. On a host without the PowerShell bridge the bar
+	# says so at boot (the portable offline test requires "bridge
+	# unavailable" after 3 frames); on Windows it says the Status probe has
+	# not run yet until the Status tab is visited.
+	if not OS.has_feature("windows"):
+		_status_bar.text = "● bridge unavailable"
+		_status_bar.modulate = Color(1.0, 0.4, 0.4)
+	elif _tabs.current_tab == 0:
+		_status_bar.text = "● online"
+		_status_bar.modulate = Color(0.4, 1.0, 0.4)
+	else:
+		_status_bar.text = "● room — Status not probed"
+		_status_bar.modulate = Color(1.0, 0.8, 0.2)
 	_append_status("[color=cyan]Ξ GSV Godot Cockpit[/color] — online.")
 	_append_status("Bridge: " + BRIDGE)
 	_append_status("Kilo_Core · GSV · Intermediary · FCC · LiteLLM · OpenClaw · Serena → [b]Cockpit[/b] → you")
 	_append_status("─────────────────────────────────────")
 	# refresh_status() blocks on a bridge call measured at ~21 s. Paint first.
-	_probe_after_first_paint()
+	# Slice 7: the Status probe runs only when the Status tab is actually
+	# shown — booting into the room must not pay a 21 s block on the main
+	# thread before the volume is interactive.
+	if _tabs.current_tab == 0:
+		_status_probed = true
+		_probe_after_first_paint()
 
 ## Runs the opening status probe once the cockpit is actually on screen.
 func _probe_after_first_paint() -> void:
@@ -101,6 +125,10 @@ func _build_ui() -> void:
 	_add_tab("Hologram", _panel_filler("res://scripts/holo/HoloTab.gd"))
 
 	_tabs.tab_changed.connect(_materialize_tab)
+	# Slice 7 (default-view fix, Slice 6 §6.1): boot into the Hologram room.
+	# First paint is the volume, not the Status text log. The classic tabs
+	# are reachable, not deleted — Hologram is tab 13 of 14.
+	_tabs.current_tab = 13
 	# The tab that is already showing has no tab_changed to wait for.
 	_materialize_tab(_tabs.current_tab)
 
@@ -114,6 +142,11 @@ func _add_tab(tab_name: String, filler: Callable) -> void:
 
 func _materialize_tab(idx: int) -> void:
 	if not _lazy_fillers.has(idx):
+		# Already built — but the Status probe is still owed if the user
+		# lands here after a room-first boot (see _ready()).
+		if idx == 0 and not _status_probed:
+			_status_probed = true
+			_probe_after_first_paint()
 		return
 	var filler: Callable = _lazy_fillers[idx]
 	_lazy_fillers.erase(idx)
@@ -121,6 +154,9 @@ func _materialize_tab(idx: int) -> void:
 	if panel == null:
 		return
 	filler.call(panel)
+	if idx == 0 and not _status_probed:
+		_status_probed = true
+		_probe_after_first_paint()
 
 ## Filler for tabs whose whole body is a single panel script.
 func _panel_filler(script_path: String) -> Callable:

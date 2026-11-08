@@ -11,6 +11,11 @@ extends SceneTree
 ## Also run by tests/godot_smoke_gate.py as the "holo" case.
 
 const HOLO_ROOM_SCENE := "res://scenes/HoloRoom.tscn"
+# Slice 7: FleetTelemetryProjection has no class_name — the codebase pattern
+# is a preload const (FleetTelemetryReader.gd). Without this the test fails
+# to parse at the first FleetTelemetryProjection.parse_telemetry call.
+const FleetTelemetryProjection = preload("res://scripts/holo/FleetTelemetryProjection.gd")
+const FleetTelemetryReader = preload("res://scripts/holo/FleetTelemetryReader.gd")
 const SURFACE_SHADER := "res://shaders/holo_surface.gdshader"
 
 var _failures: PackedStringArray = []
@@ -406,9 +411,11 @@ func _check_fleet_projection() -> void:
 	if not bool(weird_parsed.get("ok", false)):
 		_fail("weird service value made the whole snapshot fail")
 	else:
-		var weird_rigs: Dictionary = (weird_parsed["telemetry"] as Dictionary)["rigs"]
-		var weird_services: Dictionary = (weird_rigs["msi"] as Dictionary)["services"]
-		if String(weird_services.get("studio", "")) != "unknown":
+		# GDScript locals are function-scoped: these cannot reuse the
+		# weird_rigs / weird_services names declared above (Slice 7 fix).
+		var weird_rigs_parsed: Dictionary = (weird_parsed["telemetry"] as Dictionary)["rigs"]
+		var weird_services_parsed: Dictionary = (weird_rigs_parsed["msi"] as Dictionary)["services"]
+		if String(weird_services_parsed.get("studio", "")) != "unknown":
 			_fail("weird service value was not mapped to unknown")
 	var sparse := good.duplicate(true)
 	(sparse["rigs"] as Dictionary).erase("l9")
@@ -429,8 +436,9 @@ func _check_fleet_projection() -> void:
 	if not bool(long_parsed.get("ok", false)):
 		_fail("over-long note made the snapshot fail")
 	else:
-		var long_rigs: Dictionary = (long_parsed["telemetry"] as Dictionary)["rigs"]
-		if String((long_rigs["msi"] as Dictionary).get("note", "")).length() > 200:
+		# Same function-scope rule as weird_rigs above (Slice 7 fix).
+		var long_rigs_parsed: Dictionary = (long_parsed["telemetry"] as Dictionary)["rigs"]
+		if String((long_rigs_parsed["msi"] as Dictionary).get("note", "")).length() > 200:
 			_fail("over-long note was not truncated to 200 chars")
 
 

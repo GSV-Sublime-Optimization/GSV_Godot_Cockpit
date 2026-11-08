@@ -28,6 +28,7 @@ var render_priority: int = 0
 var pull: float = 0.0
 var pull_target: float = 0.0
 var billboard: bool = true
+var _dimmed: bool = false
 
 var _base_position: Vector3 = Vector3.ZERO
 var _quad: MeshInstance3D
@@ -53,6 +54,10 @@ static func state_color(state: String) -> Color:
 			return Color(0.5, 0.6, 0.8)
 		"simulated":
 			return Color(1.0, 0.5, 0.9)
+		"derived":
+			return Color(0.75, 0.55, 1.0)
+		"not_connected":
+			return Color(0.45, 0.6, 0.8)
 		_:
 			return Color(0.35, 0.35, 0.4)
 
@@ -100,14 +105,37 @@ func set_content(title: String, lines: PackedStringArray) -> void:
 
 func set_state(state: String) -> void:
 	layer_state = state
+	_apply_color()
+	# Degraded is a state value rendered as amplitude, not a timer: a fixed
+	# dim alpha while degraded, full alpha otherwise (Slice 7 — the sin(t)
+	# flicker is removed; see update_frame).
 	if _mat != null:
-		_mat.set_shader_parameter("holo_color", state_color(state))
+		_mat.set_shader_parameter("base_alpha", 0.6 if state == "degraded" else 1.0)
+
+
+## Selection dimming: non-focused layers dim to 40% but stay visible —
+## context is never deleted (design §3.2).
+func set_dimmed(dimmed: bool) -> void:
+	_dimmed = dimmed
+	_apply_color()
+	if _label != null:
+		_label.modulate = Color(0.36, 0.4, 0.4) if dimmed else Color(0.9, 1.0, 1.0)
+
+
+func _apply_color() -> void:
+	if _mat == null:
+		return
+	var color := state_color(layer_state)
+	if _dimmed:
+		color = color * HoloSelection.DIMMED_FACTOR
+	_mat.set_shader_parameter("holo_color", color)
 
 
 ## Per-frame: interpolate pull toward its target, move the plane toward the
 ## camera along camera-forward by pull * PULL_DISTANCE, scale by
 ## (1 + pull * PULL_KAPPA), and billboard the card at the gaze. Degraded
-## layers flicker (their desk flickers too — honest about the state).
+## layers render at a fixed dim alpha (their state value as amplitude) —
+## no timer-driven flicker remains (Slice 7).
 func update_frame(delta: float, camera: Camera3D) -> void:
 	pull = move_toward(pull, pull_target, delta * 1.5)
 	var fwd: Vector3 = -camera.global_transform.basis.z.normalized()
@@ -118,9 +146,6 @@ func update_frame(delta: float, camera: Camera3D) -> void:
 		global_transform = Transform3D(b.scaled(Vector3.ONE * s), target_pos)
 	else:
 		global_transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * s), target_pos)
-	if layer_state == "degraded" and _mat != null:
-		var flicker := 0.35 + 0.25 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0))
-		_mat.set_shader_parameter("base_alpha", flicker)
 
 
 func toggle_pull() -> void:

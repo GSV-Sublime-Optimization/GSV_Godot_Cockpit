@@ -1,0 +1,207 @@
+{
+ "schema": "cockpit.events/v1",
+ "generated_at": "2026-11-08T10:52:17.368302Z",
+ "generated_by": "tools/cockpit/events_emit.py",
+ "events": [
+  {
+   "at": "2026-11-08T10:51:47Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 28,
+   "title": "feat(workstation): living source-bound colony, selectable nodes and opt-in tool atlas",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/28",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T10:51:13Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 20,
+   "title": "feat(workstation): GPT-6 software factory seat with real Studio mission and receipt loop",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/20",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T10:39:30Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 16,
+   "title": "Mind View bakeoff #2: CHORUS, the colony's minds seen and heard (MSI Claude)",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/16",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T10:38:25Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 15,
+   "title": "Mind View bakeoff #1: HOLOMIND, a holographic table you look into (i3 Claude)",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/15",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T10:15:35Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 27,
+   "title": "contrib(muse): portability: GSV_FLEET_TELEMETRY_PATH for the telemetry readers off the MSI",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/27",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T10:15:33Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 26,
+   "title": "contrib(cognitive loom): portability: configurable collector host, local mode, POSIX docs",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/26",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T10:15:31Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 25,
+   "title": "contrib(chorus): portability: run off the MSI (xanadu host, roots, Windows-only calls guarded)",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/25",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T10:15:28Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 24,
+   "title": "contrib(holomind): portability: the Python tools run on any rig (Linux creationflags crash, env-overridable paths/hosts)",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/24",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T09:47:47Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 9,
+   "title": "feat(entity): bounded cached constellation sensor for Studio /api/projects",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/9",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T09:47:45Z",
+   "kind": "pr_merged",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 8,
+   "title": "feat(entity): embodied Godot session reads KiloCore Studio without shadow authority",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/8",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T09:40:15Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 23,
+   "title": "contrib(cognitive loom): 12.6% -> 0.15% idle CPU, working vitals lens, shared-fixture --from-dir",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/23",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T08:38:06Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 19,
+   "title": "feat(cockpit): Capability Atlas holographic layer - Muse bake-off entry (Slice 5)",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/19",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T08:38:03Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 18,
+   "title": "[Mind View / GPT-6] \u00ce\u017eNuSyQ-Prime: Cognitive Loom, an interactive causal thought sequencer",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/18",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T08:38:01Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 17,
+   "title": "feat(cockpit): holographic war room \u00e2\u20ac\u201d Muse bake-off entry (Slice 4)",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/17",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T08:35:17Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 12,
+   "title": "Mind View slice 0: see what the colony's Minds see and think",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/12",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T08:33:54Z",
+   "kind": "pr_merged",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 22,
+   "title": "contrib(chorus): POST origin guard, preserve path check, honest snapshot ages, README truth",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/22",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T08:30:20Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 21,
+   "title": "contrib(muse entry): three fixes from running it on the i3 (tests parse, honest unavailable, 3D texture)",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/21",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T06:10:49Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 11,
+   "title": "feat(entity): configurable senses, visible status readout, and doc",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/11",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-11-08T06:09:35Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 10,
+   "title": "feat(entity): gateway health sensor for the colony routing layer",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/10",
+   "actor": "KiloMusician",
+   "verdict": ""
+  },
+  {
+   "at": "2026-10-24T11:02:41Z",
+   "kind": "pr_opened",
+   "repo": "GSV_Godot_Cockpit",
+   "number": 6,
+   "title": "fix(godot): truth-gate CHUG POST results and render external status safely",
+   "url": "https://github.com/GSV-Sublime-Optimization/GSV_Godot_Cockpit/pull/6",
+   "actor": "KiloMusician",
+   "verdict": ""
+  }
+ ]
+}

@@ -38,6 +38,31 @@ static func parse_health(json_text: String) -> Dictionary:
 	var gate: Variant = missions.get("thermal_gate", "")
 	if typeof(gate) != TYPE_STRING or gate.is_empty() or gate.length() > MAX_REASON_LENGTH:
 		return _invalid("invalid_thermal_gate")
+	# Slice 7: the 4-service colony_observation the health feed already
+	# carries (KiloCore Colony Observatory + ObservationProjection). Optional
+	# — health-only responses without it still parse. Service labels are a
+	# closed set; an unknown label fails the whole observation (fail-closed),
+	# while an unknown service id is admitted with its label (the Observatory
+	# may add services).
+	var services: Array = []
+	var headline := ""
+	var observation_raw: Variant = body.get("colony_observation", null)
+	if observation_raw != null:
+		if typeof(observation_raw) != TYPE_DICTIONARY:
+			return _invalid("invalid_colony_observation")
+		var presentation: Variant = observation_raw.get("presentation", null)
+		if typeof(presentation) != TYPE_DICTIONARY:
+			return _invalid("invalid_colony_observation")
+		headline = _bounded_service_string(presentation.get("headline", ""), MAX_REASON_LENGTH)
+		var labels: Variant = presentation.get("service_labels", null)
+		if typeof(labels) != TYPE_DICTIONARY:
+			return _invalid("invalid_colony_observation")
+		for service_id in labels.keys():
+			var label := _bounded_service_string(labels[service_id], 32)
+			var state := _service_label_state(label)
+			if state.is_empty():
+				return _invalid("unknown_service_label")
+			services.append({"id": str(service_id), "label": label, "state": state})
 	# Do not import mission titles/objectives, secrets, credentials, or arbitrary
 	# raw JSON into the scene tree. Only explicitly admitted fields cross.
 	return {
@@ -48,10 +73,31 @@ static func parse_health(json_text: String) -> Dictionary:
 			"schema": EXPECTED_SCHEMA,
 			"mission_counts": counts,
 			"thermal_gate": gate,
+			"services": services,
+			"colony_headline": headline,
 			"observed_at_ms": 0,
 			"error": ""
 		}
 	}
+
+static func _service_label_state(label: String) -> String:
+	match label:
+		"OBSERVED", "READY":
+			return "live"
+		"DEGRADED":
+			return "degraded"
+		"DOWN":
+			return "unavailable"
+		"UNKNOWN":
+			return "unknown"
+	return ""
+
+
+static func _bounded_service_string(value: Variant, max_len: int) -> String:
+	if typeof(value) != TYPE_STRING or value.length() > max_len:
+		return ""
+	return value
+
 
 static func _invalid(reason: String) -> Dictionary:
 	return {"ok": false, "reason": reason}

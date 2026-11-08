@@ -84,6 +84,7 @@ func build_from(entries: Array) -> void:
 		_entry_nodes.append(node)
 	_refresh_header()
 	_apply_slice()
+	_apply_degraded_alpha()
 
 
 func entry_count() -> int:
@@ -158,7 +159,8 @@ func set_pulled(pulled: bool) -> void:
 ## Per-frame: interpolate pull toward its target, move the shelf toward the
 ## camera along camera-forward by pull * PULL_DISTANCE, scale by
 ## (1 + pull * PULL_KAPPA) — the same pull as HoloLayer — and billboard
-## every card at the gaze. Degraded entries flicker, like Skyclaw's desk.
+## every card at the gaze. Degraded entries render at a fixed dim alpha —
+## no timer-driven flicker remains (Slice 7).
 func update_frame(delta: float, camera: Camera3D) -> void:
 	pull = move_toward(pull, pull_target, delta * 1.5)
 	var fwd: Vector3 = -camera.global_transform.basis.z.normalized()
@@ -174,7 +176,6 @@ func update_frame(delta: float, camera: Camera3D) -> void:
 	for node in _entry_nodes:
 		_billboard_card(node as Node3D, camera)
 	_billboard_card(_header, camera)
-	_flicker_degraded()
 
 
 func _billboard_card(node: Node3D, camera: Camera3D) -> void:
@@ -184,14 +185,15 @@ func _billboard_card(node: Node3D, camera: Camera3D) -> void:
 	node.global_transform = Transform3D(b, node.global_position)
 
 
-func _flicker_degraded() -> void:
-	var flicker := 0.35 + 0.25 * (0.5 + 0.5 * sin(Time.get_ticks_msec() / 150.0))
+## Degraded is a state value rendered as amplitude: a fixed dim alpha set
+## once when entries are built — never a sin(t) flicker (Slice 7).
+func _apply_degraded_alpha() -> void:
 	for node in _entry_nodes:
 		var mat: ShaderMaterial = (node as Node3D).get_meta("holo_mat", null)
 		if mat == null:
 			continue
 		if String((node as Node3D).get_meta("entry_state", "")) == "degraded":
-			mat.set_shader_parameter("base_alpha", flicker)
+			mat.set_shader_parameter("base_alpha", 0.6)
 
 
 static func slice_view_matches(entry: Dictionary, view: String) -> bool:

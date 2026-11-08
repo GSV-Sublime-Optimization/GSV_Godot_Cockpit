@@ -138,8 +138,12 @@ static func seat_defs() -> Array[Dictionary]:
 const HONEST_STATES: PackedStringArray = [
 	"live", "stale", "unavailable", "unknown", "planned",
 	"degraded", "dimmed", "away", "not_detected", "awaiting", "incoming",
-	"simulated", "empty",
+	"simulated", "empty", "derived", "not_connected",
 ]
+
+## The date of the Lane B seat verdicts (2026-11-07). Seats with no live
+## source are labelled with this date — never shown as live (Slice 7).
+const LANE_B_EVIDENCE_DATE := "2026-11-07"
 
 
 static func is_honest_state(state: String) -> bool:

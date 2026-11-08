@@ -22,6 +22,13 @@ CASES = (
     ("portable", "res://tests/portable_offline_test.gd", "[portable-test] PASS"),
     ("holo", "res://tests/holo_coordinate_stack_test.gd", "[holo-test] PASS"),
     ("atlas", "res://tests/capability_atlas_test.gd", "[atlas-test] PASS"),
+    ("slice7-selection", "res://tests/slice7_selection_test.gd", "[slice7-test] PASS"),
+    ("slice7-chorus", "res://tests/slice7_chorus_feed_test.gd", "[slice7-test] PASS"),
+    ("slice7-studio", "res://tests/slice7_studio_services_test.gd", "[slice7-test] PASS"),
+    ("slice7-events", "res://tests/slice7_events_test.gd", "[slice7-test] PASS"),
+    ("slice7-pu", "res://tests/slice7_pu_queue_test.gd", "[slice7-test] PASS"),
+    ("slice7-suggestions", "res://tests/slice7_suggestions_test.gd", "[slice7-test] PASS"),
+    ("slice7-doors", "res://tests/slice7_doors_test.gd", "[slice7-test] PASS"),
 )
 
 
