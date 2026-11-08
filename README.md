@@ -22,6 +22,16 @@ launch the experience. See [HOLO DIVE operational stage](docs/HOLODIVE_OPERATION
 and [Software Factory Seat](docs/WORKSTATION_FACTORY_SEAT.md) for exact API
 boundaries, tests, and remaining live software-build acceptance gates.
 
+## Living colony extension (source-bound)
+
+The original HOLO DIVE keeps its theatrical 3D stage, game/capability atlas,
+agent handoff and source-time navigation. The [Living Colony extension](docs/LIVING_COLONY_WORKSTATION.md)
+adds an independent searchable finder for **every** visible node, animated packets
+*only* on verified running-mission relations, small read-only local tool discovery,
+and truthful source-path cross references. Local Git source presence is not an
+authenticated connector or runnable agent. All workstation mission policy remains
+Studio-owned.
+
 ## Status
 
 A working personal tool, not a general-purpose product: no release and no packaged

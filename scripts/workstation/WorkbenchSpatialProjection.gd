@@ -22,6 +22,7 @@ static func project(snapshot: Dictionary, capability_snapshot: Array = [], atlas
 	var state: Dictionary = {}
 	for key in ["body_feed_state", "project_feed_state", "mission_feed_state", "service_feed_state"]:
 		state[key] = _feed_state(String(snapshot.get(key, "unknown")))
+	state["tool_atlas_state"] = _atlas_feed_state(String(snapshot.get("tool_atlas_state", "not_configured")))
 	var body_lookup: Dictionary = {}
 	var bodies: Variant = snapshot.get("bodies", [])
 	if typeof(bodies) == TYPE_ARRAY:
@@ -141,6 +142,35 @@ static func project(snapshot: Dictionary, capability_snapshot: Array = [], atlas
 			"position": _orbit(i, mini(MAX_CAPABILITIES, allowed.size()), 13.0, -4.2, 0.26),
 			"observed": false, "admitted": false
 		})
+	# Opt-in local filesystem presence is a different observation grade from
+	# owner-admitted executable capabilities in the static capability atlas.
+	var discovered: Variant = snapshot.get("tools", [])
+	if state["tool_atlas_state"] == "observed" and typeof(discovered) == TYPE_ARRAY:
+		var bounded_tools: Array = discovered.slice(0, 32)
+		for i in range(bounded_tools.size()):
+			var local_tool: Variant = bounded_tools[i]
+			if typeof(local_tool) != TYPE_DICTIONARY:
+				continue
+			var tool_id := String(local_tool.get("id", ""))
+			var tool_state := String(local_tool.get("status", "unknown"))
+			var tool_path := String(local_tool.get("path", ""))
+			if tool_id.is_empty() or tool_id.length() > 48 or not ["source_present", "directory_seen", "not_found"].has(tool_state):
+				continue
+			if not tool_path.is_absolute_path() or tool_path.contains("..") or tool_path.length() > 500:
+				continue
+			_push(nodes, by_key, {
+				"key": "tool:" + tool_id, "kind": "tool", "id": tool_id,
+				"title": String(local_tool.get("name", tool_id)).substr(0, 80),
+				"detail": "LOCAL FILESYSTEM PRESENCE; no connector or executor admission",
+				"status": tool_state, "local_path": tool_path,
+				"position": _orbit(i, bounded_tools.size(), 6.3, -1.55, 1.1),
+				"source": "opt-in local read-only discovery file", "observed": true,
+				"admitted": false
+			})
+			# Path equality is a reference hint, not proof of identical Git remote.
+			if tool_state == "source_present" and by_key.has("project:" + tool_path):
+				edges.append({"from": "project:" + tool_path, "to": "tool:" + tool_id,
+					"kind": "local_path_match"})
 	return {"nodes": nodes, "edges": edges, "feeds": state, "source": "KiloCore Studio",
 		"atlas_source": atlas_source, "atlas_count": allowed.size(),
 		"atlas_omitted": maxi(0, allowed.size() - MAX_CAPABILITIES), "is_fixture": false}
@@ -150,6 +180,9 @@ static func _push(nodes: Array[Dictionary], lookup: Dictionary, entry: Dictionar
 		return
 	lookup[entry["key"]] = true
 	nodes.append(entry)
+
+static func _atlas_feed_state(value: String) -> String:
+	return value if ["observed", "stale", "unknown", "unavailable", "invalid", "not_configured"].has(value) else "unknown"
 
 static func _feed_state(value: String) -> String:
 	return value if ["observed", "stale", "unknown", "unavailable"].has(value) else "unknown"
@@ -182,7 +215,7 @@ static func color_for(status: String) -> Color:
 			return Color("#39ecd0")
 		"running", "queued", "approved":
 			return Color("#56baff")
-		"awaiting_approval", "proposed":
+		"awaiting_approval", "proposed", "source_present", "directory_seen":
 			return Color("#ffcf72")
 		"failed", "invalid", "down", "error", "unhealthy", "degraded":
 			return Color("#ff647f")

@@ -115,7 +115,8 @@ static func stage(world: Node) -> Dictionary:
 		{"name": "PROJECT CONCOURSE", "radius": 7.5, "y": 4.0, "hue": CYAN},
 		{"name": "MISSION TRANSECT", "radius": 4.7, "y": 0.6, "hue": GOLD},
 		{"name": "FLEET VAULT", "radius": 10.6, "y": -3.0, "hue": AZURE},
-		{"name": "SERVICE PERIMETER", "radius": 10.2, "y": -0.1, "hue": MUTE}
+		{"name": "SERVICE PERIMETER", "radius": 10.2, "y": -0.1, "hue": MUTE},
+		{"name": "LOCAL TOOL PRESENCE", "radius": 6.3, "y": -1.55, "hue": GOLD}
 	]:
 		var rad: float = deck["radius"]
 		var y: float = deck["y"]
@@ -169,6 +170,11 @@ static func object(parent: Node3D, entry: Dictionary, color: Color) -> Dictionar
 			cylinder(root, 0.33, 0.45, 1.25, 4, color, Vector3.ZERO, 0.7, 0.8)
 			cylinder(spin, 0.02, 0.33, 0.26, 4, color, Vector3(0, 0.75, 0), 1.4)
 			torus(root, 0.53, 0.026, color, Vector3(0, -0.68, 0), 0.8)
+		"tool":
+			# A cartridge for local evidence. Neither a CLI seat nor an attached session.
+			cylinder(root, 0.44, 0.44, 0.25, 8, MUTE, Vector3(0, -0.50, 0), 0.5)
+			cylinder(spin, 0.24, 0.38, 0.55, 8, color, Vector3(0, 0.03, 0), 0.9)
+			torus(root, 0.58, 0.025, GOLD, Vector3(0, -0.60, 0), 0.8)
 
 	var selection := Node3D.new()
 	selection.name = "FocusedSource"
@@ -187,12 +193,13 @@ static func object(parent: Node3D, entry: Dictionary, color: Color) -> Dictionar
 	return {"root": root, "halo": selection, "spin": spin, "pulse": halo,
 		"label": label, "status_label": status_label, "entry": entry}
 
-static func evidence_link(parent: Node3D, a: Vector3, b: Vector3) -> Node3D:
+static func evidence_link(parent: Node3D, a: Vector3, b: Vector3, relation_kind: String = "verified_repo") -> Node3D:
 	var obj := Node3D.new()
 	obj.name = "SourceVerifiedRelation"
 	parent.add_child(obj)
-	wire(obj, a, b, CYAN, 0.026, 0.78)
-	wire(obj, a, b, AZURE, 0.080, 0.17)
+	var hue := GOLD if relation_kind == "local_path_match" else CYAN
+	wire(obj, a, b, hue, 0.026, 0.78)
+	wire(obj, a, b, GOLD if relation_kind == "local_path_match" else AZURE, 0.080, 0.17)
 	var middle := (a + b) * 0.5
 	var marker := cylinder(obj, 0.02, 0.14, 0.29, 5, GOLD, middle, 1.8)
 	var vector := b - a

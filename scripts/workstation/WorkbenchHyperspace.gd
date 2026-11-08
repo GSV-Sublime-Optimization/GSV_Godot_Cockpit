@@ -31,6 +31,12 @@ var _open_button: Button
 var _compose_button: Button
 var _meshes: Dictionary = {}
 var _links: Array[Dictionary] = []
+var _flow_markers: Array[Dictionary] = []
+var _directory: ItemList
+var _directory_search: LineEdit
+var _directory_keys: Array[String] = []
+var _animation_accum := 0.0
+var _verified_running := 0
 var _architecture: Dictionary = {}
 var _focus_button: Button
 var _refresh_button: Button
@@ -80,7 +86,7 @@ func _build_ui() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	_lens = OptionButton.new()
-	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "GAMES", "CAPABILITY ATLAS"]:
+	for name in ["ALL DOMAINS", "FLEET", "PROJECTS", "MISSIONS", "SERVICES", "GAMES", "CAPABILITY ATLAS", "LOCAL TOOLS"]:
 		_lens.add_item(name)
 	_lens.tooltip_text = "Change the resource domain, not the underlying state."
 	_lens.item_selected.connect(func(_index): _apply_visibility())
@@ -128,7 +134,7 @@ func _build_ui() -> void:
 	_viewport = SubViewport.new()
 	_viewport.name = "Hyperspace3D"
 	_viewport.size = Vector2i(1000, 650)
-	_viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_viewport.disable_3d = false
 	_viewport.gui_disable_input = true
 	_display.add_child(_viewport)
@@ -170,6 +176,31 @@ func _build_ui() -> void:
 	subheading.add_theme_font_size_override("font_size", 12)
 	subheading.add_theme_color_override("font_color", Color("#ffcf72"))
 	inspector.add_child(subheading)
+	var finder_title := Label.new()
+	finder_title.text = "SOURCE FINDER / ANY NODE"
+	finder_title.add_theme_font_size_override("font_size", 11)
+	finder_title.add_theme_color_override("font_color", Color("#7cddf6"))
+	inspector.add_child(finder_title)
+	_directory_search = LineEdit.new()
+	_directory_search.placeholder_text = "Search rigs, code, missions, tools..."
+	_directory_search.text_changed.connect(func(_value: String): _rebuild_directory())
+	inspector.add_child(_directory_search)
+	_directory = ItemList.new()
+	_directory.name = "SourceObjectFinder"
+	_directory.custom_minimum_size.y = 142
+	_directory.allow_reselect = true
+	_directory.item_selected.connect(_on_directory_selected)
+	inspector.add_child(_directory)
+	var finder_actions := HBoxContainer.new()
+	inspector.add_child(finder_actions)
+	var previous := Button.new()
+	previous.text = "◀ PREV"
+	previous.pressed.connect(func(): _cycle_visible(-1))
+	finder_actions.add_child(previous)
+	var forward := Button.new()
+	forward.text = "NEXT ▶"
+	forward.pressed.connect(func(): _cycle_visible(1))
+	finder_actions.add_child(forward)
 	_info = RichTextLabel.new()
 	_info.bbcode_enabled = false
 	_info.scroll_active = true
@@ -204,7 +235,7 @@ func _build_ui() -> void:
 	inspector.add_child(_export_button)
 	var instructions := Label.new()
 	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	instructions.text = "DRAG orbit   /   WHEEL dive   /   CLICK select   /   F focus\nTAB cycle   /   1-7 decks   /   R re-observe\nFourth dimension = source timestamp only.\nLuminous geometry is illustrative, NOT proof of live execution."
+	instructions.text = "DRAG orbit / WHEEL dive / CLICK select / F focus / TAB cycle\nSearch finder or PREV / NEXT selects any visible node. 1-8 decks / R refresh.\nBlue wire = source-verified repo. Amber wire = exact local path match.\nSource RUNNING = animated packet; ambient stage lighting is illustrative."
 	instructions.add_theme_font_size_override("font_size", 11)
 	instructions.add_theme_color_override("font_color", Color("#93a9bb"))
 	inspector.add_child(instructions)
@@ -269,6 +300,8 @@ func _render() -> void:
 		child.queue_free()
 	_meshes.clear()
 	_links.clear()
+	_flow_markers.clear()
+	_verified_running = 0
 	_graph = PROJECTION.project(_snapshot, _capabilities, _atlas_source)
 	var lookup: Dictionary = {}
 	for entry in _graph.get("nodes", []):
@@ -279,15 +312,31 @@ func _render() -> void:
 		var a: String = link["from"]
 		var b: String = link["to"]
 		if lookup.has(a) and lookup.has(b):
-			var relation: Node3D = ARCH.evidence_link(_scene, lookup[a]["position"], lookup[b]["position"])
-			_links.append({"root": relation, "from": a, "to": b})
+			var kind := String(link.get("kind", "verified_repo"))
+			var relation: Node3D = ARCH.evidence_link(
+				_scene, lookup[a]["position"], lookup[b]["position"], kind)
+			_links.append({"root": relation, "from": a, "to": b, "kind": kind})
+			if kind == "verified_repo" and lookup[b]["kind"] == "mission" and lookup[b]["status"] == "running":
+				var shape := SphereMesh.new()
+				shape.radius = 0.11
+				shape.height = 0.22
+				shape.radial_segments = 10
+				var packet: MeshInstance3D = ARCH.mesh(
+					relation, shape, Color("#d1f7ff"), 2.2, 1.0, "VerifiedRunningWorkPacket")
+				packet.position = lookup[a]["position"]
+				_flow_markers.append({
+					"node": packet, "a": lookup[a]["position"],
+					"b": lookup[b]["position"], "edge": relation
+				})
+				_verified_running += 1
 	_apply_visibility()
 	_refresh_inspector()
+	_request_redraw()
 
 func _apply_visibility() -> void:
 	if _lens == null or _time == null:
 		return
-	var selected_domain: String = ["all", "rig", "project", "mission", "service", "game", "capability"][_lens.selected]
+	var selected_domain: String = ["all", "rig", "project", "mission", "service", "game", "capability", "tool"][_lens.selected]
 	for id in _meshes:
 		var item: Dictionary = _meshes[id]
 		var entry: Dictionary = item["entry"]
@@ -308,6 +357,8 @@ func _apply_visibility() -> void:
 	for link in _links:
 		link["root"].visible = (_meshes.has(link["from"]) and _meshes.has(link["to"])
 			and _meshes[link["from"]]["root"].visible and _meshes[link["to"]]["root"].visible)
+	for packet in _flow_markers:
+		packet["node"].visible = packet["edge"].visible
 	if _time_label != null:
 		_time_label.text = ("≤%dh / RECORDS" % int(_time_slider.value)
 			if _time_check.button_pressed else "ALL / 168h")
@@ -326,7 +377,10 @@ func _apply_visibility() -> void:
 	]
 	_status.text += "     |     ATLAS %d STATIC (%d hidden) / %s" % [
 		int(_graph.get("atlas_count", 0)), int(_graph.get("atlas_omitted", 0)), _atlas_source]
+	_status.text += "    |    LOCAL TOOLS " + String(feeds.get("tool_atlas_state", "not_configured"))
 	_update_label_lod()
+	_rebuild_directory()
+	_request_redraw()
 
 func _update_label_lod() -> void:
 	## Projection geometry is dense. Do not flood the theatre with billboards.
@@ -340,7 +394,8 @@ func _update_label_lod() -> void:
 			_lens.selected == 3 and kind == "mission" or
 			_lens.selected == 4 and kind == "service" or
 			_lens.selected == 5 and row["entry"].get("game", false) or
-			_lens.selected == 6 and kind == "capability")
+			_lens.selected == 6 and kind == "capability" or
+			_lens.selected == 7 and kind == "tool")
 		row["label"].visible = row["root"].visible and (focused or kind == "rig" or
 			(domain_only and context_zoom))
 		row["status_label"].visible = row["root"].visible and focused
@@ -352,6 +407,7 @@ func _update_camera() -> void:
 	_camera.position = center + Vector3(
 		sin(_yaw) * cos(_pitch), sin(_pitch), cos(_yaw) * cos(_pitch)) * _distance
 	_camera.look_at(center, Vector3.UP)
+	_request_redraw()
 
 func _on_view_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -387,7 +443,7 @@ func _on_view_input(event: InputEvent) -> void:
 			_focus_next()
 		elif code == KEY_R:
 			refresh_requested.emit()
-		elif code >= KEY_1 and code <= KEY_6:
+		elif code >= KEY_1 and code <= KEY_8:
 			_lens.select(code - KEY_1)
 			_apply_visibility()
 		else:
@@ -435,6 +491,52 @@ func _select(key: String) -> void:
 		_meshes[id]["halo"].visible = id == key
 	_refresh_inspector()
 	_update_label_lod()
+	_sync_directory_selection()
+	_request_redraw()
+
+func _on_directory_selected(index: int) -> void:
+	if index >= 0 and index < _directory_keys.size():
+		_select(_directory_keys[index])
+
+func _rebuild_directory() -> void:
+	if _directory == null:
+		return
+	var search := _directory_search.text.to_lower().strip_edges() if _directory_search != null else ""
+	_directory.clear()
+	_directory_keys.clear()
+	for node in _graph.get("nodes", []):
+		var key := String(node["key"])
+		if not _meshes.has(key) or not _meshes[key]["root"].visible:
+			continue
+		var line := "%s  %s  ·  %s" % [
+			String(node["kind"]).to_upper(), String(node["title"]),
+			String(node["status"]).to_upper()]
+		if not search.is_empty() and not line.to_lower().contains(search):
+			continue
+		_directory_keys.append(key)
+		var index := _directory.add_item(line)
+		_directory.set_item_custom_fg_color(index, PROJECTION.color_for(String(node["status"])))
+	_sync_directory_selection()
+
+func _sync_directory_selection() -> void:
+	if _directory == null:
+		return
+	var index := _directory_keys.find(_selected)
+	if index >= 0:
+		_directory.select(index)
+		_directory.ensure_current_is_visible()
+	else:
+		_directory.deselect_all()
+
+func _cycle_visible(direction: int) -> void:
+	if _directory_keys.is_empty():
+		return
+	var index := _directory_keys.find(_selected)
+	_select(_directory_keys[posmod(index + direction, _directory_keys.size())])
+
+func _request_redraw() -> void:
+	if _viewport != null:
+		_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 func _refresh_inspector() -> void:
 	if _info == null:
@@ -456,9 +558,33 @@ func _refresh_inspector() -> void:
 			String(entry.get("cost_class", "unknown")), String(entry.get("evidence", ""))]
 	if entry.has("updated_at") and not String(entry["updated_at"]).is_empty():
 		_info.text += "\n\nSOURCE UPDATED\n" + String(entry["updated_at"])
+	var relations: Array[String] = []
+	for edge in _graph.get("edges", []):
+		var other := ""
+		if edge["from"] == _selected:
+			other = String(edge["to"])
+		elif edge["to"] == _selected:
+			other = String(edge["from"])
+		if _meshes.has(other):
+			var linked: Dictionary = _meshes[other]["entry"]
+			relations.append("%s -> %s" % [
+				"EXACT LOCAL PATH" if edge.get("kind", "") == "local_path_match" else "VERIFIED REPO",
+				String(linked["title"])])
+	_info.text += "\n\nPROVEN LINKS\n" + ("\n".join(relations) if not relations.is_empty() else "None observed; no relationship inferred.")
+	if entry.get("kind", "") == "tool":
+		_info.text += "\n\nLOCAL PATH\n" + String(entry.get("local_path", "unreported"))
+		_info.text += "\n\nNUDGE: Local presence does not establish a connected or admitted executor."
+	match String(entry.get("status", "")):
+		"running":
+			_info.text += "\n\nNUDGE: Inspect the Studio mission receipt before proposing a change."
+		"failed":
+			_info.text += "\n\nNUDGE: Diagnose failure from the owning receipt; avoid blind retries."
+		"awaiting_approval":
+			_info.text += "\n\nNUDGE: Waiting for Studio-owned approval, not running."
+		"unknown", "stale", "unavailable":
+			_info.text += "\n\nNUDGE: Refresh source evidence; unknown is not offline."
 	var kind := String(entry["kind"])
 	_export_button.disabled = false
-	_open_button.disabled = not ["rig", "project", "mission"].has(kind)
 	_open_button.disabled = not ["rig", "project", "mission", "service"].has(kind)
 	_compose_button.disabled = not (kind == "project" and entry.get("observed", false)) and not (
 		kind == "mission" and not String(entry.get("repo", "")).is_empty())
@@ -493,34 +619,48 @@ func _focus_selected() -> void:
 	_update_label_lod()
 
 func _focus_next() -> void:
-	var keys: Array[String] = []
-	for entry in _graph.get("nodes", []):
-		var key: String = entry["key"]
-		if _meshes.has(key) and _meshes[key]["root"].visible:
-			keys.append(key)
-	if keys.is_empty():
-		return
-	var index := keys.find(_selected)
-	var next_key := keys[posmod(index + 1, keys.size())]
-	_select(next_key)
+	_cycle_visible(1)
 	_focus_selected()
 
 func _process(delta: float) -> void:
 	if not is_visible_in_tree():
 		return
 	_clock += minf(delta, 0.1)
+	_animation_accum += delta
+	# Idle scene: 2.5 visual refreshes/s. Visible running work or optional
+	# cinematic camera: 10/s. Stop constant 60 FPS 3D redraws.
+	var visibly_running := false
+	for packet in _flow_markers:
+		if packet["node"].visible:
+			visibly_running = true
+			break
+	var interval := 0.10 if visibly_running or _cinematic else 0.40
+	if _animation_accum < interval:
+		return
+	var tick := _animation_accum
+	_animation_accum = 0.0
 	if _cinematic and not _mouse_held:
-		_yaw += delta * 0.07
-	_camera_focus = _camera_focus.lerp(_focus_target, clampf(delta * 5.0, 0.0, 1.0))
-	_update_camera()
+		_yaw += tick * 0.07
+	var old_focus := _camera_focus
+	_camera_focus = _camera_focus.lerp(_focus_target, clampf(tick * 5.0, 0.0, 1.0))
+	if _cinematic or _camera_focus.distance_to(old_focus) > 0.001:
+		_update_camera()
+	# The slow orbital garnish is PRESENTATION ONLY, even while source state is
+	# unknown. Actual work particles require Studio "running" evidence.
 	for item in _architecture.get("animated", []):
 		if is_instance_valid(item):
-			item.rotate_y(delta * 0.10)
+			item.rotate_y(tick * 0.10)
 	for record in _meshes.values():
 		var status := String(record["entry"]["status"])
-		record["spin"].rotate_y(delta * (0.65 if status in ["running", "queued"] else 0.06))
+		if status == "running":
+			record["spin"].rotate_y(tick * 0.65)
 		if record["halo"].visible:
 			record["pulse"].scale = Vector3.ONE * (1.0 + 0.09 * sin(_clock * 2.0))
+	for packet in _flow_markers:
+		if packet["node"].visible:
+			packet["node"].position = packet["a"].lerp(
+				packet["b"], fposmod(_clock * 0.42, 1.0))
+	_request_redraw()
 
 func _export_handoff() -> void:
 	if not _meshes.has(_selected) or _export_button.disabled:

@@ -8,6 +8,12 @@ The fourth axis is source-reported mission time: if an ISO timestamp exists, its
 
 From a verified mission receipt pane, DIAGNOSE / NEXT ITERATION constructs a source-bound R0 investigation with the exact mission ID, lifecycle status, and validator observation. It never directly resubmits a job. An unsafe or missing source repository leaves the action disabled. The regular Studio composer still requires an explicit project scan and human submit.\n\nSelect an observed project and press COMPOSE STUDIO MISSION: the current Studio factory desk receives a project-path hint, scoped R0 analysis objective and testable acceptance. That hint does not authorize submission. The actual project must appear again in a fresh Studio Project Constellation scan, and a human still presses SUBMIT. R2 code work still waits for the Studio approval gate. Select an observed mission and press OPEN VERIFIED RESOURCE to open its live mission tab, log and receipt. No 3D geometry attaches a real PTY.
 
+For the subsequent source-aware geometry, all-node finder, demand-driven animation,
+local tool discovery lens and conservative path-match cross-references, see
+[Living Colony Workstation](LIVING_COLONY_WORKSTATION.md). Local filesystem
+presence cannot establish service health, plugin authentication or execution
+permission; only Studio-approved missions may be submitted through the Factory.
+
 ## Source and authority
 - KiloCore Studio owns project scan, missions, approvals, worktrees, receipts.
 - Kilo_Core / FleetBridge own qualified machine/agent admission, not this view.

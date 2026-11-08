@@ -8,6 +8,7 @@ signal snapshot_changed(snapshot: Dictionary)
 signal mission_log_received(mission_id: String, lines: PackedStringArray, error: String)
 
 const CATALOG = preload("res://scripts/workstation/WorkbenchCatalog.gd")
+const TOOL_ATLAS = preload("res://scripts/workstation/WorkbenchToolAtlas.gd")
 const MISSION_CONTRACT = preload("res://scripts/workstation/WorkbenchMissionContract.gd")
 const BODY_PROJECTION = preload("res://scripts/entity/FleetBodiesProjection.gd")
 const HEALTH_PROJECTION = preload("res://scripts/entity/StudioHealthProjection.gd")
@@ -20,6 +21,7 @@ var _bodies: Array[Dictionary] = []
 var _missions: Array[Dictionary] = []
 var _services: Array[Dictionary] = []
 var _projects: Array[Dictionary] = []
+var _tool_atlas: Dictionary = {"state": "not_configured", "tools": []}
 var _projects_state := "unknown"
 var _projects_at_msec := 0
 var _health: Dictionary = {"state": "unknown", "error": "not_observed"}
@@ -46,6 +48,9 @@ func _ready() -> void:
 		_busy[kind] = false
 
 func refresh() -> void:
+	# Local opt-in file observation only. Does not query arbitrary providers or launch them.
+	_tool_atlas = TOOL_ATLAS.load_from_environment()
+	snapshot_changed.emit(snapshot())
 	_request("health", "/api/health")
 	_request("bodies", "/api/entity/bodies")
 	_request("missions", "/api/missions?limit=24")
@@ -82,6 +87,8 @@ func snapshot() -> Dictionary:
 		"mission_feed_state": _mission_state,
 		"services": _services.duplicate(true),
 		"projects": _projects.duplicate(true),
+		"tools": _tool_atlas.get("tools", []).duplicate(true),
+		"tool_atlas_state": _tool_atlas.get("state", "not_configured"),
 		"project_feed_state": ("stale" if _projects_state == "observed" and (Time.get_ticks_msec() - _projects_at_msec > 45000) else _projects_state),
 		"service_feed_state": _service_state,
 		"endpoint_kind": "same_host_loopback",
