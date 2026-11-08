@@ -58,3 +58,14 @@ The fixture is a frozen copy of the live feed from 2026-11-08 06:36Z, until the 
 - the games as places the Mind visits;
 - sound;
 - the Culture Ship's Council as several voices.
+
+## Review ladder (`review_ladder.py`)
+
+Claude cloud review is the last rung, not the first: `python review_ladder.py <owner/repo> <pr> [--post] [--json] [--force]`.
+
+1. **Mechanical**: `gates.py`. Draft, stacked, no verify or no provenance stops here and no model is called. A failing check whose job never started (billing/spending-limit annotation, or 0 steps) counts as infrastructure, not a code failure.
+2. **Local first pass**: `qwen2.5-coder:14b` on Ollama (`OLLAMA_HOST`) over the diff (capped at 60k chars, truncation noted), behind a `gpu_claim.py` claim. Advisory only; findings citing files not in the diff are dropped. Skipped, with the reason, when `gpu_claim.py` is absent or the GPU stays busy.
+3. **Second opinion**: Codex (`codex exec`, read-only sandbox) or Copilot (`copilot_review.py`), chosen by `usage.py route`; never the PR author's family. Quota or a missing tool means "lane unavailable", not an error.
+4. **Verdict**: `needs-claude` (with the exact unresolved questions) or `ready-for-human`, saved to `C:\Users\Public\colony\mindview\reviews\<repo>-<pr>-<sha8>.json` (`REVIEW_LADDER_DIR` overrides). A saved report for the same head is reused unless `--force`.
+
+`--post` adds one comment labelled advisory and non-binding, naming the models that ran. It never posts a gsv review verdict, approval or merge, and is idempotent per head sha (a hidden marker is checked first). Default is a dry run. Tests: `tests/test_review_ladder.py` (stubbed gh, Ollama and lanes).
