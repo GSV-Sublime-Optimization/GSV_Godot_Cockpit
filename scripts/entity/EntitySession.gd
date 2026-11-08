@@ -5,6 +5,7 @@ extends Node
 ## Frame ticks measure local embodiment, not determinism of external systems.
 
 signal self_model_changed(model: Dictionary)
+signal quit_requested
 
 const STUDIO_SENSOR = preload("res://scripts/entity/StudioObservationBridge.gd")
 const CONSTELLATION_SENSOR = preload("res://scripts/entity/StudioConstellationBridge.gd")
@@ -40,6 +41,21 @@ func _ready() -> void:
 		_sensor.observe()
 		_constellation.observe()
 		_gateway.observe()
+
+## Bakeoff rule: Esc always exits. `_input` runs before GUI focus handling, so
+## this still fires while a text field has focus. Only the running scene root
+## quits, so an embedded instance never closes the scene that hosts it.
+func _input(event: InputEvent) -> void:
+	var key: InputEventKey = event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode != KEY_ESCAPE and key.physical_keycode != KEY_ESCAPE:
+		return
+	if get_tree().current_scene != self:
+		return
+	get_viewport().set_input_as_handled()
+	quit_requested.emit()
+	get_tree().quit()
 
 func _physics_process(delta: float) -> void:
 	_tick += 1
