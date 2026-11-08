@@ -7,7 +7,8 @@ Adapted from CHORUS's hooks/claude_activity.py (PR #16, MSI Claude), with the sa
   of a search pattern, or an agent's description.
 It never records command text, file contents or tool output.
 
-One line per tool call goes to C:/Users/Public/colony/mindview/activity.jsonl (override with COCKPIT_ACTIVITY),
+One line per tool call goes to activity.jsonl in HOLOMIND_DIR (default C:/Users/Public/colony/mindview on Windows;
+override the file with COCKPIT_ACTIVITY),
 with mind = COCKPIT_SEAT (default "claude (i3 seat)"). HOLOMIND's feeder turns it into the seat's live ticker and
 pulses, and publishes the last few lines in brief.json, so other cockpits see it too. The file rotates at 512 KB.
 Any error exits 0 silently: a cockpit must never block the work it watches.
@@ -18,7 +19,17 @@ import sys
 import time
 from pathlib import Path
 
-OUT = Path(os.environ.get('COCKPIT_ACTIVITY', 'C:/Users/Public/colony/mindview/activity.jsonl'))
+def _default_out() -> Path:
+    # Same folder as the feeder's HOLOMIND_DIR (tools/holomind/portable.py), kept inline so the hook stays one file.
+    if os.environ.get('HOLOMIND_DIR', '').strip():
+        return Path(os.environ['HOLOMIND_DIR']).expanduser() / 'activity.jsonl'
+    if os.name == 'nt':
+        return Path('C:/Users/Public/colony/mindview/activity.jsonl')
+    base = os.environ.get('XDG_DATA_HOME', '').strip() or str(Path.home() / '.local' / 'share')
+    return Path(base) / 'colony' / 'mindview' / 'activity.jsonl'
+
+
+OUT = Path(os.environ['COCKPIT_ACTIVITY']) if os.environ.get('COCKPIT_ACTIVITY') else _default_out()
 SEAT = os.environ.get('COCKPIT_SEAT', 'claude (i3 seat)')
 MAX = 512 * 1024
 
