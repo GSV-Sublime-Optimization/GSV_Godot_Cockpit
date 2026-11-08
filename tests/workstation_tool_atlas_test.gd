@@ -28,8 +28,9 @@ func _run() -> void:
 	})
 	_check(graph["nodes"].size() == 6, "four rigs plus two source-discovery tools")
 	_check(graph["edges"].is_empty(), "filesystem source presence never authorizes a relation")
-	_check(graph["nodes"][4]["status"] == "source_present", "present means discovered, not running")
-	_check(graph["nodes"][4]["kind"] == "tool", "tool remains a distinct domain")
+	if graph["nodes"].size() >= 5:
+		_check(graph["nodes"][4]["status"] == "source_present", "present means discovered, not running")
+		_check(graph["nodes"][4]["kind"] == "tool", "tool remains a distinct domain")
 	_check(ATLAS.parse(JSON.stringify(payload), NOW + 301)["state"] == "stale", "aged inventory refuses freshness")
 	_check(PROJECTION.project({"tool_atlas_state": "stale", "tools": result["tools"]})["nodes"].size() == 4,
 		"stale atlas cannot display purported current tools")
