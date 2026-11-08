@@ -12,6 +12,8 @@ extends SceneTree
 
 const HOLO_ROOM_SCENE := "res://scenes/HoloRoom.tscn"
 const SURFACE_SHADER := "res://shaders/holo_surface.gdshader"
+const FleetTelemetryProjection = preload("res://scripts/holo/FleetTelemetryProjection.gd")
+const FleetTelemetryReader = preload("res://scripts/holo/FleetTelemetryReader.gd")
 
 var _failures: PackedStringArray = []
 
@@ -406,9 +408,9 @@ func _check_fleet_projection() -> void:
 	if not bool(weird_parsed.get("ok", false)):
 		_fail("weird service value made the whole snapshot fail")
 	else:
-		var weird_rigs: Dictionary = (weird_parsed["telemetry"] as Dictionary)["rigs"]
-		var weird_services: Dictionary = (weird_rigs["msi"] as Dictionary)["services"]
-		if String(weird_services.get("studio", "")) != "unknown":
+		var parsed_rigs: Dictionary = (weird_parsed["telemetry"] as Dictionary)["rigs"]
+		var parsed_services: Dictionary = (parsed_rigs["msi"] as Dictionary)["services"]
+		if String(parsed_services.get("studio", "")) != "unknown":
 			_fail("weird service value was not mapped to unknown")
 	var sparse := good.duplicate(true)
 	(sparse["rigs"] as Dictionary).erase("l9")
@@ -429,8 +431,8 @@ func _check_fleet_projection() -> void:
 	if not bool(long_parsed.get("ok", false)):
 		_fail("over-long note made the snapshot fail")
 	else:
-		var long_rigs: Dictionary = (long_parsed["telemetry"] as Dictionary)["rigs"]
-		if String((long_rigs["msi"] as Dictionary).get("note", "")).length() > 200:
+		var parsed_long_rigs: Dictionary = (long_parsed["telemetry"] as Dictionary)["rigs"]
+		if String((parsed_long_rigs["msi"] as Dictionary).get("note", "")).length() > 200:
 			_fail("over-long note was not truncated to 200 chars")
 
 
