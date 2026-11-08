@@ -55,7 +55,7 @@ for f in sorted(glob.glob(os.path.join(home, "outbox", "*.md"))):
 channel = []
 cf = os.path.join(home, "cockpit", "channel.jsonl")
 if os.path.exists(cf):
-    for line in open(cf, encoding="utf-8", errors="replace").read().splitlines()[-60:]:
+    for line in open(cf, encoding="utf-8", errors="replace").read().splitlines()[-400:]:
         try: channel.append(json.loads(line))
         except ValueError: pass
 print(json.dumps({"events": [e for e in events if not e.get("simulated")][-200:], "heartbeats": beats,
@@ -143,6 +143,35 @@ def waiting_prs() -> list[dict]:
     return _prs["items"]
 
 
+_recent = {"at": 0.0, "items": []}
+
+
+def recent_prs() -> list[dict]:
+    """Colony PRs updated in the last 3 h, attributed to an agent by branch prefix (read-only gh)."""
+    if time.time() - _recent["at"] < PRS_EVERY:
+        return _recent["items"]
+    from shop import agent_of_branch
+    since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3 * 3600))
+    r = subprocess.run(["gh", "search", "prs", "--owner", "GSV-Sublime-Optimization", f"--updated=>{since}",
+                        "--limit", "40", "--json", "repository,number,title,url,updatedAt,state"],
+                       capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
+    items = []
+    if r.returncode == 0:
+        repos = sorted({p["repository"]["name"] for p in json.loads(r.stdout or "[]")})
+        for repo in repos:                       # one call per repo, not per PR
+            v = subprocess.run(["gh", "pr", "list", "--repo", f"GSV-Sublime-Optimization/{repo}", "--state", "all",
+                                "--search", f"updated:>{since}", "--limit", "20", "--json",
+                                "number,headRefName,title,url,updatedAt,state"],
+                               capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace")
+            for p in json.loads(v.stdout or "[]") if v.returncode == 0 else []:
+                who = agent_of_branch(p["headRefName"])
+                if who:
+                    items.append({"agent": who[0], "rig": who[1], "repo": repo, "number": p["number"],
+                                  "title": p["title"][:90], "url": p["url"], "updated": p["updatedAt"], "state": p["state"]})
+        _recent.update(at=time.time(), items=items)
+    return _recent["items"]
+
+
 def fetch() -> dict:
     r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu", REMOTE],
                        capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
@@ -160,6 +189,15 @@ def fetch() -> dict:
     except Exception as e:              # noqa: BLE001 - a broken probe must not stop the feed
         data["work"] = {"error": str(e)[:200]}
     data["doctor"] = doctor_cached(data)
+    try:
+        data["prs_recent"] = recent_prs()
+    except (subprocess.SubprocessError, ValueError, OSError):
+        data["prs_recent"] = _recent["items"]
+    from shop import orders, smiths
+    data["orders"] = orders(data.get("channel", []))
+    import actions
+    data["actions"] = actions.catalog()
+    data["smiths"] = smiths(data)
     data["claude_activity"] = claude_activity()
     data["spine"] = spine()
     # cache the shared channel locally so the Claude prompt hook can read it without a network call
@@ -209,16 +247,50 @@ def say(text: str, to: str, sender: str = "keath") -> dict:
     return msg
 
 
+def post_order(text: str, to: str, station: str) -> dict:
+    """Keath posts a work order: one line in the channel. An agent takes it and does the work itself."""
+    from shop import STATIONS
+    text = " ".join(str(text).split())[:600]
+    if not text:
+        raise ValueError("empty order")
+    now = time.gmtime()
+    msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", now), "from": "keath (chorus)", "kind": "order",
+           "id": "o-" + time.strftime("%m%d-%H%M%S", now), "to": to if to in SEATS.values() or to == "any" else "any",
+           "station": station if station in STATIONS else "anvil", "text": text, "via": "chorus"}
+    _append(msg)
+    return msg
+
+
+def _append(msg: dict) -> None:
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
+                        "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
+                       input=json.dumps(msg) + chr(10), capture_output=True, text=True, timeout=30)
+    if r.returncode:
+        raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - http.server naming
-        if self.path != "/say":
-            self.send_error(404, "only /say accepts POST")
+        if self.path not in ("/say", "/order", "/act"):
+            self.send_error(404, "only /say, /order and /act accept POST")
             return
         try:
             n = min(int(self.headers.get("Content-Length", 0)), 4096)
             body = json.loads(self.rfile.read(n) or b"{}")
-            # the page sends no "from" (it is Keath at the keyboard); agents must send their own seat
-            msg = say(body.get("text", ""), body.get("to", "claude"), body.get("from", "keath"))
+            if self.path == "/act":
+                import actions
+                if body.get("token"):                       # step 2: Keath confirmed
+                    msg = actions.confirm(body["token"])
+                    _append({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": "keath (chorus)",
+                             "kind": "action", "to": "all", "via": "chorus", **msg,
+                             "text": f"{'did' if msg['ok'] else 'tried'} {msg['action']} {msg['target']}: {msg['result'][:200]}"})
+                else:                                       # step 1: describe it, hand back a token
+                    msg = actions.propose(body.get("action", ""), body.get("target", ""))
+            elif self.path == "/order":
+                msg = post_order(body.get("text", ""), body.get("to", "any"), body.get("station", "anvil"))
+            else:
+                # the page sends no "from" (it is Keath at the keyboard); agents must send their own seat
+                msg = say(body.get("text", ""), body.get("to", "claude"), body.get("from", "keath"))
             out, code = json.dumps({"ok": True, "message": msg}).encode(), 200
         except (ValueError, RuntimeError, subprocess.SubprocessError, OSError) as e:
             out, code = json.dumps({"ok": False, "error": str(e)}).encode(), 400

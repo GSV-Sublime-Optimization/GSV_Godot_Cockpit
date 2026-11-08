@@ -2,6 +2,7 @@
 """chorus.py: the CHORUS cockpit as text, for agents in a terminal (and for Keath on a phone).
 
     python chorus/chorus.py              # brief: what needs attention, the Minds, the channel, the spine
+    python chorus/chorus.py orders [--all]    # work orders for this seat; then: take|working|done|decline <id> --note .. --link ..
     python chorus/chorus.py doctor       # measure the cause of each failing check (read-only)
     python chorus/chorus.py work         # who edits what; checkouts holding unsaved work
     python chorus/chorus.py rig i3       # one rig in detail: checks, disks, RAM, what the Minds said
@@ -146,6 +147,31 @@ def work_view(d: dict) -> None:
         print(f"  {r['label']:<42} {r['branch'][:34]:<34} ahead {r['ahead']:>3} dirty {r['dirty']:>4} last {r['last_commit_h']} h")
 
 
+def orders_view(d: dict, mine: bool) -> None:
+    from shop import orders
+    os_ = [o for o in orders(d.get("channel", [])) if not mine or o["to"] in (SEAT, "any")]
+    open_ = [o for o in os_ if o["status"] not in ("done", "declined")]
+    print(f"Work orders: {len(open_)} open" + (" for this seat" if mine else ""))
+    for o in os_[-15:]:
+        print(f"  {o['id']}  [{o['status']:<8}] {o['station']:<7} to {o['to']:<18} by {o['by'] or '-':<18} {o['text'][:90]}")
+        if o["note"] or o["link"]:
+            print(f"      {o['note'][:120]} {o['link']}")
+
+
+def order_status(oid: str, status: str, note: str, link: str) -> None:
+    if status not in ("taken", "working", "done", "declined"):
+        sys.exit("status must be taken|working|done|declined")
+    _post({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": SEAT, "kind": "order-status",
+           "id": oid, "status": status, "note": " ".join(note.split())[:400], "link": link})
+
+
+def _post(msg: dict) -> None:
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
+                        "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
+                       input=json.dumps(msg) + chr(10), capture_output=True, text=True, timeout=30)
+    print("sent" if r.returncode == 0 else f"not sent (ssh exit {r.returncode})")
+
+
 def say(text: str, to: str) -> None:
     text = " ".join(text.split())[:600]
     if not text:
@@ -161,13 +187,20 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "work", "doctor"])
+    ap.add_argument("cmd", nargs="?", default="brief", choices=["brief", "rig", "say", "work", "doctor", "orders", "take", "working", "done", "decline"])
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--to", default="all")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--link", default="")
+    ap.add_argument("--all", action="store_true", help="orders: show every seat's orders")
     a = ap.parse_args()
     if a.cmd == "say":
         say(a.arg or "", a.to)
+    elif a.cmd == "orders":
+        orders_view(load(), not a.all)
+    elif a.cmd in ("take", "working", "done", "decline"):
+        order_status(a.arg or sys.exit("give the order id"), {"take": "taken", "decline": "declined"}.get(a.cmd, a.cmd), a.note, a.link)
     elif a.cmd == "doctor":
         from doctor import diagnose
         for x in diagnose(load()):
