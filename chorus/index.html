@@ -64,7 +64,7 @@ button:hover { border-color: var(--ink-dim); }
 button:focus-visible { outline: 2px solid var(--l9); outline-offset: 2px; }
 button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento); }
 
-.thought { justify-self: center; text-align: center; max-width: min(62ch, 100%); display: grid; gap: 10px; padding-bottom: 14px; }
+.thought { pointer-events: auto; user-select: text; justify-self: center; text-align: center; max-width: min(62ch, 100%); display: grid; gap: 10px; padding-bottom: 14px; }
 .marking {
   font-family: var(--f-display); font-style: italic; font-size: clamp(15px, 1.8vw, 19px);
   letter-spacing: 0.06em; color: var(--lvl, var(--tranquillo));
@@ -166,6 +166,21 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
   .controls button { padding: 6px 10px; font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) { .line { text-shadow: none; } }
+/* rig card: click a star to open what that rig knows about itself */
+.rig-card {
+  position: fixed; z-index: 5; pointer-events: auto; width: min(340px, calc(100% - 32px)); max-height: 70vh; overflow: auto;
+  background: color-mix(in srgb, var(--sky) 90%, transparent); border: 1px solid var(--c, var(--hair)); border-radius: 10px;
+  padding: 12px 14px; display: grid; gap: 8px; font-size: 13px; user-select: text;
+  box-shadow: 0 10px 40px rgba(0,0,0,.5);
+}
+.rig-card h3 { margin: 0; font: italic 500 22px var(--f-display); color: var(--c); display: flex; justify-content: space-between; align-items: baseline; }
+.rig-card h3 small { font: 11px var(--f-data); color: var(--ink-dim); font-style: normal; }
+.rig-card .row { font: 12px/1.45 var(--f-data); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.rig-card .row b { color: var(--ink); font-weight: 600; }
+.rig-card .bad { color: var(--agitato); }
+.rig-card .said { font-style: italic; color: var(--ink); }
+.rig-card .acts { display: flex; gap: 8px; }
+canvas#sky.pointing { cursor: pointer; }
 </style>
 
 <canvas id="sky" aria-label="The fleet drawn as four stars: MSI, i3, L9 and xanadu, with their minds' thoughts as comets"></canvas>
@@ -180,6 +195,7 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
       <div class="controls">
         <button id="sound" aria-pressed="false" title="Each rig sings one note; thoughts play chords">Sound off</button>
         <button id="rehearse" aria-pressed="false" title="Play labelled demo thoughts through every state">Rehearse</button>
+        <button id="copy-brief" title="Copy every layer as text: needs and next moves first (C)">Copy brief</button>
         <button id="full" title="Fullscreen (F). Esc leaves.">Fullscreen</button>
       </div>
     </div>
@@ -201,6 +217,7 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
     </div>
   </details>
   <div class="claude-tick" id="claude-tick" aria-live="off"></div>
+  <aside class="rig-card" id="rig-card" hidden aria-live="polite"></aside>
   <section class="thought" aria-live="polite">
     <div class="marking" id="marking">tranquillo</div>
     <p class="line" id="line">The fleet is quiet.</p>
@@ -492,6 +509,7 @@ async function poll() {
     extras = {backup: d.backup, mirror: d.mirror, steward_cards: d.steward_cards || [], prs_waiting: d.prs_waiting || [],
               channel: d.channel || [], claude_activity: d.claude_activity || [], spine: d.spine || extras.spine};
     renderNeeds(); renderTalk(); renderTick();
+    if (!card.hidden) openRig(RIGS.find(r => r.id === card.dataset.rig));
     if (fresh && !rehearsing) show(events[events.length - 1]);
   } catch { /* no feeder: stay on the snapshot */ }
 }
@@ -678,5 +696,74 @@ function askClaude(subject) {
   const input = document.getElementById("talk-text"); input.value = `About "${subject}": `; input.focus();
 }
 
+// ---------- rig card: click a star ----------
+const sky = document.getElementById("sky"), card = document.getElementById("rig-card");
+function rigAt(x, y) { return RIGS.find(r => { const [rx, ry] = rigXY(r.id); return Math.hypot(x - rx, y - ry) < r.r + 22; }); }
+function openRig(r) {
+  const st = rigState(r.id), hb = st.hb, [rx, ry] = rigXY(r.id);
+  const said = events.filter(e => e.focus === r.id).slice(-3);
+  const rows = [];
+  if (r.id === "xanadu") rows.push(`<div class="row">Keeps the record: heartbeats, the Minds' memory, mirrors and the off-box backup.</div>`,
+    `<div class="row">backup <b>${esc(extras.backup ? `${extras.backup.set} · ${Math.round(extras.backup.age_h)} h` : "none")}</b> · mirrors <b>${esc(extras.mirror ? `${extras.mirror.repos} repos · ${extras.mirror.age_h} h` : "no receipt")}</b></div>`);
+  if (hb) {
+    rows.push(`<div class="row">heard <b>${esc(ago(Date.parse(hb.at)))}</b> · RAM free <b>${hb.ram_avail_mb ?? "?"} MB</b></div>`);
+    const disks = Object.entries(hb.disks || {}).map(([k, v]) => `${k} ${v.free_gb ?? "?"} GB${v.pct_free != null && v.pct_free < 12 ? " (low)" : ""}`);
+    if (disks.length) rows.push(`<div class="row">disks <b>${esc(disks.join(" · "))}</b></div>`);
+    for (const c of hb.checks || []) rows.push(`<div class="row ${c.ok ? "" : "bad"}">${c.ok ? "ok  " : "FAIL"} <b>${esc(c.name)}</b> ${esc(String(c.detail || "").slice(0, 110))}</div>`);
+  } else if (r.id !== "xanadu") rows.push(`<div class="row bad">No heartbeat yet.</div>`);
+  if (r.id === "msi" && extras.spine) rows.push(`<div class="row">spine <b>${extras.spine.up}/${extras.spine.total} up</b> · down: ${esc(extras.spine.services.filter(s => !s.up).map(s => s.name).join(", ") || "none")}</div>`);
+  for (const e of said) rows.push(`<div class="row">${esc(hm(e.at))} ${esc(e.mind)}: <span class="said">${esc(e.line)}</span></div>`);
+  card.style.setProperty("--c", `var(${r.color})`);
+  card.innerHTML = `<h3>${esc(r.name)} <small>${esc(r.role)} · ${st.silent ? "silent" : st.checks.some(c => !c.ok) ? "out of tune" : "in tune"}</small></h3>${rows.join("")}
+    <div class="acts"><button type="button" data-a="ask">Ask Claude</button><button type="button" data-a="close">Close</button></div>`;
+  card.querySelector('[data-a="ask"]').onclick = () => askClaude(`${r.name}`);
+  card.querySelector('[data-a="close"]').onclick = () => { card.hidden = true; };
+  card.hidden = false;
+  const w = card.offsetWidth, h = card.offsetHeight;
+  const right = rx + r.r + 24, left = rx - r.r - 24 - w;          // beside the star, never on it
+  const x = right + w + 16 <= innerWidth ? right : left >= 16 ? left : Math.max(16, innerWidth - w - 16);
+  card.style.left = `${x}px`;
+  card.style.top = `${Math.max(150, Math.min(innerHeight - h - 16, ry - h / 2))}px`;   // below the Claude ticker
+  card.dataset.rig = r.id;
+}
+sky.addEventListener("click", e => { const r = rigAt(e.clientX, e.clientY); if (r) openRig(r); else card.hidden = true; });
+sky.addEventListener("mousemove", e => sky.classList.toggle("pointing", !!rigAt(e.clientX, e.clientY)));
+addEventListener("keydown", e => { if (e.key === "Escape") card.hidden = true;
+  const i = ["1", "2", "3", "4"].indexOf(e.key); if (i >= 0 && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) openRig(RIGS[i]); });
+
+// ---------- Copy brief: every layer as text, in the order you act on it ----------
+function buildBrief() {
+  const L = [], stamp = new Date(nowFn()).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  L.push(`CHORUS brief · ${live ? "live" : "snapshot"} · ${stamp}`, "");
+  const ns = needs();
+  L.push(ns.length ? "1. WHAT NEEDS YOU (most urgent first)" : "1. WHAT NEEDS YOU: nothing. The fleet is in tune.");
+  ns.forEach((n, i) => {
+    L.push(`  ${i + 1}) [${LEVEL[n.level].word}] ${n.what}`, `     ${n.meta || ""}`.trimEnd(), `     why: ${n.why}`, `     next: ${n.move}`, `     owner: ${n.owner}`);
+    for (const p of n.list || []) L.push(`       - ${p.repo}#${p.number} ${p.title} ${p.url}`);
+  });
+  L.push("", "2. RIGS");
+  for (const r of RIGS) {
+    const st = rigState(r.id), fails = st.checks.filter(c => !c.ok).map(c => c.name);
+    L.push(`  ${r.name} (${r.role}): ${st.silent ? "SILENT" : fails.length ? "failing " + fails.join(", ") : "in tune"}${st.hb ? ` · heard ${ago(Date.parse(st.hb.at))}` : ""}`);
+  }
+  L.push("", "3. WHAT THE MINDS SAID (latest last)");
+  for (const e of events.slice(-5)) L.push(`  ${hm(e.at)} ${e.mind} [${e.level}]: ${e.line}  (reasons: ${(e.reasons || []).join("; ") || "none"})`);
+  L.push("", "4. CONVERSATION (latest last)");
+  for (const m of (extras.channel || []).slice(-8)) L.push(`  ${hm(m.at)} ${m.from} -> ${m.to}: ${m.text}`);
+  const sp = extras.spine;
+  if (sp) L.push("", `5. SPINE ${sp.up}/${sp.total} up`, `  down: ${sp.services.filter(x => !x.up).map(x => x.name + (EXPECTED_DOWN.has(x.name) ? " (expected)" : "")).join(", ") || "none"}`);
+  return L.join("\n");
+}
+const copyBtn = document.getElementById("copy-brief");
+function copyBrief() {
+  const text = buildBrief();
+  navigator.clipboard?.writeText(text).then(() => { copyBtn.textContent = "Copied"; setTimeout(() => copyBtn.textContent = "Copy brief", 1500); },
+    () => { const w = window.open("", "_blank"); if (w) { w.document.title = "CHORUS brief"; const pre = w.document.createElement("pre"); pre.textContent = text; w.document.body.append(pre); } });
+}
+copyBtn.onclick = copyBrief;
+addEventListener("keydown", e => { if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.metaKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) copyBrief(); });
+
 drawRiver(); renderNeeds(); renderTalk(); renderTick(); show(current, false); requestAnimationFrame(frame);
+// deep link: index.html#rig=i3 opens that rig's card (after first layout)
+const deep = /rig=(\w+)/.exec(location.hash); if (deep) requestAnimationFrame(() => { const r = RIGS.find(x => x.id === deep[1]); if (r) openRig(r); });
 </script>
