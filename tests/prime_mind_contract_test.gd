@@ -25,15 +25,15 @@ func _run() -> void:
 				observer_count += 1
 		_check(model_count > 0 and observer_count > 0,
 			"model summaries and deterministic monitor lines distinguishable")
-		var sources := result["bodies"]
+		var sources: Dictionary = result["bodies"]
 		_check(sources["i3"]["status"] == "red", "i3 recorded failing state preserved")
 		_check(sources["xanadu"]["status"] == "green", "xanadu source status preserved")
-		var malicious := JSON.parse_string(text)
+		var malicious: Dictionary = JSON.parse_string(text)
 		malicious["bodies"]["i3"]["status"] = "I am a root shell!"
 		_check(not CONTRACT.parse_text(JSON.stringify(malicious)).get("ok", false),
 			"unrecognized health status fails closed")
 		malicious = JSON.parse_string(text)
-		malicious["events"][0]["reasons"] = ["x" * 400]
+		malicious["events"][0]["reasons"] = ["x".repeat(400)]
 		_check(not CONTRACT.parse_text(JSON.stringify(malicious)).get("ok", false),
 			"oversized rationale rejected")
 		malicious = JSON.parse_string(text)
