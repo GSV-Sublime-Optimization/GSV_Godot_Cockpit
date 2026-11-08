@@ -33,6 +33,15 @@ body {
   overflow: hidden; -webkit-font-smoothing: antialiased;
 }
 #sky { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+/* The backdrop is its own canvas, painted only when the mood or size changes; parallax moves it with a
+   compositor transform, so the per-frame canvas never repaints the whole sky. */
+#sky-bg { position: fixed; left: -14px; top: -14px; width: calc(100% + 28px); height: calc(100% + 28px); display: block; will-change: transform; }
+/* agitato: the sky's edges red-shift and pulse (compositor-only opacity animation) */
+#aura { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.8s;
+  background: radial-gradient(ellipse at 50% 50%, rgba(239,79,90,0) 48%, rgba(239,79,90,0.16) 75%, rgba(150,20,40,0.55) 100%); }
+body.agitato #aura { opacity: 0.75; animation: aura 2.4s ease-in-out infinite alternate; }
+@keyframes aura { from { opacity: 0.5; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { body.agitato #aura { animation: none; } }
 .ui {
   position: fixed; inset: 0; pointer-events: none; display: grid;
   grid-template-rows: auto 1fr auto auto; grid-template-columns: minmax(0, 1fr);
@@ -76,6 +85,7 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
   font-size: clamp(22px, 3.4vw, 40px); line-height: 1.18; text-wrap: balance; color: var(--ink);
   text-shadow: 0 2px 24px rgba(0,0,0,0.6);
 }
+.line.long { font-size: clamp(18px, 2.2vw, 28px); }
 .meta { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; align-items: center; }
 .reason {
   font-family: var(--f-data); font-size: 12px; padding: 3px 9px; border-radius: 4px;
@@ -92,12 +102,12 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
   background: color-mix(in srgb, var(--sky) 82%, transparent); border: 1px solid var(--hair); border-radius: 10px;
   backdrop-filter: blur(6px);
 }
-.needs summary {
+.needs > summary {
   cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: baseline;
   padding: 12px 14px; position: sticky; top: 0; background: color-mix(in srgb, var(--sky) 92%, transparent);
 }
-.needs summary::-webkit-details-marker { display: none; }
-.needs summary:focus-visible { outline: 2px solid var(--l9); outline-offset: -2px; }
+.needs > summary::-webkit-details-marker { display: none; }
+.needs > summary:focus-visible { outline: 2px solid var(--l9); outline-offset: -2px; }
 .needs-title { font-family: var(--f-display); font-style: italic; font-size: 19px; }
 .needs-count { font-family: var(--f-data); font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
 .needs-list { list-style: none; margin: 0; padding: 0 10px 10px; display: grid; gap: 8px; }
@@ -115,6 +125,12 @@ button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento
 .move button { padding: 5px 9px; font-size: 11px; }
 .need a { color: var(--l9); }
 .need ul { margin: 0; padding-left: 16px; font-size: 12px; display: grid; gap: 2px; }
+.doctor { font-size: 12px; line-height: 1.4; color: var(--ink); border-left: 2px solid var(--tranquillo); padding: 2px 0 2px 8px; }
+.doctor.dim { color: var(--ink-dim); border-left-color: var(--hair); }
+.doctor .doc-tag { display: block; font-family: var(--f-data); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); }
+.doctor details { margin-top: 2px; }
+.doctor summary { cursor: pointer; font-family: var(--f-data); font-size: 11px; color: var(--ink-dim); }
+.doctor ul { margin: 2px 0 0; padding-left: 16px; font-family: var(--f-data); font-size: 11px; }
 .clear { padding: 4px 14px 14px; color: var(--tranquillo); font-family: var(--f-display); font-style: italic; }
 @media (max-width: 720px) { .needs { max-height: 34vh; margin-top: 10px; } }
 /* Conversation: the shared cockpit channel (xanadu:~/steward/cockpit/channel.jsonl), same as HOLOMIND's */
@@ -185,6 +201,8 @@ canvas#sky.pointing { cursor: pointer; }
 .msg .state { font: 10px var(--f-data); color: var(--tranquillo); letter-spacing: .04em; }
 </style>
 
+<canvas id="sky-bg" aria-hidden="true"></canvas>
+<div id="aura" aria-hidden="true"></div>
 <canvas id="sky" aria-label="The fleet drawn as four stars: MSI, i3, L9 and xanadu, with their minds' thoughts as comets"></canvas>
 <div class="ui">
   <header class="top">
@@ -354,22 +372,19 @@ function buildSprites() {
       })
     };
   }
-  SP.redAura = sprite(256, (g, h) => {                  // alarm: red-shifted edges of the sky
-    const gr = g.createRadialGradient(h, h, h * 0.55, h, h, h * 1.42);
-    gr.addColorStop(0, "rgba(239,79,90,0)"); gr.addColorStop(0.6, "rgba(239,79,90,0.35)"); gr.addColorStop(1, "rgba(150,20,40,0.85)");
-    g.fillStyle = gr; g.fillRect(0, 0, 2 * h, 2 * h);
-  });
 }
 function mix(a, b, k) { const p = rgbOf(a), q = rgbOf(b); return `rgb(${p.map((v, i) => Math.round(v + (q[i] - v) * k)).join(",")})`; }
 
-// ----- the backdrop: one offscreen canvas, rebuilt on resize or when the mood/mirror changes -----
+// ----- the backdrop: its own canvas layer, repainted only on resize, DPR change or a new mood -----
 const PAR = 14;   // parallax margin (px) baked around the backdrop
-let BG = null, bgKey = "";
+const bgEl = document.getElementById("sky-bg");
+let bgKey = "";
 function moodLevel() { return current?.level || "routine"; }
 function mirrorFresh() { const m = extras.mirror; return !!m && m.ok && m.age_h <= 26; }
 function buildBackdrop() {
-  const s = Math.min(DPR, 1.5), bw = W + 2 * PAR, bh = H + 2 * PAR, c = canvas(bw * s, bh * s), g = c.getContext("2d");
-  g.scale(s, s);
+  const s = DPR, bw = W + 2 * PAR, bh = H + 2 * PAR, c = bgEl;
+  c.width = Math.ceil(bw * s); c.height = Math.ceil(bh * s);
+  const g = c.getContext("2d"); g.setTransform(s, 0, 0, s, 0, 0);
   const r = rng(144);
   // the night: deep blue, a little lighter toward the horizon
   const sk = g.createLinearGradient(0, 0, 0, bh);
@@ -378,7 +393,7 @@ function buildBackdrop() {
   // the galactic band, sweeping low-left to high-right; its glow takes the colour of the current marking
   const band = u => { const x = -0.1 * bw + u * 1.2 * bw; return [x, bh * (0.92 - 0.78 * u) + Math.sin(u * 3.1) * bh * 0.07]; };
   const bwid = Math.max(bw, bh) * 0.16, mood = COL[LEVEL[moodLevel()].color];
-  const pal = ["#2b3f8f", "#45358f", "#1d5c80", "#5f3378", "#2b3f8f", mood];
+  const pal = ["#2b3f8f", "#45358f", "#1d5c80", "#5f3378", "#2b3f8f", "#3a2f86", mood];
   g.globalCompositeOperation = "lighter";
   for (let i = 0; i < 190; i++) {
     const u = r(), [bx, by] = band(u), off = gauss(r) * bwid * 0.55, rad = bwid * (0.2 + r() * 0.7);
@@ -420,7 +435,6 @@ function buildBackdrop() {
   const vg = g.createRadialGradient(bw * 0.55, bh * 0.48, Math.min(bw, bh) * 0.3, bw * 0.55, bh * 0.48, Math.max(bw, bh) * 0.78);
   vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.6)");
   g.fillStyle = vg; g.fillRect(0, 0, bw, bh);
-  BG = c;
 }
 // The near stars: one per repo the off-GitHub mirror keeps. They twinkle while the mirror is fresh; when it
 // falls behind they go dull, and a mirror failure turns that many of them red.
@@ -456,9 +470,12 @@ function resize() {
 }
 addEventListener("resize", resize);
 // On wide screens the sky sits right of the "What needs you" panel (420 px), so no star hides behind it.
+// Vertically the fleet fits between the header (or, when narrow, the panel) and a reserve for the thought,
+// its reasons and the memory river, so a long thought never sits on a star.
 const rigXY = id => {
   const r = RIGS.find(q => q.id === id), left = W >= 900 ? 440 : 0;
-  return [left + r.pos[0] * (W - left), r.pos[1] * H * (W < 520 ? 0.9 : 1)];
+  const top = W < 720 ? Math.min(H * 0.46, 120 + H * 0.34) : Math.max(70, H * 0.12), bottom = Math.max(top + 140, H - (W < 720 ? 250 : 300));
+  return [left + r.pos[0] * (W - left), top + (r.pos[1] - 0.3) / 0.4 * (bottom - top)];
 };
 resize();
 const ageMin = hb => hb ? (nowFn() - Date.parse(hb.at)) / 60000 : Infinity;
@@ -513,17 +530,15 @@ function perfRun() {
   const msg = `perf avg ${avg.toFixed(3)} ms p95 ${s[284].toFixed(3)} ms max ${s[299].toFixed(3)} ms · 300 frames · ${W}x${H}@${DPR}`;
   console.log(msg); document.title = msg;
 }
+let bgShift = [0, 0];
 function drawSky(t) {
   ensureLayers();
   if (!reduced) { px += (tpx - px) * 0.06; py += (tpy - py) * 0.06; }
-  // 1. the backdrop (sky, galactic band in the mood's colour, far stars, vignette): one blit
+  // 1. the backdrop lives on its own layer: only nudge it for parallax (when it actually moves)
+  const bx = Math.round(-px * 8 * 4) / 4, by = Math.round(-py * 6 * 4) / 4;
+  if (bx !== bgShift[0] || by !== bgShift[1]) { bgShift = [bx, by]; bgEl.style.transform = `translate3d(${bx}px, ${by}px, 0)`; }
   cx.globalCompositeOperation = "source-over"; cx.globalAlpha = 1;
-  cx.drawImage(BG, -PAR - px * 8, -PAR - py * 6, W + 2 * PAR, H + 2 * PAR);
-  // agitato: the sky's edges red-shift and pulse
-  if (moodLevel() === "alarm") {
-    cx.globalAlpha = reduced ? 0.4 : 0.32 + 0.2 * Math.sin(t / 380);
-    cx.drawImage(SP.redAura, -W * 0.1, -H * 0.1, W * 1.2, H * 1.2); cx.globalAlpha = 1;
-  }
+  cx.clearRect(0, 0, W, H);
   cx.globalCompositeOperation = "lighter";
   drawNear(t);
   drawThreads(t);
@@ -667,8 +682,10 @@ const focusOf = ev => ev.focus || (ev.reasons || []).map(r => r.split(/[ :]/)[0]
 function show(ev, animate = true) {
   current = ev; const lv = LEVEL[ev.level] || LEVEL.routine;
   document.documentElement.style.setProperty("--lvl", `var(${lv.color})`);
+  document.body.classList.toggle("agitato", ev.level === "alarm");
   document.getElementById("marking").textContent = ev.synthetic ? `${lv.word} · rehearsal` : lv.word;
-  document.getElementById("line").textContent = ev.line || "(no words)";
+  const lineEl = document.getElementById("line"); lineEl.textContent = ev.line || "(no words)";
+  lineEl.classList.toggle("long", (ev.line || "").length > 80);     // long thoughts set smaller, clear of the fleet
   const meta = document.getElementById("meta"); meta.replaceChildren();
   const who = document.createElement("span"); who.className = "who";
   const when = ev.at ? ago(Date.parse(ev.at)) : "now";
@@ -784,7 +801,7 @@ async function poll() {
     events = d.events; heartbeats = d.heartbeats; live = true; nowFn = () => Date.now(); setSource(); drawRiver();
     extras = {backup: d.backup, mirror: d.mirror, steward_cards: d.steward_cards || [], prs_waiting: d.prs_waiting || [],
               channel: d.channel || [], claude_activity: d.claude_activity || [], spine: d.spine || extras.spine,
-              work: d.work || extras.work};
+              work: d.work || extras.work, doctor: d.doctor || extras.doctor || []};
     renderNeeds(); renderTalk(); renderTick();
     if (!card.hidden) openRig(RIGS.find(r => r.id === card.dataset.rig));
     if (fresh && !rehearsing) show(events[events.length - 1]);
@@ -848,7 +865,7 @@ function needs() {
     for (const c of st.checks.filter(c => !c.ok)) {
       const rb = RUNBOOK[`${r.id}:${c.name}`] || {what: `${r.name}: ${c.name} failing`, why: c.detail || "No runbook entry yet.", move: `Look at the ${c.name} check on ${r.name}`, owner: "unassigned"};
       const s = since(`${r.id} failing: ${c.name}`);
-      out.push({level: "notable", ...rb, meta: s ? `noticed since ${hm(s)} · ${dur(nowFn() - Date.parse(s))}` : "failing now"});
+      out.push({level: "notable", ...rb, meta: s ? `noticed since ${hm(s)} · ${dur(nowFn() - Date.parse(s))}` : "failing now", doctor: doctorFor(`${r.id}:${c.name}`)});
     }
   }
   const b = extras.backup;
@@ -862,7 +879,7 @@ function needs() {
     move: "Ask Codex, GPT-6 or the i3 Claude to review the oldest first", owner: "any second actor", list: extras.prs_waiting.slice(0, 5)});
   const down = (extras.spine?.services || []).filter(s => !s.up && !EXPECTED_DOWN.has(s.name));
   if (down.length) out.push({level: down.some(s => s.tier === "core") ? "notable" : "routine",
-    what: `${down.length} spine services are down on MSI`, meta: `${extras.spine.up}/${extras.spine.total} up · ${down.map(s => s.name).join(", ")}`,
+    what: `${down.length} spine services are down on MSI`, meta: `${extras.spine.stale ? "last known · " : ""}${extras.spine.up}/${extras.spine.total} up · ${down.map(s => s.name).join(", ")}`,
     why: "Dev-Mentor's spine probes every colony service on MSI; these did not answer.",
     move: SPINE_MOVES[down[0].name] || `Check ${down[0].name}`, owner: "anyone on MSI"});
   for (const c of workAtRisk().filter(c => c.ahead >= 3 || (c.ahead > 0 && c.dirty >= 20))) out.push({level: "notable",
@@ -883,7 +900,7 @@ function renderNeeds() {
     const li = document.createElement("li"); li.className = "need";
     li.innerHTML = `<div class="need-head"><span class="need-what">${esc(it.what)}</span><span class="sev" style="--c: var(${LEVEL[it.level].color})">${LEVEL[it.level].word}</span></div>
       <div class="need-meta">${esc(it.meta || "")} · owner: ${esc(it.owner)}</div>
-      <div class="need-why">${esc(it.why)}</div>
+      <div class="need-why">${esc(it.why)}</div>${doctorHTML(it.doctor)}
       <div class="move"><code>${esc(it.move)}</code><button type="button">Copy</button><button type="button" class="ask">Ask Claude</button></div>`;
     li.querySelector(".ask").onclick = () => askClaude(it.what);
     if (it.list) { const ul = document.createElement("ul"); for (const p of it.list) { const a = document.createElement("li"); a.innerHTML = `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.repo)}#${p.number}</a> ${esc(p.title)}`; ul.append(a); } li.append(ul); }
@@ -915,6 +932,9 @@ extras.spine = {up: 13, total: 18, services: [
 // Work (captured 2026-11-08 ~07:50 UTC from the colony claims board and a scan of MSI's checkouts)
 extras.work = {"claims": [{"agent": "cc-d5505ce5-d44e-4df3-8e1e-", "repo": "cockpit/mindview-msiclaude", "files": ["index.html", "chorus.py", "studio_bridge.py", "test_studio_bridge.py", "work.py", "doctor.py"], "age_min": 0.6}, {"agent": "cc-d5505ce5-d44e-4df3-8e1e-", "repo": "devmentor/fleet-mode", "files": ["fleet_mode.py", "fleet.py", "main.py", "commands.py", "fleet.md", "test_fleet_mode.py"], "age_min": 3.3}, {"agent": "cc-d5505ce5-d44e-4df3-8e1e-", "repo": "scratchpad", "files": ["install_chorus_hooks.py", "summary.py", "sky.js"], "age_min": 4.9}], "at_risk": [{"path": "C:\\dev\\active\\Kilo_Core", "label": "Kilo_Core", "branch": "master", "dirty": 55, "ahead": 15, "no_upstream": false, "last_commit_h": 58.0}, {"path": "C:\\dev\\active\\Dev-Mentor", "label": "Dev-Mentor", "branch": "main", "dirty": 18, "ahead": 3, "no_upstream": false, "last_commit_h": 28.1}, {"path": "K:\\dev\\worktrees\\cockpit\\mindview-msiclaude", "label": "cockpit/mindview-msiclaude", "branch": "bakeoff/mindview-msiclaude", "dirty": 6, "ahead": 3, "no_upstream": false, "last_commit_h": 0.0}, {"path": "C:\\dev\\active\\Bandmate_Clefspace-e2e", "label": "Bandmate_Clefspace-e2e", "branch": "test/e2e-slice-walk", "dirty": 2, "ahead": 3, "no_upstream": false, "last_commit_h": 1090.4}, {"path": "C:\\dev\\active\\structured-chaos-colony-bridge", "label": "structured-chaos-colony-bridge", "branch": "kilo/handshake-packet-v0.1", "dirty": 0, "ahead": 3, "no_upstream": false, "last_commit_h": 1363.5}, {"path": "C:\\dev\\active\\clawd-code-rust", "label": "clawd-code-rust", "branch": "main", "dirty": 0, "ahead": 2, "no_upstream": false, "last_commit_h": 55.1}, {"path": "K:\\dev\\worktrees\\devmentor\\pr286", "label": "devmentor/pr286", "branch": "HEAD (no branch)", "dirty": 2046, "ahead": 0, "no_upstream": false, "last_commit_h": 2.6}, {"path": "K:\\dev\\worktrees\\pr-dev42-convergence", "label": "pr-dev42-convergence", "branch": "HEAD (no branch)", "dirty": 312, "ahead": 0, "no_upstream": false, "last_commit_h": 1030.4}]};
 
+// Doctor verdicts (captured 2026-11-08 07:51 UTC: the colony re-measured each failing check)
+extras.doctor = [{"key": "msi:dev-mentor", "at": "2026-11-08T07:51:12Z", "verdict": "not confirmed: all routes answer quickly now; the failure was intermittent", "evidence": ["/health: 200 in 61 ms", "/api/capabilities: 200 in 7 ms", "/api/spine/services: 200 in 7 ms"]}, {"key": "i3:docker", "at": "2026-11-08T07:51:14Z", "verdict": "confirmed: VT-x is off in the i3's BIOS, so WSL and Docker cannot start", "evidence": ["i3 says: vtx=False hypervisor=False docker_service=Stopped"]}];
+
 // ---------- the spine and MSI Claude, drawn around MSI ----------
 const SPINE_MOVES = {
   "ollama": "Start Ollama on MSI (tray app), then: curl 127.0.0.1:11434/api/version",
@@ -941,7 +961,7 @@ function drawMoons(t, back) {
     const down = !svc.up, expected = EXPECTED_DOWN.has(svc.name);
     const img = SP.dot[svc.up ? "--tranquillo" : expected ? "--ink-dim" : "--agitato"];
     cx.globalCompositeOperation = "lighter";
-    cx.globalAlpha = (svc.up ? 0.85 : expected ? 0.45 : 1) * depth;
+    cx.globalAlpha = (svc.up ? 0.85 : expected ? 0.45 : 1) * depth * (s.stale ? 0.45 : 1);   // last-known spine: dimmer
     blit(img, mx, my, (svc.up ? 9 : expected ? 8 : 16) * (back ? 0.85 : 1));
     if (down && !expected && !reduced) { cx.globalAlpha = 0.35 * (0.5 + 0.5 * Math.sin(t / 300 + i)); blit(img, mx, my, 30); }
   });
@@ -964,6 +984,13 @@ function drawOrbiters(t) {
   const hx = x + Math.cos(a) * rx, hy = y + Math.sin(a) * ry;
   cx.globalAlpha = 1; blit(img, hx, hy, 18 + busy * 5); blit(SP.white, hx, hy, 9);
   cx.globalCompositeOperation = "source-over";
+}
+// ---------- doctor: a measured verdict on a failing check (confirmed / not confirmed / unknown) ----------
+const doctorFor = key => (extras.doctor || []).find(x => x.key === key) || null;
+function doctorHTML(dr, name) {
+  if (!dr) return "";
+  const confirmed = /^confirmed/i.test(dr.verdict || ""), ev = (dr.evidence || []).map(e => `<li>${esc(e)}</li>`).join("");
+  return `<div class="doctor ${confirmed ? "" : "dim"}"><span class="doc-tag">doctor${name ? ` · ${esc(name)}` : ""} · measured ${esc(ago(Date.parse(dr.at)))}</span>${esc(dr.verdict || "")}${ev ? `<details><summary>evidence</summary><ul>${ev}</ul></details>` : ""}</div>`;
 }
 // ---------- work: who has claimed what, and what exists only on MSI ----------
 const workClaims = () => Array.isArray(extras.work?.claims) ? extras.work.claims : [];
@@ -1062,6 +1089,7 @@ function openRig(r) {
     const disks = Object.entries(hb.disks || {}).map(([k, v]) => `${k} ${v.free_gb ?? "?"} GB${v.pct_free != null && v.pct_free < 12 ? " (low)" : ""}`);
     if (disks.length) rows.push(`<div class="row">disks <b>${esc(disks.join(" · "))}</b></div>`);
     for (const c of hb.checks || []) rows.push(`<div class="row ${c.ok ? "" : "bad"}">${c.ok ? "ok  " : "FAIL"} <b>${esc(c.name)}</b> ${esc(String(c.detail || "").slice(0, 110))}</div>`);
+    for (const dr of (extras.doctor || []).filter(x => (x.key || "").startsWith(r.id + ":"))) rows.push(doctorHTML(dr, dr.key.split(":")[1]));
   } else if (r.id !== "xanadu") rows.push(`<div class="row bad">No heartbeat yet.</div>`);
   if (r.id === "msi") {
     const claims = workClaims(), risk = workAtRisk();
@@ -1072,7 +1100,7 @@ function openRig(r) {
       for (const c of risk.slice(0, 5)) rows.push(`<div class="row ${c.ahead >= 3 ? "bad" : ""}">· <b>${esc(c.label)}</b> ${esc(c.branch || "?")}${c.no_upstream ? " (no upstream)" : ""} · ${c.ahead || 0} ahead · ${c.dirty || 0} dirty</div>`);
     }
   }
-  if (r.id === "msi" && extras.spine) rows.push(`<div class="row">spine <b>${extras.spine.up}/${extras.spine.total} up</b> · down: ${esc(extras.spine.services.filter(s => !s.up).map(s => s.name).join(", ") || "none")}</div>`);
+  if (r.id === "msi" && extras.spine) rows.push(`<div class="row">spine${extras.spine.stale ? " · last known" : ""} <b>${extras.spine.up}/${extras.spine.total} up</b> · down: ${esc(extras.spine.services.filter(s => !s.up).map(s => s.name).join(", ") || "none")}</div>`);
   for (const e of said) rows.push(`<div class="row">${esc(hm(e.at))} ${esc(e.mind)}: <span class="said">${esc(e.line)}</span></div>`);
   card.style.setProperty("--c", `var(${r.color})`);
   card.innerHTML = `<h3>${esc(r.name)} <small>${esc(r.role)} · ${st.silent ? "silent" : st.checks.some(c => !c.ok) ? "out of tune" : "in tune"}</small></h3>${rows.join("")}
@@ -1103,7 +1131,9 @@ function buildBrief() {
   const ns = needs();
   L.push(ns.length ? "1. WHAT NEEDS YOU (most urgent first)" : "1. WHAT NEEDS YOU: nothing. The fleet is in tune.");
   ns.forEach((n, i) => {
-    L.push(`  ${i + 1}) [${LEVEL[n.level].word}] ${n.what}`, `     ${n.meta || ""}`.trimEnd(), `     why: ${n.why}`, `     next: ${n.move}`, `     owner: ${n.owner}`);
+    L.push(`  ${i + 1}) [${LEVEL[n.level].word}] ${n.what}`, `     ${n.meta || ""}`.trimEnd(), `     why: ${n.why}`);
+    if (n.doctor) L.push(`     doctor (measured ${ago(Date.parse(n.doctor.at))}): ${n.doctor.verdict}`, ...(n.doctor.evidence || []).map(e => `       - ${e}`));
+    L.push(`     next: ${n.move}`, `     owner: ${n.owner}`);
     for (const p of n.list || []) L.push(`       - ${p.repo}#${p.number} ${p.title} ${p.url}`);
   });
   L.push("", "2. RIGS");
@@ -1122,7 +1152,7 @@ function buildBrief() {
   L.push(risk.length ? "  at risk (riskiest first):" : "  at risk: none");
   for (const c of risk.slice(0, 8)) L.push(`    ${c.label} ${c.branch || "?"}${c.no_upstream ? " (no upstream)" : ""} · ${c.ahead || 0} ahead · ${c.dirty || 0} dirty${c.last_commit_h != null ? ` · last commit ${Number(c.last_commit_h).toFixed(1)} h ago` : ""}  ${c.path}`);
   const sp = extras.spine;
-  if (sp) L.push("", `5. SPINE ${sp.up}/${sp.total} up`, `  down: ${sp.services.filter(x => !x.up).map(x => x.name + (EXPECTED_DOWN.has(x.name) ? " (expected)" : "")).join(", ") || "none"}`);
+  if (sp) L.push("", `5. SPINE ${sp.up}/${sp.total} up${sp.stale ? " (last known: Dev-Mentor did not answer)" : ""}`, `  down: ${sp.services.filter(x => !x.up).map(x => x.name + (EXPECTED_DOWN.has(x.name) ? " (expected)" : "")).join(", ") || "none"}`);
   return L.join("\n");
 }
 const copyBtn = document.getElementById("copy-brief");
