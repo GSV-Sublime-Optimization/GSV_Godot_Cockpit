@@ -39,7 +39,7 @@ def orders(channel: list[dict]) -> list[dict]:
     for m in channel:
         if m.get("kind") == "order" and m.get("id"):
             state[m["id"]] = {"id": m["id"], "at": m.get("at"), "from": m.get("from"), "to": m.get("to", "any"),
-                              "station": m.get("station") if m.get("station") in STATIONS else "anvil",
+                              "station": str(m.get("station") or "anvil")[:24],   # other cockpits add stations (ledger, act, factory)
                               "text": m.get("text", ""), "status": "posted", "by": None, "note": "", "link": "",
                               "history": [{"at": m.get("at"), "status": "posted", "by": m.get("from")}]}
         elif m.get("kind") == "order-status" and m.get("id") in state:
