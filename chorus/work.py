@@ -89,11 +89,22 @@ def _state(path: Path) -> dict | None:
     no_upstream = "..." not in head and "no branch" not in head
     if not dirty and not ahead:
         return None
+    if ahead:
+        # commits already saved on ANY remote branch (e.g. a claude/preserve-* branch) are not at risk
+        rb = subprocess.run(["git", "-C", str(path), "branch", "-r", "--contains", "HEAD"], capture_output=True,
+                            text=True, timeout=20, encoding="utf-8", errors="replace")
+        saved_on = [b.strip() for b in rb.stdout.splitlines() if b.strip() and "->" not in b]
+        if saved_on:
+            ahead = 0
+            if not dirty:
+                return None
+    else:
+        saved_on = []
     t = subprocess.run(["git", "-C", str(path), "log", "-1", "--format=%ct"], capture_output=True, text=True, timeout=10)
     last = float(t.stdout.strip() or 0)
     branch = head[3:].split("...")[0].strip()
     return {"path": str(path), "label": _label(path), "branch": branch, "dirty": dirty, "ahead": ahead,
-            "no_upstream": no_upstream, "last_commit_h": round((time.time() - last) / 3600, 1) if last else None}
+            "no_upstream": no_upstream, "saved_on": saved_on[:2], "last_commit_h": round((time.time() - last) / 3600, 1) if last else None}
 
 
 def _scan() -> list[dict]:

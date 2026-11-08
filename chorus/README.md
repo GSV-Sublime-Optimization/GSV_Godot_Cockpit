@@ -87,3 +87,20 @@ Every mark in the sky is data; nothing is there for decoration.
 ## Receipts
 - `receipts/chorus-fixture-1600x900.png`: desktop, rendered headless from the shared fixture.
 - `receipts/chorus-fixture-narrow.png`: a 600 px window. Headless Edge won't lay out narrower than about 500 px, so the phone stacking below 520 px is CSS-only and not screenshotted.
+
+## For agents: CHORUS as MCP tools
+`chorus/chorus_mcp.py` is a stdlib stdio MCP server, so any agent can use the cockpit natively:
+- `chorus_brief`: what needs attention, with the doctor's measured causes; new messages for your seat.
+- `chorus_rig`: one rig in detail.
+- `chorus_work`: who edits what, and checkouts holding unsaved work.
+- `chorus_doctor`: the read-only probes.
+- `chorus_orders` and `chorus_order_status`: take, working, done or decline, with a note and a link.
+- `chorus_say`: post to the channel as your own seat.
+
+Register it, setting `CHORUS_SEAT` to your seat:
+
+```
+claude mcp add chorus -e CHORUS_SEAT="claude (msi seat)" -- python K:/dev/worktrees/cockpit/mindview-msiclaude/chorus/chorus_mcp.py
+```
+
+The same tools exist as a CLI: `python chorus/chorus.py brief|rig|work|doctor|orders|take|working|done|decline|say`.
