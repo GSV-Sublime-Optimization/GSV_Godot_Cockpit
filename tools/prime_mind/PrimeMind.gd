@@ -223,12 +223,12 @@ func _draw_minds(rect: Rect2) -> void:
 	_wrap(Vector2(rect.position.x + 16, bottom + 15), "An observer line is not thinking. A model summary is not private reasoning. Silent data stays silent.", 31, 11, MUTE)
 
 func _rig_positions(rect: Rect2) -> Dictionary:
-	var c := rect.position + rect.size * 0.5
+	var c := rect.position + Vector2(rect.size.x * 0.50, rect.size.y * 0.45)
 	return {
-		"msi": rect.position + Vector2(rect.size.x * 0.19, rect.size.y * 0.48),
-		"i3": rect.position + Vector2(rect.size.x * 0.80, rect.size.y * 0.48),
-		"l9": rect.position + Vector2(rect.size.x * 0.50, rect.size.y * 0.20),
-		"xanadu": rect.position + Vector2(rect.size.x * 0.50, rect.size.y * 0.78),
+		"msi": rect.position + Vector2(rect.size.x * 0.19, rect.size.y * 0.45),
+		"i3": rect.position + Vector2(rect.size.x * 0.80, rect.size.y * 0.45),
+		"l9": rect.position + Vector2(rect.size.x * 0.50, rect.size.y * 0.18),
+		"xanadu": rect.position + Vector2(rect.size.x * 0.50, rect.size.y * 0.72),
 		"kernel": c
 	}
 
@@ -263,7 +263,7 @@ func _draw_core(rect: Rect2) -> void:
 	for id in RIG_IDS:
 		var p: Vector2 = pos[id]
 		var focused: bool = attention == id
-		var status := String(_feed.get("bodies", {}).get(id, {}).get("status", "unknown"))
+		var status := _effective_rig_status(id)
 		var node_color := _health_color(status)
 		var weight := 2.2 if focused else 1.0
 		draw_line(center, p, Color(node_color, 0.6 if focused else 0.18), weight)
@@ -276,6 +276,7 @@ func _draw_core(rect: Rect2) -> void:
 		draw_circle(p, 4, node_color)
 		var label: String = RIG_NAMES[RIG_IDS.find(id)]
 		_txt(p + Vector2(-32, 39), label, 13, INK if focused else MUTE, 80)
+		_txt(p + Vector2(-32, 53), status.to_upper(), 9, node_color, 80)
 		_rig_hitboxes.append({"id": id, "rect": Rect2(p - Vector2(33, 33), Vector2(66, 76))})
 	draw_circle(center, 30, Color("#1b3843"))
 	draw_arc(center, 30, 0, TAU, 48, CYAN, 2)
@@ -306,11 +307,21 @@ func _draw_core(rect: Rect2) -> void:
 	# Source integrity marker deliberately visible near the field.
 	_txt(rect.position + Vector2(18, 55), "4 RIGS · 0 ACTUATORS · SELECT A NODE TO INSPECT", 10, MUTE)
 
+func _effective_rig_status(id: String) -> String:
+	if not _feed.get("ok", false):
+		return "unknown"
+	# Do not retain a green rig ornament when the *local source* expired.
+	if not _is_fixture and (
+			not _error.is_empty()
+			or CONTRACT.source_state(_feed, false) != "OBSERVED"):
+		return "stale"
+	return String(_feed.get("bodies", {}).get(id, {}).get("status", "unknown"))
+
 func _health_color(state: String) -> Color:
 	match state:
 		"green": return GREEN
 		"red": return RED
-		"silent": return AMBER
+		"silent", "stale": return AMBER
 		_: return MUTE
 
 func _draw_inspector(rect: Rect2) -> void:
