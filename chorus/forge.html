@@ -1166,10 +1166,12 @@ async function poll() {
 function report() {
   const L = [`THE FORGE · ${MOCK ? 'MOCK' : live ? 'live' : 'snapshot'} · ${new Date(now()).toISOString().slice(0, 16).replace('T', ' ')} UTC`, ''];
   L.push('ORDERS'); if (!M.orders.length) L.push('  none');
-  for (const o of M.orders) L.push(`  ${o.id} [${o.status}${o.by ? ' by ' + displayName(o.by) : ''}] to ${displayName(o.to)} at ${ST[o.station].title}: ${o.text}${o.note ? ' | ' + o.note : ''}${o.link ? ' ' + o.link : ''}`);
+  // An order composed on this page can carry a blank station, so a lookup must not throw.
+  const stationTitle = (k) => ST[k]?.title || k || 'no station';
+  for (const o of M.orders) L.push(`  ${o.id} [${o.status}${o.by ? ' by ' + displayName(o.by) : ''}] to ${displayName(o.to)} at ${stationTitle(o.station)}: ${o.text}${o.note ? ' | ' + o.note : ''}${o.link ? ' ' + o.link : ''}`);
   L.push('', 'WHO IS WHERE');
-  for (const s of M.smiths) L.push(`  ${s.name} (${RIGS[s.rig] || s.rig}) at ${ST[s.station].title}, ${ago(s.at)}: ${s.doing}`);
-  L.push('', 'STATIONS'); for (const k of PLAQUE_ORDER) { const d = plaqueData(k); L.push(`  ${ST[k].title}: ${d.v} (${d.s})`); }
+  for (const s of M.smiths) L.push(`  ${s.name} (${RIGS[s.rig] || s.rig}) at ${stationTitle(s.station)}, ${ago(s.at)}: ${s.doing}`);
+  L.push('', 'STATIONS'); for (const k of PLAQUE_ORDER) { const d = plaqueData(k); L.push(`  ${stationTitle(k)}: ${d.v} (${d.s})`); }
   L.push('', 'NEEDS DOING'); if (!M.needs.length) L.push('  nothing');
   for (const n of M.needs) L.push(`  - ${n.title}: ${n.why}${n.act ? ` [button: ${shortLabel(n.act)}]` : ''}`);
   return L.join('\n');
