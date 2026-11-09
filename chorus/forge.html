@@ -114,7 +114,16 @@ kbd { font: 700 10px var(--f-body); border: 1px solid var(--hair-2); border-bott
 .need .nt { font-weight: 700; font-size: 12.5px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .need .nt:hover { color: #f6dcae; }
 .need .nw { font-size: 11.5px; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.need .na { display: flex; gap: 6px; }
+.need .na { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* need state: what has been done about this need (see the need-state store below renderNeeds).
+   New is unmarked; queued = made into an order / sent to a seat; doing = being worked on;
+   done = resolved. Done needs are dimmed but stay visible so the work can be checked. */
+.need.st-done { opacity: 0.55; }
+.need .ns { font: 700 10px var(--f-data); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--hair-2); color: var(--ink-dim); white-space: nowrap; }
+.need.st-queued .ns { color: var(--warn); border-color: var(--warn); }
+.need.st-doing .ns { color: var(--l9); border-color: var(--l9); }
+.need.st-done .ns { color: var(--ok); border-color: var(--ok); }
+select.nstate { background: var(--panel-2); color: var(--ink); border: 1px solid var(--hair-2); border-radius: 999px; padding: 4px 6px; font: 700 11px var(--f-body); cursor: pointer; }
 
 /* the order board: always visible; tickets move through Sent -> Taken -> Working -> Done */
 .board { min-height: 0; overflow: auto; border-left: 1px solid var(--hair); background: linear-gradient(#1a120d, #120c09); padding: 12px 14px 16px; display: grid; align-content: start; gap: 12px; user-select: text; }
@@ -417,23 +426,27 @@ function derive() {
 }
 function deriveNeeds() {
   const L = [], f = feed;
-  for (const r of M.silent) L.push({ sev: 3, st: 'fire', title: `${RIGS[r.rig]} is silent`, why: r.missing ? 'no heartbeat in the feed' : `last heartbeat ${ago(r.hb.at)}`,
+  // Every need carries a stable id for the need-state store (see below renderNeeds).
+  // The id names the underlying condition (rig, check, service, PR, repo), never the
+  // title: titles carry live numbers ("109 h old", "waiting 3 h") that change as time
+  // passes, so a title-keyed state would be lost on the next refresh.
+  for (const r of M.silent) L.push({ id: 'silent:' + r.rig, sev: 3, st: 'fire', title: `${RIGS[r.rig]} is silent`, why: r.missing ? 'no heartbeat in the feed' : `last heartbeat ${ago(r.hb.at)}`,
     order: `${RIGS[r.rig]} has sent no heartbeat ${r.missing ? 'at all' : 'since ' + hhmm(r.hb.at)}. Find out why, bring it back, and post what you found.`,
     act: r.rig === 'msi' ? actionFor('task', 'heartbeat-msi') : null });
   for (const c of M.failing) {
-    L.push({ sev: 3, st: 'quench', title: `${RIGS[c.rig]} ${c.name} failing`, why: c.doc ? c.doc.verdict : c.detail,
+    L.push({ id: 'failing:' + c.rig + ':' + c.name, sev: 3, st: 'quench', title: `${RIGS[c.rig]} ${c.name} failing`, why: c.doc ? c.doc.verdict : c.detail,
       order: `Fix the ${c.name} check on ${RIGS[c.rig]}. ${c.doc ? 'Doctor: ' + c.doc.verdict + '.' : 'It says: ' + c.detail + '.'} Post the evidence once it is green, or decline with what blocks it.`,
       to: c.rig === 'i3' ? 'claude (i3 seat)' : 'claude (msi seat)', act: c.rig === 'msi' ? restartFor(c.name) : null });
   }
-  for (const s of M.spineDown) L.push({ sev: 2, st: 'fire', title: `${s.name} service is down`, why: `spine: ${s.tier || ''} service not answering`,
+  for (const s of M.spineDown) L.push({ id: 'spine:' + s.name, sev: 2, st: 'fire', title: `${s.name} service is down`, why: `spine: ${s.tier || ''} service not answering`,
     order: `The ${s.name} service is down on the spine. Find out why and bring it back; post what you found.`, act: restartFor(s.name) });
-  const b = f.backup; if (b && b.age_h > 36 && !b.in_progress) L.push({ sev: 2, st: 'vault', title: `off-box backup ${hrs(b.age_h)} old`, why: 'fresh means within 36 h',
+  const b = f.backup; if (b && b.age_h > 36 && !b.in_progress) L.push({ id: 'backup:offbox', sev: 2, st: 'vault', title: `off-box backup ${hrs(b.age_h)} old`, why: 'fresh means within 36 h',
     order: 'Run the off-box backup to xanadu and post the set name and size when it finishes.', act: actionFor('task', 'offbox-backup') });
-  const mi = f.mirror; if (mi && (!mi.ok || mi.failures || mi.age_h > 26)) L.push({ sev: 2, st: 'vault', title: `mirror ${mi.failures ? mi.failures + ' failures' : hrs(mi.age_h) + ' old'}`, why: 'fresh means within 26 h, no failures',
+  const mi = f.mirror; if (mi && (!mi.ok || mi.failures || mi.age_h > 26)) L.push({ id: 'mirror', sev: 2, st: 'vault', title: `mirror ${mi.failures ? mi.failures + ' failures' : hrs(mi.age_h) + ' old'}`, why: 'fresh means within 26 h, no failures',
     order: 'Sync the git mirrors and report any repo that fails, with the error.', act: actionFor('task', 'mirror-sync') });
-  M.prs.slice(0, 4).forEach((p, i) => L.push({ sev: i === 0 ? 2 : 1, st: 'pegs', title: `${p.repo}#${p.number} waiting ${ago(p.created).replace(' ago', '')}`, why: p.title, url: p.url,
+  M.prs.slice(0, 4).forEach((p, i) => L.push({ id: 'pr:' + p.repo + '#' + p.number, sev: i === 0 ? 2 : 1, st: 'pegs', title: `${p.repo}#${p.number} waiting ${ago(p.created).replace(' ago', '')}`, why: p.title, url: p.url,
     order: `Review ${p.repo}#${p.number} ("${p.title}"): run it, then post evidence (what you ran, the verdict, the link). ${p.url}` }));
-  M.risk.slice(0, 3).forEach((r) => L.push({ sev: r.label === 'Kilo_Core' ? 2 : 1, st: 'rack', title: `${r.label}: ${r.dirty} unsaved, ${r.ahead} unpushed`, why: `${r.branch} · last commit ${hrs(r.last_commit_h)} ago`,
+  M.risk.slice(0, 3).forEach((r) => L.push({ id: 'risk:' + r.label, sev: r.label === 'Kilo_Core' ? 2 : 1, st: 'rack', title: `${r.label}: ${r.dirty} unsaved, ${r.ahead} unpushed`, why: `${r.branch} · last commit ${hrs(r.last_commit_h)} ago`,
     order: `${r.label} (${r.branch}) holds ${r.dirty} uncommitted files and ${r.ahead} unpushed commits (last commit ${hrs(r.last_commit_h)} ago). Sort them into commits on a branch and push, or say why they should not be kept.`,
     act: r.ahead > 0 ? { action: 'preserve', target: r.path, label: `Save ${r.label}'s ${r.ahead} commits to GitHub` } : null }));
   return L.sort((a, b) => b.sev - a.sev);
@@ -979,16 +992,58 @@ ledgerB.addEventListener('click', (e) => {
 });
 $('#ledger-x').addEventListener('click', closeLedger);
 
+// ---------------------------------------------------------------- needs state: what has been done about each need
+// Needs are derived fresh from the feed on every ingest, so a need has no memory of
+// its own. This store records what was done about a need, keyed by the need's stable
+// id (see deriveNeeds). It lives in localStorage, so it persists per browser on the
+// machine that views the shop. It is deliberately a small, replaceable module: if the
+// shop later gains a server-side store, swap load/save and keep the rest.
+// States: new (nothing done yet), queued (made into an order / sent to a seat),
+// doing (being worked on), done (resolved). Setting a need back to new clears it.
+// Entries whose id is no longer derived are pruned on render, so a resolved need
+// does not leave a stale record behind.
+const NEED_STATES = ['new', 'queued', 'doing', 'done'];
+const NEED_STATE_LABEL = { new: 'New', queued: 'Queued', doing: 'Doing', done: 'Done' };
+const NEED_KEY = 'forge-needs-v1';
+function loadNeedStates() { try { return JSON.parse(localStorage.getItem(NEED_KEY) || '{}') || {}; } catch { return {}; } }
+function saveNeedStates() { try { localStorage.setItem(NEED_KEY, JSON.stringify(needStates)); } catch { /* storage unavailable: state lasts the session */ } }
+let needStates = loadNeedStates();
+function needState(n) { const s = needStates[n.id]; return s && NEED_STATES.includes(s.state) ? s : { state: 'new' }; }
+function setNeedState(id, state, to) {
+  if (!NEED_STATES.includes(state)) return;
+  if (state === 'new') delete needStates[id];
+  else needStates[id] = { state, at: new Date().toISOString(), ...(to ? { to } : {}) };
+  saveNeedStates();
+}
+function pruneNeedStates() {
+  const ids = new Set(M.needs.map((n) => n.id)); let changed = false;
+  for (const id of Object.keys(needStates)) if (!ids.has(id)) { delete needStates[id]; changed = true; }
+  if (changed) saveNeedStates();
+}
+
 // ---------------------------------------------------------------- needs bar
 function renderNeeds() {
-  const L = M.needs; $('#needs-n').textContent = L.length ? `${L.length} things you could order or do now` : '';
-  $('#needs').innerHTML = L.length ? L.map((n, i) => `<li class="need s${n.sev}"><span class="nt" data-i="${i}" title="Open the ${esc(ST[n.st].title)} ledger">${esc(n.title)}</span><span class="nw" title="${esc(n.why)}">${esc(n.why)}</span><span class="na">${n.act ? actBtn(n.act) : ''}<button class="small" type="button" data-oi="${i}">Make this an order</button></span></li>`).join('')
+  pruneNeedStates();
+  const L = M.needs;
+  const counts = { new: 0, queued: 0, doing: 0, done: 0 };
+  for (const n of L) counts[needState(n).state]++;
+  $('#needs-n').textContent = L.length ? `${L.length} things you could order or do now · ${counts.new} new · ${counts.queued} queued · ${counts.doing} doing · ${counts.done} done` : '';
+  $('#needs').innerHTML = L.length ? L.map((n, i) => {
+    const s = needState(n);
+    const when = s.at ? ` · ${hhmm(s.at)}` : '';
+    const where = s.to ? ` → ${esc(s.to)}` : '';
+    return `<li class="need s${n.sev} st-${s.state}" data-ni="${i}"><span class="nt" data-i="${i}" title="Open the ${esc(ST[n.st].title)} ledger">${esc(n.title)}</span><span class="nw" title="${esc(n.why)}">${esc(n.why)}</span><span class="ns" title="${s.state === 'new' ? 'Nothing done about this yet' : NEED_STATE_LABEL[s.state] + where + when}">${NEED_STATE_LABEL[s.state]}</span><span class="na">${n.act ? actBtn(n.act) : ''}<button class="small" type="button" data-oi="${i}">Make this an order</button><select class="small nstate" data-ns="${i}" aria-label="Status for ${esc(n.title)}">${NEED_STATES.map((v) => `<option value="${v}"${v === s.state ? ' selected' : ''}>${NEED_STATE_LABEL[v]}</option>`).join('')}</select></span></li>`;
+  }).join('')
     : `<li class="need s1"><span class="nt">Nothing needs you.</span><span class="nw">Every check passes and nothing waits.</span></li>`;
 }
 $('#needs').addEventListener('click', (e) => {
   const t = e.target.closest('[data-i]'); if (t) { openLedger(M.needs[+t.dataset.i].st); return; }
-  const o = e.target.closest('[data-oi]'); if (o) { const n = M.needs[+o.dataset.oi]; prefill(n.order, n.st === 'fire' ? 'quench' : n.st === 'rack' ? 'anvil' : n.st, n.to); return; }
-  const a = e.target.closest('[data-act]'); if (a) propose({ action: a.dataset.act, target: a.dataset.target, label: a.dataset.label });
+  const o = e.target.closest('[data-oi]'); if (o) { const n = M.needs[+o.dataset.oi]; setNeedState(n.id, 'queued', n.to); prefill(n.order, n.st === 'fire' ? 'quench' : n.st === 'rack' ? 'anvil' : n.st, n.to); renderNeeds(); return; }
+  const a = e.target.closest('[data-act]'); if (a) { const li = e.target.closest('li.need'); const n = li ? M.needs[+li.dataset.ni] : null; propose({ action: a.dataset.act, target: a.dataset.target, label: a.dataset.label }); if (n) { setNeedState(n.id, 'doing', needState(n).to); renderNeeds(); } }
+});
+$('#needs').addEventListener('change', (e) => {
+  const s = e.target.closest('[data-ns]'); if (!s) return;
+  const n = M.needs[+s.dataset.ns]; setNeedState(n.id, s.value, needState(n).to); renderNeeds();
 });
 
 // ---------------------------------------------------------------- the order board
@@ -1150,7 +1205,7 @@ function report() {
   for (const s of M.smiths) L.push(`  ${s.name} (${RIGS[s.rig] || s.rig}) at ${ST[s.station].title}, ${ago(s.at)}: ${s.doing}`);
   L.push('', 'STATIONS'); for (const k of PLAQUE_ORDER) { const d = plaqueData(k); L.push(`  ${ST[k].title}: ${d.v} (${d.s})`); }
   L.push('', 'NEEDS DOING'); if (!M.needs.length) L.push('  nothing');
-  for (const n of M.needs) L.push(`  - ${n.title}: ${n.why}${n.act ? ` [button: ${shortLabel(n.act)}]` : ''}`);
+  for (const n of M.needs) { const s = needState(n); L.push(`  - [${NEED_STATE_LABEL[s.state]}${s.to ? ' → ' + s.to : ''}${s.at ? ' ' + s.at.slice(0, 16).replace('T', ' ') : ''}] ${n.title}: ${n.why}${n.act ? ` [button: ${shortLabel(n.act)}]` : ''}`); }
   return L.join('\n');
 }
 async function copy(text) { try { await navigator.clipboard.writeText(text); toast('Shop report copied.'); } catch { const ta = document.createElement('textarea'); ta.value = text; document.body.append(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Shop report copied.'); } }
