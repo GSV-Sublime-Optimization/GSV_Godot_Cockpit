@@ -4,13 +4,21 @@ extends Node
 ## R0 / read-only: never shells out, posts tasks, reads credential stores,
 ## impersonates an agent, or interprets an HTTP response as write authority.
 ## No polling until an owning UI/agent scene explicitly calls observe().
+## Timeout and freshness are configuration with safe defaults and bounds.
+## Redirect following is disabled: the URL is hardcoded local, never input.
 
 signal observation_changed(observation: Dictionary)
 
 const PROJECTION = preload("res://scripts/entity/StudioHealthProjection.gd")
 const LOCAL_STUDIO_BASE := "http://127.0.0.1:7340"
-const HTTP_TIMEOUT_SECONDS := 4.0
-const DEFAULT_FRESHNESS_MSEC := 15000
+const MAX_BODY_BYTES := 131072
+
+@export_range(1.0, 30.0, 0.5) var http_timeout_seconds: float = 4.0:
+	set(value):
+		http_timeout_seconds = clampf(value, 1.0, 30.0)
+@export_range(5000.0, 300000.0, 1000.0) var freshness_msec: float = 15000.0:
+	set(value):
+		freshness_msec = clampf(value, 5000.0, 300000.0)
 
 var _request: HTTPRequest
 var _pending: bool = false
@@ -20,7 +28,8 @@ var _failure: String = "not_observed"
 
 func _ready() -> void:
 	_request = HTTPRequest.new()
-	_request.timeout = HTTP_TIMEOUT_SECONDS
+	_request.timeout = http_timeout_seconds
+	_request.max_redirects = 0
 	add_child(_request)
 	_request.request_completed.connect(_on_request_completed)
 
@@ -50,7 +59,7 @@ func current_observation() -> Dictionary:
 			"observed_at_ms": 0
 		}
 	var view := _last_good.duplicate(true)
-	var expired := Time.get_ticks_msec() - _observed_at_ms > DEFAULT_FRESHNESS_MSEC
+	var expired := Time.get_ticks_msec() - _observed_at_ms > freshness_msec
 	if expired or not _failure.is_empty():
 		view["state"] = "stale"
 		view["error"] = "observation_expired" if expired and _failure.is_empty() else _failure
@@ -62,7 +71,7 @@ func _on_request_completed(result: int, response_code: int,
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		_mark_failure("studio_transport_unavailable")
 		return
-	if body.size() > 131072:
+	if body.size() > MAX_BODY_BYTES:
 		_mark_failure("health_response_too_large")
 		return
 	var projection: Dictionary = PROJECTION.parse_health(body.get_string_from_utf8())
