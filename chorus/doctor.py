@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import json
 import subprocess
+from quiet_process import run as run_quiet
 import time
 import urllib.request
 from pathlib import Path
@@ -47,7 +48,7 @@ def i3_docker() -> dict:
           "$s=(Get-Service com.docker.service -EA SilentlyContinue).Status; "
           "\"vtx=$($p.VirtualizationFirmwareEnabled) hypervisor=$($c.HypervisorPresent) docker_service=$s\"")
     enc = base64.b64encode(ps.encode("utf-16-le")).decode()      # no quoting survives ssh -> cmd -> powershell; this does
-    r = subprocess.run(SSH + ["i3", f"powershell -NoProfile -EncodedCommand {enc}"], capture_output=True, text=True, timeout=40)
+    r = run_quiet(SSH + ["i3", f"powershell -NoProfile -EncodedCommand {enc}"], capture_output=True, text=True, timeout=40)
     line = (r.stdout or "").strip().splitlines()[-1:] or ["no answer"]
     ev = [f"i3 says: {line[0]}"]
     if "vtx=False" in line[0]:
@@ -66,12 +67,12 @@ def i3_ollama() -> dict:
 def msi_docker() -> dict:
     t = time.perf_counter()
     try:
-        r = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"], capture_output=True, text=True, timeout=20)
+        r = run_quiet(["docker", "version", "--format", "{{.Server.Version}}"], capture_output=True, text=True, timeout=20)
         ok, out = r.returncode == 0, (r.stdout or r.stderr).strip()[:120]
     except subprocess.TimeoutExpired:
         ok, out = False, "no answer in 20 s"
     ms = round((time.perf_counter() - t) * 1000)
-    builds = subprocess.run(["powershell", "-NoProfile", "-Command",
+    builds = run_quiet(["powershell", "-NoProfile", "-Command",
                              "(Get-CimInstance Win32_Process -Filter \"Name='docker.exe'\" | ? CommandLine -match ' build ').Count"],
                             capture_output=True, text=True, timeout=20).stdout.strip() or "0"
     ev = [f"docker version: {out} ({ms} ms)", f"docker builds running: {builds}"]
@@ -83,7 +84,7 @@ def msi_docker() -> dict:
 def spine_container(name: str, container: str, url: str):
     """Probe for a spine service that runs as a container: is it running, what is its restart policy, does it answer."""
     def probe() -> dict:
-        r = subprocess.run(["docker", "inspect", container, "--format",
+        r = run_quiet(["docker", "inspect", container, "--format",
                             "{{.State.Status}}|{{.State.ExitCode}}|{{.State.FinishedAt}}|{{.HostConfig.RestartPolicy.Name}}"],
                            capture_output=True, text=True, timeout=20)
         state = (r.stdout or "").strip() or "missing"
