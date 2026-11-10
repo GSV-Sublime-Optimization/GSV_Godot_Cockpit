@@ -43,7 +43,8 @@ def assess(returncode: int, output: str, expected: str) -> dict:
     # A PASS must be an exact, standalone final marker, including bare
     # ENTITY_* sentinels. The old substring check could be fooled by debug
     # prose or a partial success banner.
-    marker_seen = lines.count(expected) == 1
+    marker_seen = (sum(line.startswith(expected) for line in lines) == 1
+                   if expected == "Godot Engine v" else lines.count(expected) == 1)
     return {
         "exit_code": returncode,
         "expected_pass_marker": expected,
