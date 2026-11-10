@@ -54,20 +54,20 @@ class GodotSmokeLogGateTests(unittest.TestCase):
             self.assertNotIn(forbidden, checked)
 
     def test_ansi_coloured_script_error_cannot_hide_behind_pass(self):
-        report = assess(0, "[boot-test] PASS\\n\\x1b[31mSCRIPT ERROR: Invalid call\\x1b[0m\\n", "[boot-test] PASS")
+        report = assess(0, "[boot-test] PASS\n\x1b[31mSCRIPT ERROR: Invalid call\x1b[0m\n", "[boot-test] PASS")
         self.assertFalse(report["passed"])
         self.assertEqual(len(report["engine_errors"]), 1)
 
     def test_bare_success_substring_in_a_log_is_not_a_real_pass(self):
-        self.assertFalse(assess(0, "not really ENTITY_SESSION_PASS yet\\n",
+        self.assertFalse(assess(0, "not really ENTITY_SESSION_PASS yet\n",
                                 "ENTITY_SESSION_PASS")["passed"])
 
     def test_duplicate_positive_sentinels_fail_closed(self):
-        self.assertFalse(assess(0, "ENTITY_SESSION_PASS\\nENTITY_SESSION_PASS\\n",
+        self.assertFalse(assess(0, "ENTITY_SESSION_PASS\nENTITY_SESSION_PASS\n",
                                 "ENTITY_SESSION_PASS")["passed"])
 
     def test_import_banner_prefix_still_works_once(self):
-        self.assertTrue(assess(0, "Godot Engine v4.7.1.stable.official\\n",
+        self.assertTrue(assess(0, "Godot Engine v4.7.1.stable.official\n",
                                "Godot Engine v")["passed"])
 
     def test_offline_runner_strips_local_live_studio_opt_in(self):
