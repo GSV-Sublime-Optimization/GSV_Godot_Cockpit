@@ -77,6 +77,18 @@ def _kill_owned_tree(proc: subprocess.Popen) -> None:
         proc.communicate()
 
 
+def isolated_env(source: dict[str, str] | None = None) -> dict[str, str]:
+    """A proof declared offline must never opportunistically touch live Studio.
+
+    Local developers may have GSV_STUDIO_LIVE=1 set in their shell. Resetting
+    the flag only in CI leaves the portable GSV gate non-hermetic on the MSI.
+    """
+    env = dict(os.environ if source is None else source)
+    env["GSV_STUDIO_LIVE"] = "0"
+    env.pop("GSV_STUDIO_ENTITY_PORT", None)
+    return env
+
+
 def run_case(binary: str, project: Path, test: str, expected: str, timeout: int) -> dict:
     command = [binary, "--headless", "--audio-driver", "Dummy", "--path", str(project)]
     if test == "--import":
@@ -86,7 +98,8 @@ def run_case(binary: str, project: Path, test: str, expected: str, timeout: int)
     proc = None
     try:
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, errors="replace", start_new_session=os.name != "nt")
+                                text=True, errors="replace", start_new_session=os.name != "nt",
+                                env=isolated_env())
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         if proc is not None:
