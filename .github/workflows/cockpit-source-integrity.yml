@@ -1,0 +1,52 @@
+name: GSV Cockpit source and offline truth gate
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-source-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Setup Python for fixture and negative controls
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Refuse false-positive PASS and parser diagnoses
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Install Godot 4.7.1 for GL Compatibility source checks
+        uses: solarlabyrinth/action-setup-godot@v3
+        with:
+          version: 4.7.1-stable
+          export-templates: false
+
+      # Every proof is repository-owned and runs on Linux without Studio,
+      # GSV tools, fleet agents, secrets or physical computers. Offline must
+      # remain visually distinct from empty/fresh/healthy, never synthesized.
+      - name: Full resource import and seven real offline fixture scenes
+        env:
+          GSV_STUDIO_LIVE: "0"
+        run: python tests/godot_smoke_gate.py --godot godot --project . --timeout 240 --receipt ci-receipts/cockpit-offline.json
+
+      - name: Check syntax of every first-party .gd source and native test
+        run: python tests/cockpit_parse_gate.py --godot godot --project . --timeout 45
+
+      - name: Preserve the exact-head offline proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsv-cockpit-offline-source-${{ github.sha }}
+          path: ci-receipts/cockpit-offline.json
+          if-no-files-found: warn
+          retention-days: 7
