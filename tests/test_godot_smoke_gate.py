@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from godot_smoke_gate import CASES, assess
+from godot_smoke_gate import CASES, assess, isolated_env
 
 
 class GodotSmokeLogGateTests(unittest.TestCase):
@@ -69,6 +69,24 @@ class GodotSmokeLogGateTests(unittest.TestCase):
     def test_import_banner_prefix_still_works_once(self):
         self.assertTrue(assess(0, "Godot Engine v4.7.1.stable.official\\n",
                                "Godot Engine v")["passed"])
+
+    def test_offline_runner_strips_local_live_studio_opt_in(self):
+        result = isolated_env({
+            "GSV_STUDIO_LIVE": "1",
+            "GSV_STUDIO_ENTITY_PORT": "7340",
+            "GSV_KILOCORE_REPORTS_DIR": "/my-safe-local-fixture",
+        })
+        self.assertEqual(result["GSV_STUDIO_LIVE"], "0")
+        self.assertNotIn("GSV_STUDIO_ENTITY_PORT", result)
+        self.assertEqual(result["GSV_KILOCORE_REPORTS_DIR"], "/my-safe-local-fixture")
+
+    def test_offline_runner_does_not_mutate_callers_environment(self):
+        original = {"GSV_STUDIO_LIVE": "1", "GSV_STUDIO_ENTITY_PORT": "7340"}
+        result = isolated_env(original)
+        self.assertEqual(original["GSV_STUDIO_LIVE"], "1")
+        self.assertEqual(original["GSV_STUDIO_ENTITY_PORT"], "7340")
+        self.assertEqual(result["GSV_STUDIO_LIVE"], "0")
+        self.assertNotIn("GSV_STUDIO_ENTITY_PORT", result)
 
     def test_build_contract_pins_engine_for_every_phase(self):
         manifest = (Path(__file__).resolve().parents[1] / ".gsv" / "build.yaml").read_text(
