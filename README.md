@@ -69,6 +69,28 @@ above, and every tab gains content when shown. It takes about two minutes becaus
 panels' probes run for real. Always run headless Godot under a hard timeout: a failed
 headless boot can hang instead of exiting.
 
+## 2026-11-10 candidate: standalone offline source gate
+
+The `gpt6/cockpit-offline-source-ci-gate-20261110` draft adds a GitHub
+workflow to the existing `.gsv` source contract. It runs on PRs and
+master pushes, without requiring an MSI PowerShell bridge, local Studio,
+fleet credentials, or any sibling service. The workflow installs Godot
+4.7.1, runs Python negative-control tests, imports project resources,
+and executes the repository's seven strictly gated offline fixture scenes.
+These include four previously omitted entity/projection scenes proving
+that unknown and offline input **cannot** be silently promoted to a live
+or authorized actuator. The separately required *real live Studio* tests
+are intentionally NOT claimed by this offline gate.
+
+`tests/cockpit_parse_gate.py` also runs Godot's `--check-only --script`
+against every first-party GDScript file and test. The strict log gate
+rejects ANSI-hidden engine script errors, partial/multiple PASS markers,
+process failures, and fixture failures. Each CI run preserves an
+exact-head JSON receipt. Source/fixture validity is **not** a human
+visual, performance or input-feel acceptance; this is still a cockpit
+presentation membrane, not a colony control plane. `master` remains
+canonical until reviewed and merged.
+
 ## Validate
 
 The repository-owned GSV proof contract is `.gsv/build.yaml`.
