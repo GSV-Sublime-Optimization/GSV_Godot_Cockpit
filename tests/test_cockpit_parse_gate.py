@@ -15,6 +15,20 @@ class SourceParseGateTests(unittest.TestCase):
         self.assertGreaterEqual(len(scripts), 15)
         self.assertFalse(any(name.endswith(".uid") for name in names))
 
+    def test_hosted_workflow_and_local_contract_share_the_same_offline_proof(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/cockpit-source-integrity.yml").read_text(
+            encoding="utf-8"
+        )
+        contract = (root / ".gsv/build.yaml").read_text(encoding="utf-8")
+        for command in ("tests/godot_smoke_gate.py", "tests/cockpit_parse_gate.py"):
+            self.assertIn(command, workflow)
+            self.assertIn(command, contract)
+        self.assertIn("pull_request:", workflow)
+        self.assertIn("branches: [master]", workflow)
+        self.assertIn('GSV_STUDIO_LIVE: "0"', workflow)
+        self.assertNotIn("entity_scene_live_test.gd", workflow)
+
     def test_clean_checkonly_output_passes(self):
         self.assertTrue(assess_parse(0, "Godot Engine v4.7.1\n"))
 
