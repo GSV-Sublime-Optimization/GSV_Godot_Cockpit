@@ -18,18 +18,32 @@ import sys
 from pathlib import Path
 
 ENGINE_ERROR = re.compile(r"(?m)^\s*(?:SCRIPT ERROR:|ERROR:|FATAL:)")
+# These are SAFE, fixture-only tests. Live Studio/fleet integration scenes
+# require a real authorized service and must remain a separate explicit gate.
 CASES = (
     ("import", "--import", "Godot Engine v"),
     ("boot", "res://tests/cockpit_boot_test.gd", "[boot-test] PASS"),
     ("portable", "res://tests/portable_offline_test.gd", "[portable-test] PASS"),
+    ("entity", "res://tests/entity_session_test.gd", "ENTITY_SESSION_PASS"),
+    ("projection", "res://tests/fleet_body_projection_test.gd", "ENTITY_FLEET_PROJECTION_PASS"),
+    ("console", "res://tests/entity_observation_console_test.gd", "ENTITY_OBSERVATION_CONSOLE_PASS"),
+    ("studio", "res://tests/studio_entity_bridge_test.gd", "STUDIO_ENTITY_BRIDGE_PASS"),
 )
 
 
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
 def assess(returncode: int, output: str, expected: str) -> dict:
-    errors = [line.strip() for line in output.splitlines() if ENGINE_ERROR.match(line)]
-    # Test PASS markers must be whole lines, not prefixes of per-assertion logs.
-    marker_seen = (any(line.strip() == expected for line in output.splitlines())
-                   if expected.startswith("[") else expected in output)
+    # Coloured Godot logs and carriage-return progress lines must not hide
+    # a fatal parser/error diagnostic behind ANSI/control-byte prefixes.
+    cleaned = ANSI_ESCAPE.sub("", output).replace("\r", "\n")
+    lines = [line.strip() for line in cleaned.splitlines()]
+    errors = [line for line in lines if ENGINE_ERROR.match(line)]
+    # A PASS must be an exact, standalone final marker, including bare
+    # ENTITY_* sentinels. The old substring check could be fooled by debug
+    # prose or a partial success banner.
+    marker_seen = lines.count(expected) == 1
     return {
         "exit_code": returncode,
         "expected_pass_marker": expected,
