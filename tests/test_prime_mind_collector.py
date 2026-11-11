@@ -91,6 +91,40 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(json.loads(out.read_text())["schema"], collector.SCHEMA)
             self.assertFalse(any(Path(tmp).glob(".prime-mind-*.tmp")))
 
+    def test_local_archive_copy_uses_shared_fixture_layout_without_ssh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "events.jsonl").write_text(
+                json.dumps({"at": "2026-11-08T06:16:16+00:00", "mind": "l9-triage-drone",
+                            "model": "qwen3:4b-l9fast", "level": "notable",
+                            "reasons": ["i3 failing: docker"], "line": "i3 failing: docker",
+                            "focus": "i3"}) + "\nnot json\n", encoding="utf-8")
+            (root / "heartbeat_i3.json").write_text(json.dumps({
+                "schema": "colony.heartbeat/v1", "rig": "i3", "at": "2026-11-08T06:46:42Z",
+                "green": False, "checks": [{"name": "docker", "ok": False}]}), encoding="utf-8")
+            out = root / "out" / "feed.json"
+            with patch.object(collector.subprocess, "run") as run:
+                rc = collector.main(["--output", str(out), "--from-dir", str(root),
+                                     "--now", "2026-11-08T06:47:00Z"])
+            run.assert_not_called()
+            self.assertEqual(rc, 0)
+            feed = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(len(feed["events"]), 1)
+            self.assertEqual(feed["at"], "2026-11-08T06:47:00Z")
+            self.assertEqual(feed["bodies"]["i3"]["status"], "red")
+            self.assertEqual(feed["bodies"]["i3"]["failing"], ["docker"])
+            self.assertEqual(feed["bodies"]["msi"]["status"], "unknown")
+            self.assertNotIn("SSH", feed["bodies"]["xanadu"]["detail"])
+
+    def test_actual_shared_fixture_when_present(self):
+        shared = Path(__file__).resolve().parent / "fixtures" / "mindview-20261108"
+        if not shared.is_dir():
+            self.skipTest("shared #14 fixture not on this branch (lives on PR #16)")
+        feed = collector.project(collector.read_local_archive(shared),
+                                 now=dt.datetime(2026, 11, 8, 6, 47, tzinfo=dt.timezone.utc))
+        self.assertEqual(len(feed["events"]), 4)
+        self.assertEqual(feed["bodies"]["i3"]["status"], "red")
+
 
 if __name__ == "__main__":
     unittest.main()

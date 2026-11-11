@@ -43,6 +43,8 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_font = ThemeDB.fallback_font
 	Engine.max_fps = 24
+	# Only render frames when the canvas asks for it (#14 idle budget: <=5% of one core).
+	OS.low_processor_usage_mode = true
 	get_window().mode = Window.MODE_WINDOWED
 	get_window().always_on_top = false
 	_parse_args()
@@ -303,9 +305,31 @@ func _draw_core(rect: Rect2) -> void:
 		for i in mini(2, reasons.size()):
 			_txt(start + Vector2(0, 17 + i * 15), "· " + reasons[i], 11, MUTE, rect.size.x - 43)
 	else:
-		_txt(rect.position + Vector2(20, rect.size.y - 34), "VITALS LENS  /  HEARTBEAT STATE + CAPTURE AGE", 11, AMBER)
+		_txt(rect.position + Vector2(20, rect.size.y - 68), "VITALS LENS  /  HEARTBEAT STATE + CAPTURE AGE", 11, AMBER)
+		var rows := _vitals_lines()
+		var col_w := (rect.size.x - 40.0) / 2.0
+		for i in rows.size():
+			var at := rect.position + Vector2(20 + (i % 2) * col_w, rect.size.y - 48 + (i / 2) * 17)
+			var tint := CYAN if _focus_override == RIG_IDS[i] else MUTE
+			_txt(at, rows[i], 11, tint, col_w - 8)
 	# Source integrity marker deliberately visible near the field.
 	_txt(rect.position + Vector2(18, 55), "4 RIGS · 0 ACTUATORS · SELECT A NODE TO INSPECT", 10, MUTE)
+
+## One line per rig for the vitals lens: reported status, heartbeat age at
+## capture and failing checks, straight from the feed's body map.
+func _vitals_lines() -> PackedStringArray:
+	var out: PackedStringArray = []
+	var bodies: Dictionary = _feed.get("bodies", {})
+	for i in RIG_IDS.size():
+		var id: String = RIG_IDS[i]
+		var b: Dictionary = bodies.get(id, {})
+		var age: int = int(b.get("age_s", -1))
+		var failing: PackedStringArray = b.get("failing", PackedStringArray())
+		var parts := [RIG_NAMES[i], _effective_rig_status(id).to_upper(),
+			("hb %d s old at capture" % age) if age >= 0 else "no heartbeat age",
+			("failing: " + ", ".join(failing)) if not failing.is_empty() else "no failing checks"]
+		out.append("  ·  ".join(parts))
+	return out
 
 func _effective_rig_status(id: String) -> String:
 	if not _feed.get("ok", false):
@@ -371,7 +395,7 @@ func _draw_tape(rect: Rect2) -> void:
 	_tick_hitboxes.clear()
 	_txt(rect.position + Vector2(15, 25), "THOUGHT TAPE / CAUSAL SEQUENCER", 15, CYAN)
 	_txt(rect.position + Vector2(390, 25), "←  →  SCRUB    SPACE  PLAY / PAUSE", 11, MUTE)
-	_txt(Vector2(rect.end.x - 152, rect.position.y + 25), "R : " + ("PLAYING" if _replaying else "PAUSED"), 11, AMBER)
+	_txt(Vector2(rect.end.x - 152, rect.position.y + 25), "SPACE : " + ("PLAYING" if _replaying else "PAUSED"), 11, AMBER)
 	var indices := _filtered_indices()
 	if indices.is_empty():
 		_txt(rect.position + Vector2(17, 80), "No events in this lens. Source uncertainty is preserved.", 13, MUTE)
@@ -453,6 +477,7 @@ func _gui_input(event: InputEvent) -> void:
 			if option["rect"].has_point(p):
 				_mind_filter = String(option["id"])
 				_focus_override = ""
+				_select_within_filter()
 				queue_redraw()
 				accept_event()
 				return
@@ -481,6 +506,11 @@ func _gui_input(event: InputEvent) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
+	# '?' arrives as Shift+Slash on most layouts, so match the character too.
+	if event.keycode == KEY_F1 or event.keycode == KEY_QUESTION or event.unicode == 0x3F:
+		_show_help = not _show_help
+		queue_redraw()
+		return
 	match event.keycode:
 		KEY_ESCAPE:
 			get_tree().quit(0)
@@ -496,13 +526,20 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_M:
 			var filters := ["all", "models", "observer"]
 			_mind_filter = filters[(filters.find(_mind_filter) + 1) % filters.size()]
+			_select_within_filter()
 		KEY_R:
 			_load_snapshot()
 		KEY_F11:
 			get_window().mode = Window.MODE_WINDOWED if get_window().mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
-		KEY_QUESTION, KEY_F1:
-			_show_help = not _show_help
 	queue_redraw()
+
+## Keep the inspector on an event the active filter actually shows.
+func _select_within_filter() -> void:
+	var visible := _filtered_indices()
+	if visible.has(_selected):
+		return
+	_selected = visible[visible.size() - 1] if not visible.is_empty() else -1
+	_focus_override = ""
 
 func _step(direction: int) -> void:
 	var visible := _filtered_indices()

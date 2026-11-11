@@ -66,7 +66,12 @@ def elapsed(stamp: Any, now: dt.datetime) -> int | None:
         return None
 
 
-def project(remote: dict[str, Any], *, now: dt.datetime) -> dict[str, Any]:
+XANADU_SSH_NOTE = "SSH read of Xanadu archive succeeded; host health not independently qualified"
+XANADU_LOCAL_NOTE = "Local archive copy; Xanadu host health not observed"
+
+
+def project(remote: dict[str, Any], *, now: dt.datetime,
+            xanadu_detail: str = XANADU_SSH_NOTE) -> dict[str, Any]:
     if not isinstance(remote, dict):
         raise ValueError("invalid_remote_source")
     events = remote.get("events", [])
@@ -82,7 +87,7 @@ def project(remote: dict[str, Any], *, now: dt.datetime) -> dict[str, Any]:
         }
         hb = heartbeats.get(rig)
         if rig == "xanadu":
-            body["detail"] = "SSH read of Xanadu archive succeeded; host health not independently qualified"
+            body["detail"] = xanadu_detail
         elif isinstance(hb, dict) and hb.get("schema") == "colony.heartbeat/v1" and hb.get("rig") == rig:
             age = elapsed(hb.get("at"), now)
             checks = hb.get("checks", [])
@@ -131,6 +136,43 @@ def project(remote: dict[str, Any], *, now: dt.datetime) -> dict[str, Any]:
     }
 
 
+def read_local_archive(root: Path) -> dict[str, Any]:
+    """Read a local copy of the archive, e.g. the shared #14 fixture
+    tests/fixtures/mindview-20261108/ (events.jsonl + heartbeat_<rig>.json)
+    or a mirror of xanadu:~/steward (events/*.jsonl + heartbeats/<rig>.json).
+    Same limits as the remote script; nothing is written or executed."""
+    files = sorted((root / "events").glob("*.jsonl"))[-2:] or sorted(root.glob("events*.jsonl"))
+    lines: list[str] = []
+    for path in files:
+        if path.is_file() and path.stat().st_size <= 400_000:
+            lines.extend(path.read_text(encoding="utf-8").splitlines()[-80:])
+    events = []
+    for line in lines[-80:]:
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            events.append(obj)
+    heartbeats: dict[str, Any] = {}
+    for name in ("msi", "i3", "l9"):
+        for path in (root / "heartbeats" / f"{name}.json", root / f"heartbeat_{name}.json"):
+            if path.is_file() and path.stat().st_size <= 8192:
+                try:
+                    heartbeats[name] = json.loads(path.read_text(encoding="utf-8"))
+                except ValueError:
+                    pass
+                break
+    return {"events": events, "heartbeats": heartbeats}
+
+
+def _parse_now(value: str) -> dt.datetime:
+    stamp = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if stamp.tzinfo is None:
+        raise ValueError("--now needs a timezone, e.g. 2026-11-08T06:47:00Z")
+    return stamp
+
+
 def _ssh_client() -> str:
     """Use the existing Git SSH configuration on Windows when available.
 
@@ -147,18 +189,7 @@ def _ssh_client() -> str:
     return "ssh"
 
 
-def collect_once(*, output: Path, timeout: float = 16.0) -> dict[str, Any]:
-    cmd = [_ssh_client(), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-           "-o", "ConnectTimeout=6", SSH_HOST, "python3 -"]
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-    result = subprocess.run(
-        cmd, input=REMOTE_SCRIPT, capture_output=True, text=True,
-        encoding="utf-8", timeout=timeout, check=False, creationflags=creationflags,
-    )
-    if result.returncode != 0 or len(result.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES:
-        raise RuntimeError("authenticated_archive_fetch_unavailable")
-    remote = json.loads(result.stdout)
-    feed = project(remote, now=utc_now())
+def _write_atomic(output: Path, feed: dict[str, Any]) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(feed, ensure_ascii=False, separators=(",", ":"))
     if len(content.encode("utf-8")) > MAX_RESPONSE_BYTES:
@@ -176,6 +207,21 @@ def collect_once(*, output: Path, timeout: float = 16.0) -> dict[str, Any]:
     finally:
         if tmp.exists():
             tmp.unlink()
+
+
+def collect_once(*, output: Path, timeout: float = 16.0) -> dict[str, Any]:
+    cmd = [_ssh_client(), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+           "-o", "ConnectTimeout=6", SSH_HOST, "python3 -"]
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    result = subprocess.run(
+        cmd, input=REMOTE_SCRIPT, capture_output=True, text=True,
+        encoding="utf-8", timeout=timeout, check=False, creationflags=creationflags,
+    )
+    if result.returncode != 0 or len(result.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES:
+        raise RuntimeError("authenticated_archive_fetch_unavailable")
+    remote = json.loads(result.stdout)
+    feed = project(remote, now=utc_now())
+    _write_atomic(output, feed)
     return {"output": str(output), "events": len(feed["events"]),
             "source_ok": feed["source_ok"],
             "note": "one authorized read; no remote changes"}
@@ -185,8 +231,19 @@ def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--output", type=Path, required=True,
                      help="Local-only file for --feed in the Godot scene")
+    cli.add_argument("--from-dir", type=Path,
+                     help="Project a local archive copy (e.g. the shared #14 fixture) instead of SSH")
+    cli.add_argument("--now", help="With --from-dir: the UTC instant to judge heartbeat age against")
     args = cli.parse_args(argv)
     try:
+        if args.from_dir is not None:
+            now = _parse_now(args.now) if args.now else utc_now()
+            feed = project(read_local_archive(args.from_dir), now=now,
+                           xanadu_detail=XANADU_LOCAL_NOTE)
+            _write_atomic(args.output, feed)
+            print(json.dumps({"output": str(args.output), "events": len(feed["events"]),
+                              "source": str(args.from_dir), "note": "local copy; no SSH"}))
+            return 0
         result = collect_once(output=args.output)
     except (subprocess.TimeoutExpired, OSError, RuntimeError, ValueError) as error:
         print(json.dumps({"state": "unavailable", "reason": str(error)}), file=sys.stderr)
