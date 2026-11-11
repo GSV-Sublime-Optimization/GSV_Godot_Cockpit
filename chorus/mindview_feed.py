@@ -18,6 +18,7 @@ import http.server
 import json
 import os
 import subprocess
+from quiet_process import run as run_quiet
 import threading
 import time
 from pathlib import Path
@@ -134,7 +135,7 @@ def waiting_prs() -> list[dict]:
     """Open, non-draft colony PRs with no review yet: the work waiting on a second actor (read-only gh)."""
     if time.time() - _prs["at"] < PRS_EVERY:
         return _prs["items"]
-    r = subprocess.run(["gh", "search", "prs", "--owner", "GSV-Sublime-Optimization", "--state", "open",
+    r = run_quiet(["gh", "search", "prs", "--owner", "GSV-Sublime-Optimization", "--state", "open",
                         "--draft=false", "--review", "none", "--limit", "30", "--json",
                         "repository,number,title,url,createdAt"],
                        capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
@@ -144,7 +145,7 @@ def waiting_prs() -> list[dict]:
             repo = p["repository"]["name"]
             # every agent reviews through the shared account, so GitHub's reviewDecision never moves;
             # the colony's own record is a <!-- gsv-review: ... head=<sha> --> comment bound to the head
-            v = subprocess.run(["gh", "pr", "view", str(p["number"]), "--repo", f"GSV-Sublime-Optimization/{repo}",
+            v = run_quiet(["gh", "pr", "view", str(p["number"]), "--repo", f"GSV-Sublime-Optimization/{repo}",
                                 "--json", "headRefOid,comments"], capture_output=True, text=True, timeout=30,
                                encoding="utf-8", errors="replace")
             if v.returncode == 0:
@@ -169,14 +170,14 @@ def recent_prs() -> list[dict]:
         return _recent["items"]
     from shop import agent_of_branch
     since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3 * 3600))
-    r = subprocess.run(["gh", "search", "prs", "--owner", "GSV-Sublime-Optimization", f"--updated=>{since}",
+    r = run_quiet(["gh", "search", "prs", "--owner", "GSV-Sublime-Optimization", f"--updated=>{since}",
                         "--limit", "40", "--json", "repository,number,title,url,updatedAt,state"],
                        capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
     items = []
     if r.returncode == 0:
         repos = sorted({p["repository"]["name"] for p in json.loads(r.stdout or "[]")})
         for repo in repos:                       # one call per repo, not per PR
-            v = subprocess.run(["gh", "pr", "list", "--repo", f"GSV-Sublime-Optimization/{repo}", "--state", "all",
+            v = run_quiet(["gh", "pr", "list", "--repo", f"GSV-Sublime-Optimization/{repo}", "--state", "all",
                                 "--search", f"updated:>{since}", "--limit", "20", "--json",
                                 "number,headRefName,title,url,updatedAt,state"],
                                capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace")
@@ -190,7 +191,7 @@ def recent_prs() -> list[dict]:
 
 
 def fetch() -> dict:
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu", REMOTE],
+    r = run_quiet(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu", REMOTE],
                        capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
     if r.returncode:
         raise RuntimeError(f"xanadu unreachable (ssh exit {r.returncode})")
@@ -282,7 +283,7 @@ def ship_minds(outbox: Path | None = None, offsets_file: Path | None = None, sen
 
 
 def _ship_events(day: str, blob: str) -> None:
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
+    r = run_quiet(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
                         f"mkdir -p ~/steward/events && cat >> ~/steward/events/{day}.jsonl"],
                        input=blob, capture_output=True, text=True, timeout=30)
     if r.returncode:
@@ -317,7 +318,7 @@ def flush_acks() -> None:
     reads = sorted({json.loads(l)["at"] for l in f.read_text(encoding="utf-8").splitlines() if l.strip()})
     rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": "claude (msi seat)", "to": "all",
            "kind": "read", "reads": reads, "text": f"read {len(reads)} message(s)"}
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
+    r = run_quiet(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
                         "cat >> ~/steward/cockpit/channel.jsonl"], input=json.dumps(rec) + chr(10),
                        capture_output=True, text=True, timeout=30)
     if r.returncode == 0:
@@ -346,7 +347,7 @@ def say(text: str, to: str, sender: str = "keath") -> dict:
         raise ValueError(f"unknown seat {sender!r}; use one of {sorted(SEATS)}")
     msg = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "from": SEATS[sender],
            "to": SPEAKERS.get(to, to if to in SEATS.values() else "claude (msi seat)"), "text": text, "via": "chorus"}
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
+    r = run_quiet(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
                         "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
                        input=json.dumps(msg) + "\n", capture_output=True, text=True, timeout=30)
     if r.returncode:
@@ -443,7 +444,7 @@ def post_suggestion(text: str, node: str, sender: str = "keath", why: str = "", 
 
 
 def _append(msg: dict) -> None:
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
+    r = run_quiet(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "xanadu",
                         "mkdir -p ~/steward/cockpit && cat >> ~/steward/cockpit/channel.jsonl"],
                        input=json.dumps(msg) + chr(10), capture_output=True, text=True, timeout=30)
     if r.returncode:
@@ -602,7 +603,7 @@ def _gh_comment(t: dict, kind: str, sender: str, about: str, text: str, why: str
     cmd = ["gh", "pr" if "/pull/" in url else "issue", "comment", url, "--body", comment]
     delivered, prepared = False, {"command": shlex.join(cmd), "body": comment, "url": url}
     if os.environ.get("CHORUS_ALLOW_GH_COMMENT") == "1":     # opt-in: the feeder may comment as the shared account
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
+        r = run_quiet(cmd, capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
         if r.returncode:
             raise RuntimeError(f"gh comment failed: {(r.stderr or r.stdout).strip()[:200]}")
         delivered, prepared = True, None

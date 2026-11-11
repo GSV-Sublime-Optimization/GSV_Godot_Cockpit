@@ -17,6 +17,7 @@ import json
 import os
 import re
 import subprocess
+from quiet_process import run as run_quiet
 import sys
 import time
 from pathlib import Path
@@ -45,10 +46,10 @@ def _codegraph() -> list[dict]:
     reg = json.loads((Path.home() / ".gitnexus/registry.json").read_text(encoding="utf-8"))
     out = []
     for r in reg if isinstance(reg, list) else reg.get("repos", []):
-        head = subprocess.run(["git", "-C", r.get("path", ""), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10).stdout.strip()
+        head = run_quiet(["git", "-C", r.get("path", ""), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10).stdout.strip()
         behind = None
         if head and r.get("lastCommit") and head != r["lastCommit"]:
-            c = subprocess.run(["git", "-C", r["path"], "rev-list", "--count", f"{r['lastCommit']}..{head}"],
+            c = run_quiet(["git", "-C", r["path"], "rev-list", "--count", f"{r['lastCommit']}..{head}"],
                                capture_output=True, text=True, timeout=10).stdout.strip()
             behind = int(c) if c.isdigit() else None
         st = r.get("stats") or {}
@@ -79,7 +80,7 @@ def _decisions(limit: int = 8) -> list[dict]:
 
 
 def _rivals() -> list[dict]:
-    r = subprocess.run(["gh", "pr", "list", "--repo", "GSV-Sublime-Optimization/GSV_Godot_Cockpit", "--state", "open",
+    r = run_quiet(["gh", "pr", "list", "--repo", "GSV-Sublime-Optimization/GSV_Godot_Cockpit", "--state", "open",
                         "--limit", "20", "--json", "number,title,headRefName,url,updatedAt,body"],
                        capture_output=True, text=True, timeout=40, encoding="utf-8", errors="replace")
     out = []

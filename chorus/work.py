@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from quiet_process import run as run_quiet
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -31,7 +32,7 @@ def _cached(key: str, ttl: float, fn):
 
 
 def _claims() -> list[dict]:
-    r = subprocess.run(["python", str(COLONY), "status", "--json"], capture_output=True, text=True,
+    r = run_quiet(["python", str(COLONY), "status", "--json"], capture_output=True, text=True,
                        timeout=30, encoding="utf-8", errors="replace")
     rows = json.loads(r.stdout or "[]")
     groups: dict[tuple, dict] = {}
@@ -76,7 +77,7 @@ def _checkouts() -> list[Path]:
 
 
 def _state(path: Path) -> dict | None:
-    r = subprocess.run(["git", "-C", str(path), "status", "--porcelain=v1", "-b"], capture_output=True,
+    r = run_quiet(["git", "-C", str(path), "status", "--porcelain=v1", "-b"], capture_output=True,
                        text=True, timeout=20, encoding="utf-8", errors="replace")
     if r.returncode:
         return None
@@ -91,7 +92,7 @@ def _state(path: Path) -> dict | None:
         return None
     if ahead:
         # commits already saved on ANY remote branch (e.g. a claude/preserve-* branch) are not at risk
-        rb = subprocess.run(["git", "-C", str(path), "branch", "-r", "--contains", "HEAD"], capture_output=True,
+        rb = run_quiet(["git", "-C", str(path), "branch", "-r", "--contains", "HEAD"], capture_output=True,
                             text=True, timeout=20, encoding="utf-8", errors="replace")
         saved_on = [b.strip() for b in rb.stdout.splitlines() if b.strip() and "->" not in b]
         if saved_on:
@@ -100,7 +101,7 @@ def _state(path: Path) -> dict | None:
                 return None
     else:
         saved_on = []
-    t = subprocess.run(["git", "-C", str(path), "log", "-1", "--format=%ct"], capture_output=True, text=True, timeout=10)
+    t = run_quiet(["git", "-C", str(path), "log", "-1", "--format=%ct"], capture_output=True, text=True, timeout=10)
     last = float(t.stdout.strip() or 0)
     branch = head[3:].split("...")[0].strip()
     return {"path": str(path), "label": _label(path), "branch": branch, "dirty": dirty, "ahead": ahead,
