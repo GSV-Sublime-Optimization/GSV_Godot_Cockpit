@@ -273,7 +273,7 @@ func _bridge(mode: String, objective: String) -> String:
 		return "(bridge unavailable: Windows PowerShell host required)"
 	var output: Array = []
 	var code := OS.execute(PsShell.exe(), args, output, true, false)
-	if code != 0:
+	if code != 0 and PsShell.exe() != "powershell":
 		output.clear()
 		code = OS.execute("powershell", args, output, true, false)
 	var text := ""
