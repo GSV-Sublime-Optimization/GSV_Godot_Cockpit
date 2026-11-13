@@ -1,0 +1,1 @@
+{"schema": "colony.heartbeat/v1", "rig": "msi", "at": "2026-11-08T06:35:12Z", "green": true, "checks": [{"name": "disk", "ok": true}]}

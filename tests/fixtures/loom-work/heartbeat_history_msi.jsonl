@@ -1,0 +1,4 @@
+{"schema":"colony.heartbeat/v1","rig":"msi","at":"2026-11-08T06:00:10Z","green":false,"checks":[{"name":"dev-mentor","ok":false},{"name":"disk","ok":true}]}
+{"schema":"colony.heartbeat/v1","rig":"msi","at":"2026-11-08T06:14:30Z","green":true,"checks":[{"name":"disk","ok":true}]}
+{"schema":"colony.heartbeat/v1","rig":"msi","at":"2026-11-08T06:20:30Z","green":true,"checks":[{"name":"disk","ok":true}]}
+{"schema":"colony.heartbeat/v1","rig":"msi","at":"2026-11-08T06:30:18Z","green":false,"checks":[{"name":"dev-mentor","ok":false},{"name":"disk","ok":true}]}

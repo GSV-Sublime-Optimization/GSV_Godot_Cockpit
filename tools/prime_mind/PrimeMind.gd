@@ -14,10 +14,19 @@ const VIOLET = Color("#b4a3ff")
 const AMBER = Color("#f8be6c")
 const RED = Color("#ff738a")
 const GREEN = Color("#69d7b0")
+# Colony work has its own lane and colours, never the thought colours.
+const ORDER_C = Color("#6fa8ff")
+const STATUS_C = Color("#b6e36a")
+const DECISION_C = Color("#f590d6")
+const RIGCHANGE_C = Color("#ff9a57")
+const WORK_COLORS = {"order": ORDER_C, "order-status": STATUS_C, "decision": DECISION_C, "rig-change": RIGCHANGE_C}
+const TAPE_H := 175.0
 const RIG_IDS = ["msi", "i3", "l9", "xanadu"]
 const RIG_NAMES = ["MSI", "I3", "L9", "XANADU"]
 
 var _feed: Dictionary = {}
+## Thought events and colony work merged by time; _selected indexes this.
+var _tape: Array = []
 var _selected := -1
 var _mind_filter := "all"
 var _lens := 0
@@ -91,6 +100,7 @@ func _load_snapshot() -> void:
 		_error = "No local feed. Source is unavailable."
 		if not _is_fixture:
 			_feed.clear()
+			_tape.clear()
 		queue_redraw()
 		return
 	var file := FileAccess.open(_feed_path, FileAccess.READ)
@@ -113,13 +123,37 @@ func _load_snapshot() -> void:
 		return
 	var old_stamp := String(_feed.get("source_at", ""))
 	_feed = result
+	_tape = build_tape(_feed)
 	_error = ""
 	if _selected < 0 or old_stamp != String(_feed["source_at"]):
 		_choose_latest_mind()
 	queue_redraw()
 
+## Merge thought events and work lines by UTC second, each list keeping its
+## own order. Both stay what they are: work never becomes a thought.
+static func build_tape(feed: Dictionary) -> Array:
+	var events: Array = feed.get("events", [])
+	var work: Array = feed.get("work", [])
+	var out: Array = []
+	var i := 0
+	var j := 0
+	while i < events.size() or j < work.size():
+		if j >= work.size():
+			out.append(events[i])
+			i += 1
+		elif i >= events.size():
+			out.append(work[j])
+			j += 1
+		elif String(work[j]["at"]).substr(0, 19) < String(events[i]["at"]).substr(0, 19):
+			out.append(work[j])
+			j += 1
+		else:
+			out.append(events[i])
+			i += 1
+	return out
+
 func _choose_latest_mind() -> void:
-	var events: Array = _feed.get("events", [])
+	var events: Array = _tape
 	_selected = events.size() - 1
 	for i in range(events.size() - 1, -1, -1):
 		if events[i].get("identity") == "model_summary":
@@ -146,11 +180,11 @@ func _draw() -> void:
 		_txt(Vector2(26, 38), "COGNITIVE LOOM", 23, CYAN)
 		_wrap(Vector2(26, 90), "Resize to at least 930 × 540 to inspect the complete fleet and thought timeline.", 38, 17, MUTE)
 		return
-	var bottom := sz.y - 166
+	var bottom := sz.y - TAPE_H - 27
 	var left := Rect2(18, 86, 248, bottom - 98)
 	var core := Rect2(278, 86, sz.x - 579, bottom - 98)
 	var right := Rect2(sz.x - 289, 86, 270, bottom - 98)
-	var tape := Rect2(18, sz.y - 155, sz.x - 36, 139)
+	var tape := Rect2(18, sz.y - TAPE_H - 16, sz.x - 36, TAPE_H)
 	_draw_header(sz)
 	_draw_panel(left)
 	_draw_panel(core)
@@ -191,36 +225,42 @@ func _draw_minds(rect: Rect2) -> void:
 	_txt(rect.position + Vector2(16, 31), "MINDS / SIGNAL ROUTING", 14, CYAN)
 	_txt(rect.position + Vector2(16, 56), "Select source • filter evidence", 11, MUTE)
 	var events: Array = _feed.get("events", [])
+	var work: Array = _feed.get("work", [])
 	var options := [
-		{"id": "all", "title": "ALL INPUTS", "subtitle": "%d retained signals" % events.size()},
+		{"id": "all", "title": "ALL INPUTS", "subtitle": "%d retained signals" % _tape.size()},
 		{"id": "models", "title": "MODEL THOUGHTS", "subtitle": "Reported summaries only"},
-		{"id": "observer", "title": "SYSTEM OBSERVER", "subtitle": "Rules, not a model"}
+		{"id": "observer", "title": "SYSTEM OBSERVER", "subtitle": "Rules, not a model"},
+		{"id": "work", "title": "COLONY WORK", "subtitle": "%d orders · receipts · rig changes" % work.size()}
 	]
-	var y := rect.position.y + 77.0
+	var y := rect.position.y + 70.0
 	for option in options:
-		var hit := Rect2(rect.position.x + 12, y, rect.size.x - 24, 54)
+		var hit := Rect2(rect.position.x + 12, y, rect.size.x - 24, 44)
 		var chosen: bool = option["id"] == _mind_filter
 		if chosen:
 			draw_rect(hit, Color("#20364a"))
 			draw_rect(hit, CYAN.darkened(0.2), false, 1)
-		_txt(hit.position + Vector2(12, 20), option["title"], 13, INK if chosen else MUTE)
-		_txt(hit.position + Vector2(12, 39), option["subtitle"], 10, CYAN if chosen else MUTE)
+		_txt(hit.position + Vector2(12, 18), option["title"], 13, INK if chosen else MUTE)
+		_txt(hit.position + Vector2(12, 35), option["subtitle"], 10, CYAN if chosen else MUTE, rect.size.x - 48)
 		_mind_hitboxes.append({"id": option["id"], "rect": hit})
-		y += 60.0
-	y += 14.0
-	_txt(Vector2(rect.position.x + 16, y), "CURRENT OBSERVED MINDS", 11, AMBER)
+		y += 49.0
+	var bottom := rect.end.y - 86
+	y += 12.0
+	if y + 22.0 < bottom - 12.0:
+		_txt(Vector2(rect.position.x + 16, y), "CURRENT OBSERVED MINDS", 11, AMBER)
 	y += 22.0
 	var names: Dictionary = {}
 	for e in events:
 		if e["identity"] == "model_summary":
 			names[e["mind"]] = true
 	if names.is_empty():
-		_txt(Vector2(rect.position.x + 16, y + 8), "No model observations", 13, MUTE)
+		if y + 8.0 < bottom - 12.0:
+			_txt(Vector2(rect.position.x + 16, y + 8), "No model observations", 13, MUTE)
 	else:
 		for name in names.keys():
+			if y + 12.0 >= bottom - 12.0:
+				break
 			_txt(Vector2(rect.position.x + 16, y + 12), "◉  " + String(name), 12, VIOLET, rect.size.x - 28)
 			y += 27.0
-	var bottom := rect.end.y - 86
 	_txt(Vector2(rect.position.x + 16, bottom), "SENSORIAL TRUTH", 11, CYAN)
 	_wrap(Vector2(rect.position.x + 16, bottom + 15), "An observer line is not thinking. A model summary is not private reasoning. Silent data stays silent.", 31, 11, MUTE)
 
@@ -234,8 +274,15 @@ func _rig_positions(rect: Rect2) -> Dictionary:
 		"kernel": c
 	}
 
+## The rig an entry attends to, or "". focus may be JSON null (admitted by
+## the contract for thoughts and for every work line except rig changes),
+## and String(null) is a script error, so never convert it directly.
+static func focus_of(e: Dictionary) -> String:
+	var f: Variant = e.get("focus")
+	return String(f) if typeof(f) == TYPE_STRING else ""
+
 func _selected_event() -> Dictionary:
-	var events: Array = _feed.get("events", [])
+	var events: Array = _tape
 	if _selected < 0 or _selected >= events.size():
 		return {}
 	return events[_selected]
@@ -255,7 +302,7 @@ func _draw_core(rect: Rect2) -> void:
 	var pos := _rig_positions(rect)
 	var center: Vector2 = pos["kernel"]
 	var evidence := _selected_event()
-	var attention := _focus_override if not _focus_override.is_empty() else String(evidence.get("focus", ""))
+	var attention := _focus_override if not _focus_override.is_empty() else focus_of(evidence)
 	for n in [0, 1, 2, 3]:
 		var radius := 34.0 + float(n) * 24.0
 		draw_arc(center, radius, 0, TAU, 60, Color(CYAN, 0.12 + float(n) * 0.035), 1)
@@ -351,8 +398,11 @@ func _health_color(state: String) -> Color:
 func _draw_inspector(rect: Rect2) -> void:
 	var x := rect.position.x + 14.0
 	var y := rect.position.y
-	_txt(Vector2(x, y + 30), "THOUGHT / EVIDENCE", 14, CYAN)
 	var e := _selected_event()
+	if e.get("identity", "") == "work":
+		_draw_work_inspector(rect, e)
+		return
+	_txt(Vector2(x, y + 30), "THOUGHT / EVIDENCE", 14, CYAN)
 	if e.is_empty():
 		_txt(Vector2(x, y + 67), "NO RECORDED THOUGHT", 15, AMBER)
 		_wrap(Vector2(x, y + 91), "No event is available to inspect. The interface does not fabricate one.", 31, 12, MUTE)
@@ -376,11 +426,64 @@ func _draw_inspector(rect: Rect2) -> void:
 		var offset := why_y + 18.0
 		for reason in reasons.slice(0, 3):
 			offset = _wrap(Vector2(x, offset), "• " + reason, 29, 11, MUTE, 2) + 6
-	_txt(Vector2(x, rect.end.y - 40), "ATTENDING   " + String(e.get("focus", "unassigned")).to_upper(), 12, CYAN)
+	_txt(Vector2(x, rect.end.y - 40), "ATTENDING   " + (focus_of(e) if not focus_of(e).is_empty() else "unassigned").to_upper(), 12, CYAN)
 	_txt(Vector2(x, rect.end.y - 20), "No hidden reasoning is inferred.", 10, MUTE)
 
+## Status text for a work line. A done receipt without a link is only
+## "reported"; with one it is "linked", still not verified by the Loom.
+static func work_status_text(e: Dictionary) -> String:
+	var status := String(e.get("status", "")).to_upper()
+	match String(e.get("receipt", "")):
+		"reported":
+			return status + " · REPORTED (NO LINK)"
+		"linked":
+			return status + " · LINKED (NOT FETCHED)"
+	if e.get("kind") == "rig-change":
+		return String(e.get("prev_status", "")).to_upper() + " -> " + status
+	return status
+
+func _draw_work_inspector(rect: Rect2, e: Dictionary) -> void:
+	var x := rect.position.x + 14.0
+	var y := rect.position.y
+	var w := rect.size.x - 25
+	var kind := String(e.get("kind", ""))
+	var c: Color = WORK_COLORS.get(kind, MUTE)
+	_txt(Vector2(x, y + 30), "WORK / RECEIPT", 14, CYAN)
+	_txt(Vector2(x, y + 60), kind.to_upper() + "  /  " + String(e.get("id", "")), 12, c, w)
+	_txt(Vector2(x, y + 80), String(e.get("at", "")).substr(0, 19).replace("T", "  ") + " UTC", 10, MUTE)
+	draw_line(Vector2(x, y + 92), Vector2(rect.end.x - 12, y + 92), EDGE)
+	var rows := [
+		["WHO", String(e.get("from", ""))],
+		["TO", String(e.get("to", "")) if not String(e.get("to", "")).is_empty() else "-"],
+		["STATUS", work_status_text(e)],
+	]
+	var ry := y + 112.0
+	for row in rows:
+		_txt(Vector2(x, ry), row[0], 10, AMBER)
+		var tint := INK
+		if row[0] == "STATUS" and e.get("receipt", "") == "reported":
+			tint = AMBER
+		# Wrap rather than clip: the receipt verdict is the point of this row.
+		ry = _wrap(Vector2(x + 58, ry), row[1], 26, 12, tint, 2) + 3.0
+	if not String(e.get("text", "")).is_empty():
+		_txt(Vector2(x, ry + 6), "ORDER" if kind != "rig-change" else "CHANGE", 10, AMBER)
+		ry = _wrap(Vector2(x, ry + 24), String(e.get("text", "")), 29, 12, INK, 3)
+	_txt(Vector2(x, ry + 8), "NOTE", 10, AMBER)
+	var note := String(e.get("note", ""))
+	ry = _wrap(Vector2(x, ry + 26), note if not note.is_empty() else "None recorded", 29, 12, INK if not note.is_empty() else MUTE, 3)
+	_txt(Vector2(x, ry + 8), "RECEIPT LINK", 10, AMBER)
+	var link := String(e.get("link", ""))
+	if link.is_empty():
+		_txt(Vector2(x, ry + 26), "none" if kind != "order" else "none on this order", 12, MUTE, w)
+	else:
+		# Show the tail: the PR or issue number is what a reader looks for.
+		var shown := link if link.length() <= 34 else "…" + link.right(33)
+		_txt(Vector2(x, ry + 26), shown, 11, CYAN, w)
+	_txt(Vector2(x, rect.end.y - 40), "ATTENDING   " + (focus_of(e) if not focus_of(e).is_empty() else "unassigned").to_upper(), 12, CYAN)
+	_txt(Vector2(x, rect.end.y - 20), "A channel report, not a model thought.", 10, MUTE)
+
 func _filtered_indices() -> Array[int]:
-	var all: Array = _feed.get("events", [])
+	var all: Array = _tape
 	var out: Array[int] = []
 	for i in all.size():
 		var label := String(all[i].get("identity", "monitor"))
@@ -388,43 +491,69 @@ func _filtered_indices() -> Array[int]:
 			continue
 		if _mind_filter == "observer" and label != "monitor":
 			continue
+		if _mind_filter == "work" and label != "work":
+			continue
 		out.append(i)
 	return out
 
 func _draw_tape(rect: Rect2) -> void:
 	_tick_hitboxes.clear()
 	_txt(rect.position + Vector2(15, 25), "THOUGHT TAPE / CAUSAL SEQUENCER", 15, CYAN)
-	_txt(rect.position + Vector2(390, 25), "←  →  SCRUB    SPACE  PLAY / PAUSE", 11, MUTE)
+	_txt(rect.position + Vector2(390, 25), "←  →  SCRUB    SPACE  PLAY / PAUSE    M  FILTER", 11, MUTE)
 	_txt(Vector2(rect.end.x - 152, rect.position.y + 25), "SPACE : " + ("PLAYING" if _replaying else "PAUSED"), 11, AMBER)
 	var indices := _filtered_indices()
+	var baseline := rect.position.y + 90.0
+	var work_y := rect.position.y + 118.0
+	_txt(Vector2(rect.position.x + 12, baseline - 4), "THOUGHTS", 9, MUTE)
+	_txt(Vector2(rect.position.x + 12, work_y + 4), "WORK", 9, MUTE)
 	if indices.is_empty():
-		_txt(rect.position + Vector2(17, 80), "No events in this lens. Source uncertainty is preserved.", 13, MUTE)
+		_txt(rect.position + Vector2(84, 80), "No events in this lens. Source uncertainty is preserved.", 13, MUTE)
 		return
-	var base_x := rect.position.x + 19.0
-	var span := rect.size.x - 38.0
+	var base_x := rect.position.x + 76.0
+	var span := rect.size.x - 95.0
 	var cell := span / float(indices.size())
-	var baseline := rect.end.y - 42.0
 	draw_line(Vector2(base_x, baseline), Vector2(base_x + span, baseline), EDGE, 1)
+	draw_line(Vector2(base_x, work_y), Vector2(base_x + span, work_y), Color(EDGE, 0.6), 1)
 	for j in indices.size():
 		var index := indices[j]
-		var e: Dictionary = _feed["events"][index]
+		var e: Dictionary = _tape[index]
 		var px := base_x + (j + 0.5) * cell
-		var col := RED if e["level"] == "alarm" else VIOLET if e["identity"] == "model_summary" else AMBER
-		var bar_height := 36.0 if e["identity"] == "model_summary" else 23.0
-		if e["level"] == "alarm":
-			bar_height += 10
 		var selected := index == _selected
-		draw_rect(Rect2(px - maxf(2, cell * 0.18), baseline - bar_height, maxf(4, cell * 0.36), bar_height),
-			Color(col, 0.9 if selected else 0.5))
-		if selected:
-			draw_arc(Vector2(px, baseline - bar_height - 9), 7, 0, TAU, 24, CYAN, 2)
-			draw_line(Vector2(px, baseline - bar_height - 24), Vector2(px, baseline - bar_height - 10), CYAN, 1.3)
-		var hit := Rect2(base_x + j * cell, rect.position.y + 35, cell, rect.size.y - 48)
+		if e["identity"] == "work":
+			_draw_work_mark(e, Vector2(px, work_y), cell, selected)
+		else:
+			var col := RED if e["level"] == "alarm" else VIOLET if e["identity"] == "model_summary" else AMBER
+			var bar_height := 36.0 if e["identity"] == "model_summary" else 23.0
+			if e["level"] == "alarm":
+				bar_height += 10
+			draw_rect(Rect2(px - maxf(2, cell * 0.18), baseline - bar_height, maxf(4, cell * 0.36), bar_height),
+				Color(col, 0.9 if selected else 0.5))
+			if selected:
+				draw_arc(Vector2(px, baseline - bar_height - 9), 7, 0, TAU, 24, CYAN, 2)
+				draw_line(Vector2(px, baseline - bar_height - 24), Vector2(px, baseline - bar_height - 10), CYAN, 1.3)
+		var hit := Rect2(base_x + j * cell, rect.position.y + 35, cell, rect.size.y - 50)
 		_tick_hitboxes.append(hit)
 		if j % maxi(1, int(ceil(float(indices.size()) / 9.0))) == 0:
 			var clock := String(e.get("at", "")).substr(11, 5)
-			_txt(Vector2(px - 16, baseline + 19), clock, 10, MUTE)
-	_txt(rect.position + Vector2(17, rect.size.y - 10), "GOLD = MONITOR    VIOLET = MODEL SUMMARY    RED = ALARM    BLUE RING = SELECTED", 10, MUTE)
+			_txt(Vector2(px - 16, work_y + 30), clock, 10, MUTE)
+	_txt(rect.position + Vector2(17, rect.size.y - 8), "GOLD MONITOR · VIOLET MODEL · RED ALARM  |  WORK: BLUE ORDER · LIME STATUS (HOLLOW = DONE, REPORTED ONLY) · PINK DECISION · ORANGE RIG CHANGE", 10, MUTE, rect.size.x - 30)
+
+## Work marks sit in their own lane: a square per line, filled unless it is
+## a done receipt with no link, which stays hollow (reported, not linked).
+func _draw_work_mark(e: Dictionary, at: Vector2, cell: float, selected: bool) -> void:
+	var c: Color = WORK_COLORS.get(String(e.get("kind", "")), MUTE)
+	var half := clampf(cell * 0.22, 3.0, 7.0)
+	var box := Rect2(at - Vector2(half, half), Vector2(half, half) * 2.0)
+	if e.get("kind") == "decision":
+		var diamond := PackedVector2Array([at + Vector2(0, -half - 1), at + Vector2(half + 1, 0),
+			at + Vector2(0, half + 1), at + Vector2(-half - 1, 0)])
+		draw_colored_polygon(diamond, Color(c, 0.9 if selected else 0.6))
+	elif e.get("receipt", "") == "reported":
+		draw_rect(box, Color(c, 1.0 if selected else 0.75), false, 1.5)
+	else:
+		draw_rect(box, Color(c, 0.9 if selected else 0.6))
+	if selected:
+		draw_arc(at, half + 6, 0, TAU, 24, CYAN, 2)
 
 func _draw_help(sz: Vector2) -> void:
 	var rect := Rect2(sz.x * 0.20, sz.y * 0.22, sz.x * 0.60, sz.y * 0.56)
@@ -435,7 +564,7 @@ func _draw_help(sz: Vector2) -> void:
 		"← / →    Move through recorded events",
 		"SPACE    Replay the event tape, locally only",
 		"1 / 2 / 3    Pulse, reasons, or fleet-vitals lens",
-		"M    Cycle: all / model summaries / observers",
+		"M    Cycle: all / model summaries / observers / colony work",
 		"Mouse    Select rig, event or Mind source",
 		"R    Reload the local snapshot",
 		"F11    Explicit fullscreen toggle",
@@ -443,7 +572,8 @@ func _draw_help(sz: Vector2) -> void:
 		"?    Hide this guide",
 		"",
 		"Replay is a presentation tool, not execution.",
-		"Mind summaries do not reveal hidden private reasoning."
+		"Mind summaries do not reveal hidden private reasoning.",
+		"Work lines are channel reports; a done without a link is only reported."
 	]
 	for i in lines.size():
 		_txt(rect.position + Vector2(24, 75 + i * 24), lines[i], 13, MUTE)
@@ -524,7 +654,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_1, KEY_2, KEY_3:
 			_lens = event.keycode - KEY_1
 		KEY_M:
-			var filters := ["all", "models", "observer"]
+			var filters := ["all", "models", "observer", "work"]
 			_mind_filter = filters[(filters.find(_mind_filter) + 1) % filters.size()]
 			_select_within_filter()
 		KEY_R:
