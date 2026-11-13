@@ -79,7 +79,7 @@ func _probe_and_show(label: String, url: String, parser: Callable = Callable()) 
 		"try { $r=Invoke-WebRequest '%s' -UseBasicParsing -TimeoutSec 4; Write-Output $r.Content } catch { Write-Output 'ERROR: '+$_.Exception.Message }" % url
 	]
 	var output: Array = []
-	OS.execute("pwsh", args, output, true, false)
+	OS.execute(PsShell.exe(), args, output, true, false)
 	var raw := ""
 	for item in output:
 		raw += str(item)

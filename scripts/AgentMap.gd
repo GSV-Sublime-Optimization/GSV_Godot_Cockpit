@@ -77,7 +77,7 @@ func _cmd_exists(name: String) -> bool:
 	elif name == "litellm":  mapped = "ollama"   # proxy: litellm lives via docker, check ollama instead
 	elif name == "devmentor":mapped = "td"
 	elif name == "nusyq":    mapped = "gsv"
-	var code := OS.execute("pwsh", ["-NoProfile","-Command",
+	var code := OS.execute(PsShell.exe(), ["-NoProfile","-Command",
 		"if (Get-Command '%s' -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" % mapped],
 		output, true, false)
 	return code == 0
