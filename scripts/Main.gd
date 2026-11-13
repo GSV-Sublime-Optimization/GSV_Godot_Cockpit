@@ -16,7 +16,7 @@ extends Control
 const BRIDGE := "C:/GSV/tools/godot-cockpit/Invoke-GSVGodotBridge.ps1"
 
 ## Every panel that talks to the colony does so with a blocking
-## OS.execute("pwsh", ...) call from its own _ready(). Building all thirteen
+## OS.execute(PsShell.exe(), ...) call from its own _ready(). Building all thirteen
 ## tabs up front therefore cost 24 serial process spawns — measured at 39 s —
 ## before the window could draw anything. Tabs are now built on first visit,
 ## and the cockpit's own first probe waits until a frame has been painted.
@@ -272,8 +272,8 @@ func _bridge(mode: String, objective: String) -> String:
 	if not OS.has_feature("windows"):
 		return "(bridge unavailable: Windows PowerShell host required)"
 	var output: Array = []
-	var code := OS.execute("pwsh", args, output, true, false)
-	if code != 0:
+	var code := OS.execute(PsShell.exe(), args, output, true, false)
+	if code != 0 and PsShell.exe() != "powershell":
 		output.clear()
 		code = OS.execute("powershell", args, output, true, false)
 	var text := ""

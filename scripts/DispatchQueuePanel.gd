@@ -117,8 +117,8 @@ func _ps_get(url: String) -> String:
 	if OS.has_feature("windows"):
 		var args := ["-NoProfile", "-Command",
 			"try{(Invoke-WebRequest '%s' -UseBasicParsing -TimeoutSec 4).Content}catch{''}" % url]
-		code = OS.execute("pwsh", args, output, true, false)
-		if code != 0:
+		code = OS.execute(PsShell.exe(), args, output, true, false)
+		if code != 0 and PsShell.exe() != "powershell":
 			output.clear()
 			code = OS.execute("powershell", args, output, true, false)
 	else:

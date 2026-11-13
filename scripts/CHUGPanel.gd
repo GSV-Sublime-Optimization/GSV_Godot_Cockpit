@@ -126,7 +126,7 @@ func refresh() -> void:
 
 func _trigger_chug() -> void:
 	var output: Array = []
-	OS.execute("pwsh", [
+	OS.execute(PsShell.exe(), [
 		"-NoProfile", "-Command",
 		"Invoke-WebRequest '%s' -Method Post -UseBasicParsing -TimeoutSec 10 | Out-Null; Write-Host 'triggered'" % DM_TRIGGER
 	], output, true, false)
@@ -134,7 +134,7 @@ func _trigger_chug() -> void:
 
 func _ps_get(url: String) -> String:
 	var output: Array = []
-	var code := OS.execute("pwsh", [
+	var code := OS.execute(PsShell.exe(), [
 		"-NoProfile", "-Command",
 		"try { (Invoke-WebRequest '%s' -UseBasicParsing -TimeoutSec 5).Content } catch { 'ERR: ' + $_.Exception.Message }" % url
 	], output, true, false)

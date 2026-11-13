@@ -70,7 +70,7 @@ func _show_repo(repo: String) -> void:
 
 	var output: Array = []
 	var fmt := "%h  %ar  %an  %s"
-	var code := OS.execute("pwsh", [
+	var code := OS.execute(PsShell.exe(), [
 		"-NoProfile", "-Command",
 		"cd '%s'; git log --oneline --format='%s' -n %d 2>&1" % [repo, fmt, COMMITS_PER_REPO]
 	], output, true, false)
