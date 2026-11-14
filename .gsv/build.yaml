@@ -19,6 +19,8 @@ commands:
     - name: Cockpit offline integration smoke with strict engine diagnostics
       run: ${python} tests/godot_smoke_gate.py --godot ${godot} --project .
       requires: [godot]
+    - name: CHORUS feeder, actions, orders, guards and bridges (pytest)
+      run: ${python} -m pytest -q -p no:cacheprovider chorus/tests
 security:
   network_required: false
   secrets_required: false

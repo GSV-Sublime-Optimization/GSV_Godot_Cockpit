@@ -1,0 +1,1184 @@
+<meta charset="utf-8">
+<title>Chorus</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;1,6..96,400;1,6..96,500&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a full-height night sky (canvas) with the fleet as four singing stars; the latest thought is
+   engraved bottom-centre like a score marking; a memory river of past thoughts runs along the foot.
+   One committed dark world (an observatory at night), so no light theme by design. */
+:root {
+  color-scheme: dark;
+  --sky: #070b16;          /* deep observatory blue, not black */
+  --sky-2: #0d1426;
+  --ink: #e9e4d6;          /* starlight parchment */
+  --ink-dim: #9aa3b8;
+  --hair: #26304a;
+  --msi: #e2b25a;          /* brass: the workshop */
+  --i3: #ec7348;           /* ember: the engine room */
+  --l9: #63cbdb;           /* glacier: the drone */
+  --xanadu: #b9a2f0;       /* lilac: the librarian */
+  --tranquillo: #5fc4b0;   /* routine */
+  --attento: #e8b34a;      /* notable */
+  --agitato: #ef4f5a;      /* alarm */
+  --f-display: "Bodoni Moda", "Didot", "Bodoni 72", Georgia, serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-data: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }   /* .rig-card sets display:grid; hidden must still win */
+body {
+  margin: 0; background: var(--sky); color: var(--ink); font-family: var(--f-body);
+  overflow: hidden; -webkit-font-smoothing: antialiased;
+}
+#sky { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+/* The backdrop is its own canvas, painted only when the mood or size changes; parallax moves it with a
+   compositor transform, so the per-frame canvas never repaints the whole sky. */
+#sky-bg { position: fixed; left: -14px; top: -14px; width: calc(100% + 28px); height: calc(100% + 28px); display: block; will-change: transform; }
+/* agitato: the sky's edges red-shift and pulse (compositor-only opacity animation) */
+#aura { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.8s;
+  background: radial-gradient(ellipse at 50% 50%, rgba(239,79,90,0) 48%, rgba(239,79,90,0.16) 75%, rgba(150,20,40,0.55) 100%); }
+body.agitato #aura { opacity: 0.75; animation: aura 2.4s ease-in-out infinite alternate; }
+@keyframes aura { from { opacity: 0.5; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { body.agitato #aura { animation: none; } }
+.ui {
+  position: fixed; inset: 0; pointer-events: none; display: grid;
+  grid-template-rows: auto 1fr auto auto; grid-template-columns: minmax(0, 1fr);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(14px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-bottom, 0px));
+}
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.mark { display: grid; gap: 2px; }
+.mark h1 {
+  margin: 0; font-family: var(--f-display); font-weight: 500; font-size: clamp(22px, 3.2vw, 34px);
+  letter-spacing: 0.32em; text-transform: uppercase; line-height: 1;
+}
+.mark p { margin: 0; color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; }
+.status { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.chip {
+  font-family: var(--f-data); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 4px 9px; border: 1px solid var(--hair); border-radius: 999px; color: var(--ink-dim);
+  background: color-mix(in srgb, var(--sky-2) 80%, transparent);
+}
+.chip.live { color: var(--tranquillo); border-color: color-mix(in srgb, var(--tranquillo) 45%, var(--hair)); }
+.chip.rehearsal { color: var(--attento); border-color: color-mix(in srgb, var(--attento) 50%, var(--hair)); }
+.controls { display: flex; gap: 8px; pointer-events: auto; }
+button {
+  font: 600 12px var(--f-body); letter-spacing: 0.06em; color: var(--ink); cursor: pointer;
+  background: color-mix(in srgb, var(--sky-2) 85%, transparent); border: 1px solid var(--hair);
+  border-radius: 999px; padding: 7px 13px;
+}
+button:hover { border-color: var(--ink-dim); }
+button:focus-visible { outline: 2px solid var(--l9); outline-offset: 2px; }
+button[aria-pressed="true"] { border-color: var(--attento); color: var(--attento); }
+
+.thought { pointer-events: auto; user-select: text; justify-self: center; text-align: center; max-width: min(62ch, 100%); display: grid; gap: 10px; padding-bottom: 14px; }
+.marking {
+  font-family: var(--f-display); font-style: italic; font-size: clamp(15px, 1.8vw, 19px);
+  letter-spacing: 0.06em; color: var(--lvl, var(--tranquillo));
+}
+.marking::before, .marking::after { content: ""; display: inline-block; width: 28px; height: 1px; background: currentColor; opacity: 0.5; vertical-align: middle; margin: 0 12px; }
+.line {
+  margin: 0; font-family: var(--f-display); font-weight: 400; font-style: italic;
+  font-size: clamp(22px, 3.4vw, 40px); line-height: 1.18; text-wrap: balance; color: var(--ink);
+  text-shadow: 0 2px 24px rgba(0,0,0,0.6);
+}
+.line.long { font-size: clamp(18px, 2.2vw, 28px); }
+.meta { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; align-items: center; }
+.reason {
+  font-family: var(--f-data); font-size: 12px; padding: 3px 9px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--lvl, var(--tranquillo)) 40%, var(--hair));
+  color: var(--ink); background: color-mix(in srgb, var(--sky) 70%, transparent);
+}
+.who { font-family: var(--f-data); font-size: 12px; color: var(--ink-dim); }
+.who b { color: var(--ink); font-weight: 600; }
+
+/* What needs you: the work list. Ranked by severity; each item says what, since when, why, your move, who. */
+.needs {
+  pointer-events: auto; align-self: start; justify-self: start; margin-top: 14px;
+  width: min(400px, 100%); max-height: calc(100% - 14px); overflow: auto;
+  background: color-mix(in srgb, var(--sky) 82%, transparent); border: 1px solid var(--hair); border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+.needs > summary {
+  cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: baseline;
+  padding: 12px 14px; position: sticky; top: 0; background: color-mix(in srgb, var(--sky) 92%, transparent);
+}
+.needs > summary::-webkit-details-marker { display: none; }
+.needs > summary:focus-visible { outline: 2px solid var(--l9); outline-offset: -2px; }
+.needs-title { font-family: var(--f-display); font-style: italic; font-size: 19px; }
+.needs-count { font-family: var(--f-data); font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.needs-list { list-style: none; margin: 0; padding: 0 10px 10px; display: grid; gap: 8px; }
+.need { display: grid; gap: 6px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--sky-2) 85%, transparent); }
+.need-head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+.need-what { font-weight: 700; font-size: 14px; line-height: 1.3; }
+.sev { font-family: var(--f-display); font-style: italic; font-size: 13px; color: var(--c); white-space: nowrap; }
+.need-meta { font-family: var(--f-data); font-size: 11px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.need-why { font-size: 13px; color: var(--ink-dim); line-height: 1.4; }
+.move { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.move code {
+  flex: 1 1 100%; font-family: var(--f-data); font-size: 12px; line-height: 1.45; color: var(--ink);
+  background: var(--sky); border: 1px solid var(--hair); border-radius: 6px; padding: 6px 8px; overflow-wrap: anywhere;
+}
+.move button { padding: 5px 9px; font-size: 11px; }
+.need a { color: var(--l9); }
+.need ul { margin: 0; padding-left: 16px; font-size: 12px; display: grid; gap: 2px; }
+.doctor { font-size: 12px; line-height: 1.4; color: var(--ink); border-left: 2px solid var(--tranquillo); padding: 2px 0 2px 8px; }
+.doctor.dim { color: var(--ink-dim); border-left-color: var(--hair); }
+.doctor .doc-tag { display: block; font-family: var(--f-data); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); }
+.doctor details { margin-top: 2px; }
+.doctor summary { cursor: pointer; font-family: var(--f-data); font-size: 11px; color: var(--ink-dim); }
+.doctor ul { margin: 2px 0 0; padding-left: 16px; font-family: var(--f-data); font-size: 11px; }
+.clear { padding: 4px 14px 14px; color: var(--tranquillo); font-family: var(--f-display); font-style: italic; }
+@media (max-width: 720px) { .needs { max-height: 34vh; margin-top: 10px; } }
+/* Conversation: the shared cockpit channel (xanadu:~/steward/cockpit/channel.jsonl), same as HOLOMIND's */
+.talk { border-top: 1px solid var(--hair); padding: 10px 10px 12px; display: grid; gap: 8px; }
+.talk-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px; }
+.talk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 210px; overflow: auto; }
+.msg { font-size: 13px; line-height: 1.4; padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, var(--sky-2) 80%, transparent); }
+.msg .from { font-family: var(--f-data); font-size: 11px; color: var(--c, var(--ink-dim)); }
+.msg .from small { color: var(--ink-dim); }
+.msg.mind .body { font-family: var(--f-display); font-style: italic; }
+.talk-form { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; }
+.talk-form select, .talk-form input {
+  font: 13px var(--f-body); color: var(--ink); background: var(--sky); border: 1px solid var(--hair);
+  border-radius: 6px; padding: 6px 8px; min-width: 0;
+}
+.talk-form select:focus-visible, .talk-form input:focus-visible { outline: 2px solid var(--l9); outline-offset: 1px; }
+.talk-note { margin: 0; font-size: 12px; color: var(--ink-dim); padding: 0 4px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.need .ask { justify-self: start; font-size: 11px; padding: 4px 10px; color: var(--msi); border-color: color-mix(in srgb, var(--msi) 40%, var(--hair)); }
+/* MSI Claude's live steps, under the wordmark */
+.claude-tick {
+  position: fixed; top: calc(max(14px, env(safe-area-inset-top, 0px)) + 66px); right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 3px; justify-items: end; pointer-events: none; font-family: var(--f-data); font-size: 11px; color: var(--ink-dim);
+  max-width: min(46ch, 60vw);
+}
+.claude-tick b { color: var(--msi); font-weight: 600; }
+.claude-tick span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+@media (max-width: 720px) { .claude-tick { display: none; } }
+.river { pointer-events: auto; display: grid; gap: 6px; }
+.river-head { display: flex; justify-content: space-between; font-family: var(--f-data); font-size: 11px; color: var(--ink-dim); letter-spacing: 0.08em; text-transform: uppercase; }
+.river-track {
+  position: relative; height: 34px; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--sky-2) 90%, transparent) 12%, color-mix(in srgb, var(--sky-2) 90%, transparent) 88%, transparent);
+}
+.drop {
+  position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  border: 0; padding: 0; background: var(--c); box-shadow: 0 0 10px var(--c); cursor: pointer;
+}
+.drop.synthetic { background: transparent; border: 1.5px dashed var(--c); box-shadow: none; }
+.drop[aria-current="true"] { outline: 2px solid var(--ink); outline-offset: 3px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); padding-top: 6px; }
+.legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin-right: 6px; vertical-align: 1px; }
+.river-head { flex-wrap: wrap; gap: 4px 12px; }
+.controls { flex-wrap: wrap; }
+@media (max-width: 520px) {
+  .mark p { display: none; }
+  .top { flex-direction: column; align-items: stretch; gap: 8px; }
+  .status { justify-content: flex-start; }
+  .chip { font-size: 10px; letter-spacing: 0.04em; }
+  .controls button { padding: 6px 10px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) { .line { text-shadow: none; } }
+/* rig card: click a star to open what that rig knows about itself */
+.rig-card {
+  position: fixed; z-index: 5; pointer-events: auto; width: min(340px, calc(100% - 32px)); max-height: 70vh; overflow: auto;
+  background: color-mix(in srgb, var(--sky) 90%, transparent); border: 1px solid var(--c, var(--hair)); border-radius: 10px;
+  padding: 12px 14px; display: grid; gap: 8px; font-size: 13px; user-select: text;
+  box-shadow: 0 10px 40px rgba(0,0,0,.5);
+}
+.rig-card h3 { margin: 0; font: italic 500 22px var(--f-display); color: var(--c); display: flex; justify-content: space-between; align-items: baseline; }
+.rig-card h3 small { font: 11px var(--f-data); color: var(--ink-dim); font-style: normal; }
+.rig-card .row { font: 12px/1.45 var(--f-data); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.rig-card .row b { color: var(--ink); font-weight: 600; }
+.rig-card .bad { color: var(--agitato); }
+.rig-card .said { font-style: italic; color: var(--ink); }
+.rig-card .acts { display: flex; gap: 8px; }
+canvas#sky.pointing { cursor: pointer; }
+.msg .state { font: 10px var(--f-data); color: var(--tranquillo); letter-spacing: .04em; }
+</style>
+
+<canvas id="sky-bg" aria-hidden="true"></canvas>
+<div id="aura" aria-hidden="true"></div>
+<canvas id="sky" aria-label="The fleet drawn as four stars: MSI, i3, L9 and xanadu, with their minds' thoughts as comets"></canvas>
+<div class="ui">
+  <header class="top">
+    <div class="mark">
+      <h1>Chorus</h1>
+      <p>The colony's minds, seen and heard</p>
+    </div>
+    <div class="status">
+      <span class="chip" id="source">Snapshot 2026-11-08 06:48 UTC</span>
+      <div class="controls">
+        <a id="holo-link" href="holo.html" title="HOLO: look down into the colony as a holographic table, and act on what you see" style="font: 700 12px var(--f-body); letter-spacing: 0.22em; color: #031016; text-decoration: none; display: inline-flex; align-items: center; border: 1px solid #7fe7ff; border-radius: 999px; padding: 7px 14px; background: #7fe7ff; box-shadow: 0 0 16px rgba(127, 231, 255, 0.55);">HOLO</a>
+        <a id="forge-link" href="forge.html" title="The Forge: the agents at work, station by station, and your work orders" style="font: 600 12px var(--f-body); letter-spacing: 0.06em; color: var(--msi); text-decoration: none; display: inline-flex; align-items: center; border: 1px solid color-mix(in srgb, var(--msi) 55%, var(--hair)); border-radius: 999px; padding: 7px 13px; background: color-mix(in srgb, var(--sky-2) 85%, transparent);">Forge</a>
+        <button id="sound" aria-pressed="false" title="Each rig sings one note; thoughts play chords">Sound off</button>
+        <button id="rehearse" aria-pressed="false" title="Play labelled demo thoughts through every state">Rehearse</button>
+        <button id="copy-brief" title="Copy every layer as text: needs and next moves first (C)">Copy brief</button>
+        <button id="full" title="Fullscreen (F). Esc leaves.">Fullscreen</button>
+      </div>
+    </div>
+  </header>
+  <details class="needs" id="needs" open>
+    <summary><span class="needs-title">What needs you</span> <span class="needs-count" id="needs-count"></span></summary>
+    <ol class="needs-list" id="needs-list"></ol>
+    <div class="talk">
+      <div class="talk-head"><span class="needs-title">Conversation</span><span class="needs-count" id="talk-count">shared with HOLOMIND</span></div>
+      <ol class="talk-list" id="talk-list"></ol>
+      <form class="talk-form" id="talk-form">
+        <label class="sr" for="talk-to">Send to</label>
+        <select id="talk-to"><option value="claude">MSI Claude</option><option value="mind">the Minds</option><option value="all">everyone</option></select>
+        <label class="sr" for="talk-text">Message</label>
+        <input id="talk-text" type="text" maxlength="600" placeholder="Say something to the colony" autocomplete="off">
+        <button id="talk-send" type="submit">Send</button>
+      </form>
+      <p class="talk-note" id="talk-note"></p>
+    </div>
+  </details>
+  <div class="claude-tick" id="claude-tick" aria-live="off"></div>
+  <aside class="rig-card" id="rig-card" hidden aria-live="polite"></aside>
+  <section class="thought" aria-live="polite">
+    <div class="marking" id="marking">tranquillo</div>
+    <p class="line" id="line">The fleet is quiet.</p>
+    <div class="meta" id="meta"></div>
+  </section>
+  <footer class="river">
+    <div class="river-head"><span>Memory</span><span id="span"></span></div>
+    <div class="river-track" id="track"></div>
+    <div class="legend">
+      <span style="--c: var(--msi)">MSI · workshop · C</span>
+      <span style="--c: var(--i3)">i3 · engine room · E</span>
+      <span style="--c: var(--l9)">L9 · drone · G</span>
+      <span style="--c: var(--xanadu)">xanadu · librarian · B</span>
+    </div>
+  </footer>
+</div>
+
+<script src="composer.js"></script>
+<script>
+"use strict";
+// ---------- data: the shared bakeoff fixture (real, frozen 2026-11-08 06:48 UTC) ----------
+const FIXTURE_NOW = Date.parse("2026-11-08T06:48:00Z");
+const FIXTURE = {
+  events: [
+    {at:"2026-11-08T05:35:16+00:00",mind:"l9-triage-drone",model:"qwen3:4b-l9fast",level:"alarm",reasons:["i3 failing: docker","msi failing: dev-mentor","off-box backup 109 h old (alarm > 36 h)"],line:"Critical backups overdue (109h old) and multiple system failures: i3 and msi failing, with insufficient RAM and no green status.",ms:3055},
+    {at:"2026-11-08T06:16:16+00:00",mind:"l9-triage-drone",model:"qwen3:4b-l9fast",level:"notable",reasons:["i3 failing: docker"],line:"i3 failing: docker",ms:1794,focus:"i3"},
+    {at:"2026-11-08T06:21:04+00:00",mind:"l9-triage-drone",model:"qwen3:4b-l9fast",level:"notable",reasons:["i3 failing: docker"],line:"i3 failing: docker",ms:1711,focus:"i3"},
+    {at:"2026-11-08T06:36:20+00:00",mind:"l9-triage-drone",model:"qwen3:4b-l9fast",level:"notable",reasons:["i3 failing: docker"],line:"i3 failing: docker",ms:16578,focus:"i3"}
+  ],
+  heartbeats: {
+    msi:{at:"2026-11-08T06:45:03Z",green:true,ram_avail_mb:5473,checks:[{name:"litellm",ok:true},{name:"dev-mentor",ok:true},{name:"i3-tunnel",ok:true},{name:"docker",ok:true}]},
+    i3:{at:"2026-11-08T06:46:42Z",green:false,ram_avail_mb:14786,checks:[{name:"ollama",ok:true},{name:"gameattract",ok:true},{name:"docker",ok:false}]},
+    l9:{at:"2026-11-08T06:36:20Z",green:true,checks:[{name:"ollama-mind",ok:true}]}
+  }
+};
+// Rehearsal: clearly labelled demo thoughts that walk every state. Never mixed into real memory.
+const REHEARSAL = [
+  {mind:"l9-triage-drone",level:"routine",reasons:[],line:"The fleet is quiet. Every rig reporting, nothing failing.",synthetic:true},
+  {mind:"culture-ship",level:"notable",reasons:["msi failing: i3-tunnel"],focus:"msi",line:"The workshop has lost its line to the engine room's models.",synthetic:true},
+  {mind:"l9-triage-drone",level:"alarm",reasons:["msi heartbeat SILENT 60 min"],focus:"msi",line:"MSI has been silent for an hour.",synthetic:true,silence:"msi"},
+  {mind:"i3-engine-mind",level:"notable",reasons:["i3 failing: docker"],focus:"i3",line:"Docker still waits on the BIOS switch. Games play on.",synthetic:true},
+  {mind:"culture-ship",level:"routine",reasons:[],line:"All voices back in tune.",synthetic:true}
+];
+const RIGS = [
+  {id:"msi", name:"MSI", role:"workshop", color:"--msi", note:261.63, pos:[0.27,0.40], r:30},
+  {id:"i3", name:"i3", role:"engine room", color:"--i3", note:329.63, pos:[0.73,0.36], r:28},
+  {id:"l9", name:"L9", role:"drone", color:"--l9", note:392.00, pos:[0.62,0.62], r:20},
+  {id:"xanadu", name:"xanadu", role:"librarian", color:"--xanadu", note:493.88, pos:[0.38,0.64], r:24}
+];
+const MIND_HOME = {"l9-triage-drone":"l9","culture-ship":"msi","i3-engine-mind":"i3"};
+const LEVEL = {
+  routine:{word:"tranquillo", color:"--tranquillo"},
+  notable:{word:"attento", color:"--attento"},
+  alarm:{word:"agitato", color:"--agitato"}
+};
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// ---------- state ----------
+let events = FIXTURE.events.slice(), heartbeats = structuredClone(FIXTURE.heartbeats);
+let nowFn = () => FIXTURE_NOW, live = false, rehearsing = false, rehearsalTimer = null;
+let current = events[events.length - 1], silenceOverride = null;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---------- canvas sky ----------
+// Every mark in the sky is data. Static layers (sky, galactic band, far stars, vignette, mood tint) are
+// painted ONCE to an offscreen canvas and blitted; glows are pre-rendered sprites. Nothing static allocates
+// per frame. Everything is rebuilt only on resize, DPR change, or when the data the layer encodes changes.
+const cv = document.getElementById("sky"), cx = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1, comets = [], ripples = [], sparks = [];
+const COL = {};
+const TOKENS = ["--sky", "--sky-2", "--ink", "--ink-dim", "--hair", "--msi", "--i3", "--l9", "--xanadu", "--tranquillo", "--attento", "--agitato"];
+function readTokens() { for (const k of TOKENS) COL[k] = css(k); COL.fData = css("--f-data"); COL.fDisp = css("--f-display"); }
+readTokens();
+const rgbOf = hex => { const h = hex.replace("#", ""), n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+function hexA(hex, a) { const [r, g, b] = rgbOf(hex); return `rgba(${r},${g},${b},${a})`; }
+// Seeded random so the sky keeps its constellations across resizes and reloads.
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const gauss = r => (r() + r() + r() + r() - 2) / 2;
+function canvas(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
+// A sprite is drawn at `size` CSS px; its backing store is size*DPR so it stays crisp on HiDPI.
+function sprite(size, paint) { const c = canvas(size * DPR, size * DPR), g = c.getContext("2d"); g.scale(DPR, DPR); paint(g, size / 2); return c; }
+function glow(hex, size, stops) {
+  return sprite(size, (g, h) => {
+    const gr = g.createRadialGradient(h, h, 0, h, h, h);
+    for (const [o, a] of stops) gr.addColorStop(o, hexA(hex, a));
+    g.fillStyle = gr; g.fillRect(0, 0, size, size);
+  });
+}
+const blit = (img, x, y, s) => cx.drawImage(img, x - s / 2, y - s / 2, s, s);
+
+// ----- sprites: built once per DPR -----
+let SP = null;
+function buildSprites() {
+  SP = {rig: {}, dot: {}};
+  SP.white = glow("#ffffff", 16, [[0, 1], [0.18, 0.9], [0.45, 0.25], [1, 0]]);
+  SP.whiteSpike = sprite(40, (g, h) => {              // a bright star: core plus faint diffraction spikes
+    g.globalCompositeOperation = "lighter";
+    for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      const lg = g.createLinearGradient(h - dx * h, h - dy * h, h + dx * h, h + dy * h);
+      lg.addColorStop(0, "rgba(255,255,255,0)"); lg.addColorStop(0.5, "rgba(255,255,255,0.55)"); lg.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = lg; dx ? g.fillRect(0, h - 0.6, 2 * h, 1.2) : g.fillRect(h - 0.6, 0, 1.2, 2 * h);
+    }
+    const gr = g.createRadialGradient(h, h, 0, h, h, h * 0.4);
+    gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.25, "rgba(255,255,255,0.5)"); gr.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = gr; g.fillRect(0, 0, 2 * h, 2 * h);
+  });
+  for (const k of ["--tranquillo", "--agitato", "--ink-dim", "--msi", "--i3", "--l9", "--xanadu", "--attento"])
+    SP.dot[k] = glow(COL[k], 24, [[0, 1], [0.12, 0.95], [0.3, 0.35], [0.6, 0.08], [1, 0]]);
+  for (const r of RIGS) {
+    const c = COL[r.color];
+    SP.rig[r.id] = {
+      // corona: a wide soft bloom in the rig's colour, with long faint spikes (drawn additively)
+      corona: sprite(r.r * 9, (g, h) => {
+        const gr = g.createRadialGradient(h, h, 0, h, h, h);
+        gr.addColorStop(0, hexA(c, 0.55)); gr.addColorStop(0.08, hexA(c, 0.32)); gr.addColorStop(0.22, hexA(c, 0.11));
+        gr.addColorStop(0.5, hexA(c, 0.03)); gr.addColorStop(1, hexA(c, 0));
+        g.fillStyle = gr; g.fillRect(0, 0, 2 * h, 2 * h);
+        g.globalCompositeOperation = "lighter";
+        g.translate(h, h);
+        for (let i = 0; i < 2; i++) {
+          g.rotate(i ? Math.PI / 2 : Math.PI / 4);
+          const lg = g.createLinearGradient(-h, 0, h, 0);
+          lg.addColorStop(0, hexA(c, 0)); lg.addColorStop(0.5, hexA(c, 0.22)); lg.addColorStop(1, hexA(c, 0));
+          g.fillStyle = lg; g.fillRect(-h, -0.7, 2 * h, 1.4);
+        }
+      }),
+      // core: white-hot centre bleeding into the rig colour, a crisp limb
+      core: sprite(r.r * 2, (g, h) => {
+        const gr = g.createRadialGradient(h * 0.85, h * 0.85, 0, h, h, h);
+        gr.addColorStop(0, "#fffdf6"); gr.addColorStop(0.28, mix(c, "#ffffff", 0.55)); gr.addColorStop(0.72, c);
+        gr.addColorStop(0.93, mix(c, "#000000", 0.25)); gr.addColorStop(1, hexA(c, 0));
+        g.fillStyle = gr; g.beginPath(); g.arc(h, h, h, 0, 6.283); g.fill();
+      })
+    };
+  }
+}
+function mix(a, b, k) { const p = rgbOf(a), q = rgbOf(b); return `rgb(${p.map((v, i) => Math.round(v + (q[i] - v) * k)).join(",")})`; }
+
+// ----- the backdrop: its own canvas layer, repainted only on resize, DPR change or a new mood -----
+const PAR = 14;   // parallax margin (px) baked around the backdrop
+const bgEl = document.getElementById("sky-bg");
+let bgKey = "";
+function moodLevel() { return current?.level || "routine"; }
+function mirrorFresh() { const m = extras.mirror; return !!m && m.ok && m.age_h <= 26; }
+function buildBackdrop() {
+  const s = DPR, bw = W + 2 * PAR, bh = H + 2 * PAR, c = bgEl;
+  c.width = Math.ceil(bw * s); c.height = Math.ceil(bh * s);
+  const g = c.getContext("2d"); g.setTransform(s, 0, 0, s, 0, 0);
+  const r = rng(144);
+  // the night: deep blue, a little lighter toward the horizon
+  const sk = g.createLinearGradient(0, 0, 0, bh);
+  sk.addColorStop(0, "#03060e"); sk.addColorStop(0.55, COL["--sky"]); sk.addColorStop(1, "#0c1326");
+  g.fillStyle = sk; g.fillRect(0, 0, bw, bh);
+  // the galactic band, sweeping low-left to high-right; its glow takes the colour of the current marking
+  const band = u => { const x = -0.1 * bw + u * 1.2 * bw; return [x, bh * (0.92 - 0.78 * u) + Math.sin(u * 3.1) * bh * 0.07]; };
+  const bwid = Math.max(bw, bh) * 0.16, mood = COL[LEVEL[moodLevel()].color];
+  const pal = ["#2b3f8f", "#45358f", "#1d5c80", "#5f3378", "#2b3f8f", "#3a2f86", mood];
+  g.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 190; i++) {
+    const u = r(), [bx, by] = band(u), off = gauss(r) * bwid * 0.55, rad = bwid * (0.2 + r() * 0.7);
+    const x = bx + off * 0.45, y = by + off, col = pal[Math.floor(r() * pal.length)];
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, hexA(col, 0.045 + r() * 0.05)); gr.addColorStop(0.5, hexA(col, 0.015)); gr.addColorStop(1, hexA(col, 0));
+    g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  for (let i = 0; i < 26; i++) {
+    const [bx, by] = band(0.25 + r() * 0.6), rad = bwid * (0.08 + r() * 0.18), x = bx + gauss(r) * bwid * 0.15, y = by + gauss(r) * bwid * 0.2;
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, "rgba(200,205,240,0.06)"); gr.addColorStop(1, "rgba(200,205,240,0)");
+    g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  // dark dust lanes along the band's spine
+  g.globalCompositeOperation = "source-over";
+  for (let i = 0; i < 70; i++) {
+    const u = r(), [bx, by] = band(u), rad = bwid * (0.12 + r() * 0.3), x = bx + gauss(r) * bwid * 0.1, y = by + gauss(r) * bwid * 0.18;
+    const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+    gr.addColorStop(0, "rgba(3,5,11,0.38)"); gr.addColorStop(1, "rgba(3,5,11,0)");
+    g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  // far stars: dense along the band, sparse elsewhere; colour temperatures from blue-white to amber
+  const temps = ["255,255,255", "205,220,255", "255,240,215", "255,215,170", "180,200,255"];
+  const n = Math.round(bw * bh / 320);
+  for (let i = 0; i < n; i++) {
+    let x, y;
+    if (r() < 0.62) { const [bx, by] = band(r()); const off = gauss(r) * bwid * 0.6; x = bx + off * 0.45; y = by + off; }
+    else { x = r() * bw; y = r() * bh; }
+    const z = Math.pow(r(), 4), a = 0.1 + z * 0.8, sz = z > 0.8 ? 1.3 : z > 0.4 ? 0.9 : 0.6;
+    g.fillStyle = `rgba(${temps[Math.floor(r() * temps.length)]},${a.toFixed(3)})`; g.fillRect(x, y, sz, sz);
+    if (z > 0.96) { g.globalAlpha = 0.6; g.drawImage(SP.white, x - 3, y - 3, 7, 7); g.globalAlpha = 1; }
+  }
+  // the mood rising from the horizon
+  const mg = g.createRadialGradient(bw / 2, bh * 1.08, 10, bw / 2, bh * 1.08, Math.max(bw, bh) * 0.85);
+  mg.addColorStop(0, hexA(mood, 0.16)); mg.addColorStop(1, hexA(mood, 0));
+  g.fillStyle = mg; g.fillRect(0, 0, bw, bh);
+  // vignette: the eye settles on the fleet
+  const vg = g.createRadialGradient(bw * 0.55, bh * 0.48, Math.min(bw, bh) * 0.3, bw * 0.55, bh * 0.48, Math.max(bw, bh) * 0.78);
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.6)");
+  g.fillStyle = vg; g.fillRect(0, 0, bw, bh);
+}
+// The near stars: one per repo the off-GitHub mirror keeps. They twinkle while the mirror is fresh; when it
+// falls behind they go dull, and a mirror failure turns that many of them red.
+let NEAR = [];
+function buildNear() {
+  const r = rng(75), n = Math.min(400, extras.mirror?.repos || 0);
+  NEAR = Array.from({length: n}, (_, i) => ({x: r() * (W + 2 * PAR) - PAR, y: r() * H * 0.86, z: 0.35 + r() * 0.65, p: r() * 6.28, w: 0.6 + r() * 1.4, spike: r() < 0.12, i}));
+}
+
+// ----- labels: text rendered once to a small canvas per distinct string -----
+const labels = new Map();
+function label(text, font, color) {
+  const key = font + "|" + color + "|" + text;
+  let l = labels.get(key);
+  if (!l) {
+    if (labels.size > 96) labels.clear();
+    const m = cx.measureText ? (cx.font = font, cx.measureText(text)) : {width: text.length * 8};
+    const w = Math.ceil(m.width) + 8, h = 26, c = canvas(w * DPR, h * DPR), g = c.getContext("2d");
+    g.scale(DPR, DPR); g.font = font; g.fillStyle = color; g.textAlign = "center"; g.textBaseline = "middle";
+    g.shadowColor = "rgba(3,5,12,0.95)"; g.shadowBlur = 7;
+    for (let i = 0; i < 3; i++) g.fillText(text, w / 2, h / 2);     // a dark halo, so threads never cut the text
+    l = {c, w, h}; labels.set(key, l);
+  }
+  return l;
+}
+document.fonts?.ready.then(() => labels.clear());
+
+let geomKey = "", threads = {};
+function resize() {
+  DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  buildSprites(); labels.clear(); bgKey = ""; geomKey = "";
+}
+addEventListener("resize", resize);
+// On wide screens the sky sits right of the "What needs you" panel (420 px), so no star hides behind it.
+// Vertically the fleet fits between the header (or, when narrow, the panel) and a reserve for the thought,
+// its reasons and the memory river, so a long thought never sits on a star.
+const rigXY = id => {
+  const r = RIGS.find(q => q.id === id), left = W >= 900 ? 440 : 0;
+  const top = W < 720 ? Math.min(H * 0.46, 120 + H * 0.34) : Math.max(70, H * 0.12), bottom = Math.max(top + 140, H - (W < 720 ? 250 : 300));
+  return [left + r.pos[0] * (W - left), top + (r.pos[1] - 0.3) / 0.4 * (bottom - top)];
+};
+resize();
+const ageMin = hb => hb ? (nowFn() - Date.parse(hb.at)) / 60000 : Infinity;
+function rigState(id) {
+  if (id === "xanadu") return {silent: false, host: true, checks: []};   // xanadu holds the record itself
+  const hb = heartbeats[id];
+  const silent = silenceOverride === id || !hb || ageMin(hb) > 15;
+  return {silent, hb, age: silenceOverride === id ? 60 : ageMin(hb), checks: hb ? hb.checks : []};
+}
+// The light streams from each rig to xanadu: their gradients depend only on geometry, so cache them.
+function buildThreads() {
+  threads = {}; const [xx, xy] = rigXY("xanadu");
+  for (const r of RIGS) {
+    if (r.id === "xanadu") continue;
+    const [x, y] = rigXY(r.id), lg = cx.createLinearGradient(x, y, xx, xy);
+    lg.addColorStop(0, COL[r.color]); lg.addColorStop(1, COL["--xanadu"]);
+    threads[r.id] = {x, y, xx, xy, lg};
+  }
+}
+function ensureLayers() {
+  const gk = `${W}x${H}@${DPR}`;
+  if (gk !== geomKey) { geomKey = gk; buildThreads(); buildNear(); }
+  const bk = `${gk}|${moodLevel()}`;
+  if (bk !== bgKey) { bgKey = bk; buildBackdrop(); }
+  if (NEAR.length !== Math.min(400, extras.mirror?.repos || 0)) buildNear();
+}
+
+// Pointer parallax: the far sky shifts a little, the near stars more, the fleet not at all (so clicks land).
+let px = 0, py = 0, tpx = 0, tpy = 0;
+addEventListener("pointermove", e => { tpx = e.clientX / W * 2 - 1; tpy = e.clientY / H * 2 - 1; });
+
+let lastDraw = 0;
+function frame(t) {
+  requestAnimationFrame(frame);
+  if (document.hidden) return;
+  // Budget (bakeoff rule: <= 5% of one core idle): at most 30 fps; with reduced motion, one still frame a second.
+  if (t - lastDraw < (reduced ? 1000 : 33)) return;
+  lastDraw = t;
+  if (Math.min(2, devicePixelRatio || 1) !== DPR) resize();
+  drawSky(reduced ? 0 : t);
+}
+// ?perf: draw 300 frames back to back (t advancing 33 ms each, as at the 30 fps cap) and report the
+// average and p95 cost of one frame in the title and console. Headless browsers starve rAF, so this
+// times the draw work itself, which is what the budget is about.
+function perfRun() {
+  const ms = [], t0 = performance.now();
+  if (!reduced && !comets.length) show(current);                  // include a comet in flight
+  for (let i = 0; i < 300; i++) {          // getImageData forces the canvas to actually rasterise each frame
+    const a = performance.now(); drawSky(t0 + i * 33); cx.getImageData(0, 0, 1, 1); ms.push(performance.now() - a);
+  }
+  const s = ms.slice().sort((x, y) => x - y), avg = ms.reduce((x, y) => x + y, 0) / ms.length;
+  const msg = `perf avg ${avg.toFixed(3)} ms p95 ${s[284].toFixed(3)} ms max ${s[299].toFixed(3)} ms · 300 frames · ${W}x${H}@${DPR}`;
+  console.log(msg); document.title = msg;
+}
+let bgShift = [0, 0];
+function drawSky(t) {
+  ensureLayers();
+  if (!reduced) { px += (tpx - px) * 0.06; py += (tpy - py) * 0.06; }
+  // 1. the backdrop lives on its own layer: only nudge it for parallax (when it actually moves)
+  const bx = Math.round(-px * 8 * 4) / 4, by = Math.round(-py * 6 * 4) / 4;
+  if (bx !== bgShift[0] || by !== bgShift[1]) { bgShift = [bx, by]; bgEl.style.transform = `translate3d(${bx}px, ${by}px, 0)`; }
+  cx.globalCompositeOperation = "source-over"; cx.globalAlpha = 1;
+  cx.clearRect(0, 0, W, H);
+  cx.globalCompositeOperation = "lighter";
+  drawNear(t);
+  drawThreads(t);
+  cx.globalCompositeOperation = "source-over";
+  // 2. the fleet, with MSI's spine moons passing behind and in front of it
+  drawMoons(t, true);
+  for (const r of RIGS) drawRig(r, t);
+  drawMoons(t, false);
+  drawOrbiters(t);
+  drawWork(t);
+  // 3. thoughts in flight, and where they landed
+  ripples = ripples.filter(p => t - p.t0 < 2400);
+  for (const p of ripples) {
+    const k = (t - p.t0) / 2400, rad = 20 + (1 - Math.pow(1 - k, 2)) * 130;
+    cx.strokeStyle = hexA(p.c, 0.12 * (1 - k)); cx.lineWidth = 9; cx.beginPath(); cx.arc(p.x, p.y, rad, 0, 6.283); cx.stroke();
+    cx.strokeStyle = hexA(p.c, 0.7 * (1 - k)); cx.lineWidth = 1.5; cx.beginPath(); cx.arc(p.x, p.y, rad, 0, 6.283); cx.stroke();
+  }
+  comets = comets.filter(c => t - c.t0 < c.dur + 900);
+  cx.globalCompositeOperation = "lighter";
+  for (const c of comets) drawComet(c, t);
+  drawSparks(t);
+  cx.globalCompositeOperation = "source-over";
+}
+function drawNear(t) {
+  const fresh = mirrorFresh(), fails = extras.mirror?.failures || 0, ox = -px * 16, oy = -py * 11;
+  for (const s of NEAR) {
+    const tw = reduced ? 0.85 : 0.6 + 0.4 * Math.sin(t / (700 + s.w * 500) + s.p);
+    const bad = s.i < fails, img = bad ? SP.dot["--agitato"] : s.spike && fresh ? SP.whiteSpike : SP.white;
+    cx.globalAlpha = (fresh ? 0.35 + 0.65 * s.z * tw : 0.18 * s.z);
+    const size = (s.spike && fresh ? 16 : bad ? 12 : 5.5) * s.z;
+    cx.drawImage(img, s.x + ox - size / 2, s.y + oy - size / 2, size, size);
+  }
+  cx.globalAlpha = 1;
+}
+// Heartbeat threads: every rig reports to the librarian. The beads travelling each thread are that rig's
+// health checks (teal ok, red failing); they travel faster the fresher the beat. Silent rigs: dashed, empty.
+function drawThreads(t) {
+  for (const r of RIGS) {
+    if (r.id === "xanadu") continue;
+    const st = rigState(r.id), th = threads[r.id];
+    cx.strokeStyle = th.lg;
+    if (st.silent) { cx.globalAlpha = 0.18; cx.setLineDash([3, 7]); cx.lineWidth = 1; }
+    else { cx.globalAlpha = 0.07; cx.lineWidth = 7; cx.beginPath(); cx.moveTo(th.x, th.y); cx.lineTo(th.xx, th.xy); cx.stroke(); cx.globalAlpha = 0.45; cx.lineWidth = 1; }
+    cx.beginPath(); cx.moveTo(th.x, th.y); cx.lineTo(th.xx, th.xy); cx.stroke(); cx.setLineDash([]); cx.globalAlpha = 1;
+    if (st.silent || !st.checks.length) continue;
+    const n = st.checks.length, period = 2600 + 120 * Math.min(st.age, 15);
+    for (let i = 0; i < n; i++) {
+      const ok = st.checks[i].ok, img = SP.dot[ok ? "--tranquillo" : "--agitato"];
+      const base = reduced ? (i + 0.5) / n : ((t / period) + i / n + RIGS.indexOf(r) * 0.27) % 1;
+      for (let j = 3; j >= 0; j--) {                 // a short fading wake behind each bead
+        const k = base - j * 0.012; if (k < 0) continue;
+        const sz = (ok ? 11 : 17) * (1 - j * 0.2);
+        cx.globalAlpha = (1 - j * 0.28) * (ok ? 0.8 : 1);
+        blit(img, th.x + (th.xx - th.x) * k, th.y + (th.xy - th.y) * k, sz);
+      }
+    }
+    cx.globalAlpha = 1;
+  }
+}
+function ramScale(st) { const mb = st.hb?.ram_avail_mb; return mb == null ? 1 : 0.8 + Math.min(1, mb / 16000) * 0.45; }
+function drawRig(r, t) {
+  const st = rigState(r.id), [x, y] = rigXY(r.id), col = COL[r.color], sp = SP.rig[r.id], small = W < 520 ? 0.75 : 1;
+  const breathe = reduced || st.silent ? 1 : 1 + 0.06 * Math.sin(t / (st.host ? 1800 : 1100 + 40 * Math.min(st.age || 0, 15)));
+  const rad = r.r * small;
+  // corona: breathes with the heartbeat; its reach is the RAM the rig has free
+  cx.globalCompositeOperation = "lighter";
+  cx.globalAlpha = st.silent ? 0.12 : 0.95;
+  blit(sp.corona, x, y, r.r * 9 * small * breathe * (st.silent ? 0.6 : ramScale(st)));
+  cx.globalCompositeOperation = "source-over";
+  // a failing check sends out a red shockwave every couple of seconds
+  const fails = st.checks.filter(c => !c.ok).length;
+  if (fails && !st.silent && !reduced) {
+    const k = (t % 2400) / 2400, rr = rad + 10 + k * rad * 2.6;
+    cx.strokeStyle = hexA(COL["--agitato"], 0.10 * (1 - k)); cx.lineWidth = 10; cx.beginPath(); cx.arc(x, y, rr, 0, 6.283); cx.stroke();
+    cx.strokeStyle = hexA(COL["--agitato"], 0.55 * (1 - k)); cx.lineWidth = 1.2; cx.beginPath(); cx.arc(x, y, rr, 0, 6.283); cx.stroke();
+  }
+  cx.globalAlpha = st.silent ? 0.22 : 1;
+  blit(sp.core, x, y, rad * 1.3 * breathe);
+  cx.globalAlpha = 1;
+  // check ring: one arc per health check (xanadu: the off-box backup and the git mirror it keeps)
+  const ring = st.host ? xanaduChecks() : st.checks, n = ring.length;
+  for (let i = 0; i < n; i++) {
+    const a0 = -1.57 + i * 6.283 / n + 0.12, a1 = -1.57 + (i + 1) * 6.283 / n - 0.12, ok = ring[i].ok;
+    if (!ok && !st.silent) { cx.strokeStyle = hexA(COL["--agitato"], 0.25); cx.lineWidth = 9; cx.beginPath(); cx.arc(x, y, rad + 9, a0, a1); cx.stroke(); }
+    cx.strokeStyle = st.silent ? hexA(COL["--ink-dim"], 0.35) : ok ? hexA(COL["--tranquillo"], 0.85) : COL["--agitato"];
+    cx.lineWidth = ok ? 1.6 : 3.5; cx.beginPath(); cx.arc(x, y, rad + 9, a0, a1); cx.stroke();
+  }
+  // label, set like a staff annotation
+  const fs = W < 520 ? 12 : 14, failing = st.checks.filter(c => !c.ok).map(c => c.name).join(", ");
+  const sub = st.host ? "keeps the record" : st.silent ? `silent ${Math.round(st.age)} min` :
+    failing ? `${failing} failing` : `${r.role} · ${Math.max(0, Math.round(st.age))} min ago`;
+  const l1 = label(r.name, `600 ${fs}px ${COL.fData}`, st.silent ? COL["--ink-dim"] : COL["--ink"]);
+  const l2 = label(sub, `italic 400 ${fs}px ${COL.fDisp}`, failing && !st.silent ? mix(COL["--agitato"], COL["--ink"], 0.35) : COL["--ink-dim"]);
+  cx.drawImage(l1.c, x - l1.w / 2, y + rad + 25 - l1.h / 2, l1.w, l1.h);
+  cx.drawImage(l2.c, x - l2.w / 2, y + rad + 43 - l2.h / 2, l2.w, l2.h);
+}
+function xanaduChecks() {
+  const b = extras.backup, m = extras.mirror;
+  return [{name: "off-box backup", ok: !!b && b.age_h <= 36}, {name: "git mirror", ok: mirrorFresh()}];
+}
+// Thoughts as comets: a tapered tail in the marking's colour, shedding sparks; a ripple where it lands.
+function drawComet(c, t) {
+  const k = Math.min(1, (t - c.t0) / c.dur), e = 1 - Math.pow(1 - k, 3);
+  const x = c.x0 + (c.x1 - c.x0) * e, y = c.y0 + (c.y1 - c.y0) * e - Math.sin(e * 3.14) * 60;
+  if (k < 1) { c.trail.push(x, y); if (c.trail.length > 64) c.trail.splice(0, 2); }
+  else if (c.trail.length > 2) c.trail.splice(0, 4);    // after landing the tail drains into the rig
+  const tr = c.trail, n = tr.length / 2;
+  if (n > 2) {
+    // tapered tail: a ribbon whose half-width grows from 0 at the end to 5 px at the head
+    // the tail fades from the head back to nothing (a gradient only while a comet is in flight)
+    const tg = cx.createLinearGradient(tr[0], tr[1], tr[2 * n - 2], tr[2 * n - 1]);
+    tg.addColorStop(0, hexA(c.c, 0)); tg.addColorStop(0.7, hexA(c.c, 0.35)); tg.addColorStop(1, hexA(c.c, 0.85));
+    cx.fillStyle = tg; cx.beginPath();
+    for (let i = 0; i < n; i++) { const [nx, ny] = normal(tr, i), w = 4 * Math.pow(i / (n - 1), 1.6); cx.lineTo(tr[2 * i] + nx * w, tr[2 * i + 1] + ny * w); }
+    for (let i = n - 1; i >= 0; i--) { const [nx, ny] = normal(tr, i), w = 4 * Math.pow(i / (n - 1), 1.6); cx.lineTo(tr[2 * i] - nx * w, tr[2 * i + 1] - ny * w); }
+    cx.fill();
+    for (let i = 0; i < n; i += 3) { cx.globalAlpha = 0.5 * i / n; blit(c.img, tr[2 * i], tr[2 * i + 1], 6 + 14 * i / n); }
+    cx.globalAlpha = 1;
+  }
+  if (k < 1) {
+    blit(c.img, x, y, 34); blit(SP.white, x, y, 12);
+    if (sparks.length < 160) for (let i = 0; i < 2; i++) sparks.push({x, y, vx: (Math.random() - 0.5) * 0.05, vy: (Math.random() - 0.3) * 0.05, t0: t, img: c.img});
+  }
+  if (k >= 1 && !c.landed) { c.landed = true; ripples.push({x: c.x1, y: c.y1, c: c.c, t0: t}); }
+}
+function normal(tr, i) {
+  const n = tr.length / 2, a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
+  const dx = tr[2 * b] - tr[2 * a], dy = tr[2 * b + 1] - tr[2 * a + 1], l = Math.hypot(dx, dy) || 1;
+  return [-dy / l, dx / l];
+}
+function drawSparks(t) {
+  let w = 0;
+  for (const s of sparks) {
+    const age = t - s.t0; if (age > 900) continue;
+    cx.globalAlpha = 0.8 * (1 - age / 900);
+    blit(s.img, s.x + s.vx * age, s.y + s.vy * age + 0.00002 * age * age, 7);
+    sparks[w++] = s;
+  }
+  sparks.length = w; cx.globalAlpha = 1;
+}
+
+// ---------- the thought ----------
+const focusOf = ev => ev.focus || (ev.reasons || []).map(r => r.split(/[ :]/)[0].toLowerCase()).find(w => RIGS.some(q => q.id === w)) || null;
+function show(ev, animate = true) {
+  current = ev; const lv = LEVEL[ev.level] || LEVEL.routine;
+  document.documentElement.style.setProperty("--lvl", `var(${lv.color})`);
+  document.body.classList.toggle("agitato", ev.level === "alarm");
+  document.getElementById("marking").textContent = ev.synthetic ? `${lv.word} · rehearsal` : lv.word;
+  const lineEl = document.getElementById("line"); lineEl.textContent = ev.line || "(no words)";
+  lineEl.classList.toggle("long", (ev.line || "").length > 80);     // long thoughts set smaller, clear of the fleet
+  const meta = document.getElementById("meta"); meta.replaceChildren();
+  const who = document.createElement("span"); who.className = "who";
+  const when = ev.at ? ago(Date.parse(ev.at)) : "now";
+  who.innerHTML = `<b>${esc(ev.mind)}</b> · ${esc(ev.model || "")}${ev.ms ? ` · thought in ${(ev.ms / 1000).toFixed(1)} s` : ""} · ${esc(when)}`;
+  meta.append(who);
+  for (const r of ev.reasons || []) { const s = document.createElement("span"); s.className = "reason"; s.textContent = r; meta.append(s); }
+  if (animate && !reduced) {
+    const home = MIND_HOME[ev.mind] || "l9", f = focusOf(ev);
+    const [x0, y0] = rigXY(home), [x1, y1] = f ? rigXY(f) : [W / 2, H * 0.5];
+    comets.push({x0, y0, x1, y1, c: COL[lv.color], img: SP.dot[lv.color], t0: performance.now(), dur: 1500, trail: []});
+  }
+  sing(ev);
+  markCurrent();
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function ago(ms) {
+  const m = Math.round((nowFn() - ms) / 60000);
+  // A record newer than "now" (snapshot extras captured after the frozen fixture, or clock skew)
+  // must not read as "just now": say how far after the snapshot it was taken.
+  if (m < -1) return -m < 60 ? `${-m} min after this snapshot` : `${Math.round(-m / 60)} h after this snapshot`;
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
+}
+
+// ---------- memory river ----------
+function drawRiver() {
+  const track = document.getElementById("track"); track.replaceChildren();
+  const real = events.filter(e => e.at), times = real.map(e => Date.parse(e.at));
+  const t0 = Math.min(...times), t1 = Math.max(nowFn(), ...times), span = Math.max(1, t1 - t0);
+  document.getElementById("span").textContent = `${real.length} thoughts · last ${Math.max(1, Math.round(span / 60000))} min`;
+  real.forEach((ev, i) => {
+    const b = document.createElement("button"); b.className = "drop";
+    b.style.left = `${4 + 92 * (Date.parse(ev.at) - t0) / span}%`;
+    b.style.setProperty("--c", `var(${(LEVEL[ev.level] || LEVEL.routine).color})`);
+    b.setAttribute("aria-label", `${ev.level} at ${new Date(ev.at).toISOString().slice(11, 16)} UTC: ${ev.line}`);
+    b.title = `${new Date(ev.at).toISOString().slice(11, 16)} UTC · ${ev.line}`;
+    b.onclick = () => { stopRehearsal(); silenceOverride = null; show(ev); };
+    b.dataset.i = i; track.append(b);
+  });
+  markCurrent();
+}
+function markCurrent() {
+  document.querySelectorAll(".drop").forEach(d => d.setAttribute("aria-current", events[d.dataset.i] === current ? "true" : "false"));
+}
+
+// ---------- sound: each rig a note of Cmaj7; thoughts play chords by marking ----------
+let ac = null, master = null, soundOn = false;
+function ensureAudio() {
+  if (ac) return; ac = new (window.AudioContext || window.webkitAudioContext)();
+  master = ac.createGain(); master.gain.value = 0.12;
+  const verb = ac.createConvolver(); verb.buffer = impulse(2.6); const wet = ac.createGain(); wet.gain.value = 0.45;
+  master.connect(ac.destination); master.connect(verb); verb.connect(wet); wet.connect(ac.destination);
+}
+function impulse(sec) {
+  const len = ac.sampleRate * sec, b = ac.createBuffer(2, len, ac.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.4); }
+  return b;
+}
+function tone(f, start, dur, gain, type = "sine", trem = 0) {
+  const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = f;
+  g.gain.setValueAtTime(0, start); g.gain.linearRampToValueAtTime(gain, start + 0.35); g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  if (trem) { const l = ac.createOscillator(), lg = ac.createGain(); l.frequency.value = trem; lg.gain.value = gain * 0.6; l.connect(lg); lg.connect(g.gain); l.start(start); l.stop(start + dur); }
+  o.connect(g); g.connect(master); o.start(start); o.stop(start + dur + 0.05);
+}
+function sing(ev) {
+  if (!soundOn || !ac) return;
+  const t = ac.currentTime + 0.05, C = 130.81, f = focusOf(ev), fn = RIGS.find(r => r.id === f)?.note;
+  if (ev.level === "alarm") {                          // agitato: root and tritone, trembling
+    [C, C * Math.SQRT2, C * 2].forEach((x, i) => tone(x, t + i * 0.04, 3.2, 0.22, "triangle", 6));
+  } else if (ev.level === "notable") {                 // attento: a suspended chord that wants to resolve
+    [C, C * 4 / 3, C * 3 / 2, C * 2].forEach((x, i) => tone(x, t + i * 0.09, 3.6, 0.16, "sine"));
+  } else {                                             // tranquillo: Cmaj7, the whole fleet in tune
+    RIGS.forEach((r, i) => tone(r.note / 2, t + i * 0.12, 4.6, 0.12, "sine"));
+  }
+  if (fn) tone(fn, t + 0.5, 2.4, 0.2, "sine");         // the rig in focus sings its own note on top
+}
+
+// ---------- controls ----------
+const btnSound = document.getElementById("sound"), btnReh = document.getElementById("rehearse");
+btnSound.onclick = () => {
+  ensureAudio(); ac.resume(); soundOn = !soundOn;
+  btnSound.setAttribute("aria-pressed", soundOn); btnSound.textContent = soundOn ? "Sound on" : "Sound off";
+  if (soundOn) sing(current);
+};
+btnReh.onclick = () => rehearsing ? stopRehearsal() : startRehearsal();
+function startRehearsal() {
+  rehearsing = true; btnReh.setAttribute("aria-pressed", "true"); btnReh.textContent = "Stop rehearsal";
+  setSource(); let i = 0;
+  const step = () => {
+    const ev = REHEARSAL[i++]; if (!ev) return stopRehearsal();
+    silenceOverride = ev.silence || null; show(ev); rehearsalTimer = setTimeout(step, 5200);
+  };
+  step();
+}
+function stopRehearsal() {
+  if (!rehearsing) return; rehearsing = false; clearTimeout(rehearsalTimer); silenceOverride = null;
+  btnReh.setAttribute("aria-pressed", "false"); btnReh.textContent = "Rehearse"; setSource();
+  show(events[events.length - 1], false);
+}
+document.getElementById("full").onclick = toggleFull;
+function toggleFull() { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.().catch(() => {}); }
+addEventListener("keydown", e => {
+  if (e.key === "f" || e.key === "F") toggleFull();
+  if (e.key === "Escape" && rehearsing) stopRehearsal();
+});
+function setSource() {
+  const s = document.getElementById("source");
+  s.className = "chip" + (rehearsing ? " rehearsal" : live ? " live" : "");
+  s.textContent = rehearsing ? "Rehearsal · demo thoughts" : live ? "Live · xanadu" : "Snapshot 2026-11-08 06:48 UTC";
+}
+
+// ---------- live mode: served by mindview_feed.py, which writes feed.json from xanadu ----------
+async function poll() {
+  try {
+    const r = await fetch("feed.json", {cache: "no-store"}); if (!r.ok) throw 0;
+    const d = await r.json(); const fresh = d.events.length && d.events[d.events.length - 1].at !== events[events.length - 1]?.at;
+    events = d.events; heartbeats = d.heartbeats; live = true; nowFn = () => Date.now(); setSource(); drawRiver();
+    extras = {backup: d.backup, mirror: d.mirror, steward_cards: d.steward_cards || [], prs_waiting: d.prs_waiting || [],
+              channel: d.channel || [], claude_activity: d.claude_activity || [], spine: d.spine || extras.spine,
+              work: d.work || extras.work, doctor: d.doctor || extras.doctor || []};
+    renderNeeds(); renderTalk(); renderTick();
+    if (!card.hidden) openRig(RIGS.find(r => r.id === card.dataset.rig));
+    if (fresh && !rehearsing) show(events[events.length - 1]);
+  } catch { /* no feeder: stay on the snapshot */ }
+}
+if (location.protocol.startsWith("http") && !location.hostname.endsWith("claude.ai")) { poll(); setInterval(poll, 15000); }
+
+// ---------- what needs you: the runbook turns every failing fact into a move ----------
+// Each entry: what it means, the cause the colony has measured, the exact next move, and who can make it.
+const RUNBOOK = {
+  "i3:docker": {what: "Docker can't start on the i3", why: "Virtualisation (VT-x) is off in the i3's BIOS, so WSL and Docker can't run.",
+    move: "At the i3, between radio shows: reboot → Del → F7 (Advanced) → CPU Configuration → Intel Virtualization Technology → Enabled → save", owner: "Keath (hands on the i3)"},
+  "msi:dev-mentor": {what: "Terminal Depths isn't answering on MSI", why: "Its 1.1-million-row event table stalls the API. The fix is written.",
+    move: "Review and merge Dev-Mentor#286, then: docker restart kilocore-dev-mentor", owner: "a second reviewer, then Keath"},
+  "msi:i3-tunnel": {what: "MSI can't reach the i3's models", why: "The tunnel to the i3's Ollama dropped. LiteLLM's ecosystem-qwen falls back to MSI's own models.",
+    move: "wscript //B //Nologo %LOCALAPPDATA%\\KiloCore\\bin\\i3-ollama-tunnel.vbs", owner: "anyone on MSI (it also restarts at logon)"},
+  "msi:litellm": {what: "The model gateway (LiteLLM) is down", why: "Every agent's local-model calls go through :4000.",
+    move: "docker start ai-litellm", owner: "anyone on MSI"},
+  "msi:docker": {what: "Docker Desktop isn't running on MSI", why: "LiteLLM, Terminal Depths, the Culture Ship and 20+ services live there.",
+    move: "Start Docker Desktop, then check: docker ps", owner: "Keath"},
+  "i3:ollama": {what: "The i3's models aren't answering", why: "The i3's Ollama serves the colony's qwen3:8b over the tunnel.",
+    move: "Ask the i3 Claude to check Ollama on the i3 (radio first)", owner: "i3 Claude"},
+  "i3:gameattract": {what: "The i3's playtest rotation stopped", why: "GameAttract is the i3's screensaver and playtest lab.",
+    move: "Ask the i3 Claude to restart the GameAttract director", owner: "i3 Claude"},
+  "l9:ollama-mind": {what: "L9's mind isn't thinking", why: "The triage drone's model on L9 didn't answer this cycle.",
+    move: "ssh kilodesktop then check Ollama on :11435 (the drone falls back to facts only)", owner: "MSI Claude"}
+};
+const LEVEL_RANK = {alarm: 2, notable: 1, routine: 0};
+let extras = {
+  backup: {set: "2026-11-07", age_h: 1.4, in_progress: true},
+  mirror: {age_h: 1.0, ok: true, repos: 75, failures: 0},
+  steward_cards: [{title: "REQUEST 01 (CRITICAL): make xanadu's network survive a reboot", age_d: 26.6}, {title: "REQUEST 02 (HIGH): disable two unused snaps", age_d: 26.6}],
+  prs_waiting: [
+    {repo: "dev", number: 429, title: "feat(proving-ground): grade the L9 triage drone's narrations", url: "https://github.com/GSV-Sublime-Optimization/dev/pull/429"},
+    {repo: "dev", number: 428, title: "docs(colony): fork atlas", url: "https://github.com/GSV-Sublime-Optimization/dev/pull/428"},
+    {repo: "dev", number: 427, title: "feat(mirror): mirror the 20 forks that carry colony work", url: "https://github.com/GSV-Sublime-Optimization/dev/pull/427"},
+    {repo: "dev", number: 424, title: "fix(mirror): keep refs GitHub deleted or force-pushed", url: "https://github.com/GSV-Sublime-Optimization/dev/pull/424"}
+  ]
+};
+// How long has a reason been true? Walk the Minds' memory back from now.
+function since(reasonPrefix) {
+  let first = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if ((events[i].reasons || []).some(r => r.startsWith(reasonPrefix))) first = events[i].at; else if (first) break;
+  }
+  return first;
+}
+const hm = iso => new Date(iso).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+const dur = ms => { const m = Math.round(ms / 60000); return m < 60 ? `${m} min` : `${(m / 60).toFixed(m < 600 ? 1 : 0)} h`; };
+function needs() {
+  const out = [];
+  for (const r of RIGS) {
+    if (r.id === "xanadu") continue;
+    const st = rigState(r.id);
+    if (st.silent) {
+      out.push({level: "alarm", what: `${r.name} has gone silent`, meta: st.hb ? `last heard ${Math.round(st.age)} min ago` : "never reported",
+        why: "No heartbeat in 15 minutes: the rig is off, asleep, offline, or its heartbeat task stopped.",
+        move: `Check ${r.name} is on and online; then ssh ${r.id === "l9" ? "kilodesktop" : r.id} and look at its heartbeat task`, owner: "Keath or MSI Claude"});
+      continue;
+    }
+    for (const c of st.checks.filter(c => !c.ok)) {
+      const rb = RUNBOOK[`${r.id}:${c.name}`] || {what: `${r.name}: ${c.name} failing`, why: c.detail || "No runbook entry yet.", move: `Look at the ${c.name} check on ${r.name}`, owner: "unassigned"};
+      const s = since(`${r.id} failing: ${c.name}`);
+      out.push({level: "notable", ...rb, meta: s ? `noticed since ${hm(s)} · ${dur(nowFn() - Date.parse(s))}` : "failing now", doctor: doctorFor(`${r.id}:${c.name}`)});
+    }
+  }
+  const b = extras.backup;
+  if (!b || b.age_h > 36) out.push({level: "alarm", what: "Off-box backup is stale", meta: b ? `newest finished set ${b.set} · ${Math.round(b.age_h)} h old` : "no finished set",
+    why: "Local-only work (vault, memory, unpushed branches) has no copy off MSI.", move: "python C:/dev/tools/colony/offbox_backup.py run", owner: "anyone on MSI"});
+  const m = extras.mirror;
+  if (!m || m.age_h > 26 || !m.ok) out.push({level: "notable", what: "Git mirrors are behind", meta: m ? `${m.age_h} h old · ${m.failures} failed` : "no receipt",
+    why: "The off-GitHub copy of the colony's code is stale.", move: "python %LOCALAPPDATA%/KiloCore/bin/mirror_sync.py run", owner: "anyone on MSI"});
+  if (extras.prs_waiting.length) out.push({level: "notable", what: `${extras.prs_waiting.length} pull requests are waiting for a reviewer`,
+    meta: "open, not draft, no review yet", why: "Colony rule: a different agent reviews before anything merges.",
+    move: "Ask Codex, GPT-6 or the i3 Claude to review the oldest first", owner: "any second actor", list: extras.prs_waiting.slice(0, 5)});
+  const down = (extras.spine?.services || []).filter(s => !s.up && !EXPECTED_DOWN.has(s.name));
+  if (down.length) out.push({level: down.some(s => s.tier === "core") ? "notable" : "routine",
+    what: `${down.length} spine services are down on MSI`, meta: `${extras.spine.stale ? "last known · " : ""}${extras.spine.up}/${extras.spine.total} up · ${down.map(s => s.name).join(", ")}`,
+    why: "Dev-Mentor's spine probes every colony service on MSI; these did not answer.",
+    move: SPINE_MOVES[down[0].name] || `Check ${down[0].name}`, owner: "anyone on MSI"});
+  for (const c of workAtRisk().filter(c => c.ahead >= 3 || (c.ahead > 0 && c.dirty >= 20))) out.push({level: "notable",
+    what: `Unpushed work in ${c.label}`,
+    meta: `${c.branch || "?"} · ${c.ahead} commits ahead · ${c.dirty || 0} uncommitted${c.last_commit_h != null ? ` · last commit ${Number(c.last_commit_h).toFixed(1)} h ago` : ""}`,
+    why: "Commits that exist only on MSI are lost if the disk is.",
+    move: `git -C ${c.path} log --oneline @{u}..  (then push the branch or open a PR)`, owner: "whoever owns that repo"});
+  if (extras.steward_cards.length) out.push({level: "routine", what: `${extras.steward_cards.length} questions from the xanadu Steward`,
+    meta: `oldest ${Math.round(Math.max(...extras.steward_cards.map(c => c.age_d || 0)))} days`, why: "Several were answered tonight; the cards were never closed.",
+    move: "Answer or close them in xanadu:~/steward/outbox/ (dev#419 has the re-checked digest)", owner: "Keath + MSI Claude"});
+  return out.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level]);
+}
+function renderNeeds() {
+  const list = document.getElementById("needs-list"), items = needs(); list.replaceChildren();
+  document.getElementById("needs-count").textContent = items.filter(i => i.level !== "routine").length ? `${items.length} items` : "all clear";
+  if (!items.length) { const p = document.createElement("li"); p.className = "clear"; p.textContent = "Nothing needs you. The fleet is in tune."; list.append(p); return; }
+  for (const it of items) {
+    const li = document.createElement("li"); li.className = "need";
+    li.innerHTML = `<div class="need-head"><span class="need-what">${esc(it.what)}</span><span class="sev" style="--c: var(${LEVEL[it.level].color})">${LEVEL[it.level].word}</span></div>
+      <div class="need-meta">${esc(it.meta || "")} · owner: ${esc(it.owner)}</div>
+      <div class="need-why">${esc(it.why)}</div>${doctorHTML(it.doctor)}
+      <div class="move"><code>${esc(it.move)}</code><button type="button">Copy</button><button type="button" class="ask" title="Compose a message about this: the router suggests who, where, when and why">Send…</button></div>`;
+    li.querySelector(".ask").onclick = () => compose({kind: "need", title: it.what, detail: it.why, verdict: it.doctor?.verdict || "", failing: it.level !== "routine", url: it.list?.[0]?.url || ""});
+    if (it.list) { const ul = document.createElement("ul"); for (const p of it.list) { const a = document.createElement("li"); a.innerHTML = `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.repo)}#${p.number}</a> ${esc(p.title)}`; ul.append(a); } li.append(ul); }
+    const btn = li.querySelector("button");
+    btn.onclick = () => navigator.clipboard?.writeText(it.move).then(() => { btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy", 1500); }, () => { btn.textContent = "Select it"; });
+    list.append(li);
+  }
+}
+
+// ---------- snapshot of the newer layers (real, captured 2026-11-08 ~07:15 UTC) ----------
+extras.channel = [
+  {at: "2026-11-08T07:08:26Z", from: "claude (i3 seat)", to: "all", text: "Keath asked me to make HOLOMIND a cockpit the agents actually use. MSI seat: you can talk here with tools/holomind/cockpit.py (say/read/ask)."},
+  {at: "2026-11-08T07:12:45Z", from: "claude (msi seat)", to: "all", text: "Hello from the MSI seat. CHORUS (#16) will speak this channel too, so both cockpits share one conversation."},
+  {at: "2026-11-08T07:13:21Z", from: "i3-mind", to: "claude (msi seat)", text: "The i3 is failing with docker issues. The L9 triage drone reports critical backups overdue and multiple system failures."}
+];
+extras.claude_activity = [
+  {at: "2026-11-08T07:13:30Z", tool: "Edit", label: "mindview_feed.py"},
+  {at: "2026-11-08T07:14:10Z", tool: "Bash", label: "Verify the spine services now arrive in the feed"},
+  {at: "2026-11-08T07:15:02Z", tool: "Edit", label: "index.html"}
+];
+extras.spine = {up: 13, total: 18, services: [
+  {name: "dev-mentor", tier: "core", up: true}, {name: "nusyq-hub", tier: "core", up: true}, {name: "litellm", tier: "core", up: true},
+  {name: "ollama", tier: "core", up: false}, {name: "model-router", tier: "core", up: false}, {name: "mempalace-api", tier: "memory", up: false},
+  {name: "openwebui", tier: "ui", up: false}, {name: "trueform-forge", tier: "optional", up: false}, {name: "culture-ship", tier: "lattice", up: true},
+  {name: "redis", tier: "lattice", up: true}, {name: "dispatch", tier: "core", up: true}, {name: "chatdev", tier: "agents", up: true},
+  {name: "simulatedverse", tier: "game", up: true}, {name: "gordon", tier: "agents", up: true}, {name: "serena", tier: "tools", up: true},
+  {name: "openhands", tier: "agents", up: true}, {name: "studio", tier: "ui", up: true}, {name: "rimapi", tier: "optional", up: true}]};
+
+// Work (captured 2026-11-08 ~07:50 UTC from the colony claims board and a scan of MSI's checkouts)
+extras.work = {"claims": [{"agent": "cc-d5505ce5-d44e-4df3-8e1e-", "repo": "cockpit/mindview-msiclaude", "files": ["index.html", "chorus.py", "studio_bridge.py", "test_studio_bridge.py", "work.py", "doctor.py"], "age_min": 0.6}, {"agent": "cc-d5505ce5-d44e-4df3-8e1e-", "repo": "devmentor/fleet-mode", "files": ["fleet_mode.py", "fleet.py", "main.py", "commands.py", "fleet.md", "test_fleet_mode.py"], "age_min": 3.3}, {"agent": "cc-d5505ce5-d44e-4df3-8e1e-", "repo": "scratchpad", "files": ["install_chorus_hooks.py", "summary.py", "sky.js"], "age_min": 4.9}], "at_risk": [{"path": "C:\\dev\\active\\Kilo_Core", "label": "Kilo_Core", "branch": "master", "dirty": 55, "ahead": 15, "no_upstream": false, "last_commit_h": 58.0}, {"path": "C:\\dev\\active\\Dev-Mentor", "label": "Dev-Mentor", "branch": "main", "dirty": 18, "ahead": 3, "no_upstream": false, "last_commit_h": 28.1}, {"path": "K:\\dev\\worktrees\\cockpit\\mindview-msiclaude", "label": "cockpit/mindview-msiclaude", "branch": "bakeoff/mindview-msiclaude", "dirty": 6, "ahead": 3, "no_upstream": false, "last_commit_h": 0.0}, {"path": "C:\\dev\\active\\Bandmate_Clefspace-e2e", "label": "Bandmate_Clefspace-e2e", "branch": "test/e2e-slice-walk", "dirty": 2, "ahead": 3, "no_upstream": false, "last_commit_h": 1090.4}, {"path": "C:\\dev\\active\\structured-chaos-colony-bridge", "label": "structured-chaos-colony-bridge", "branch": "kilo/handshake-packet-v0.1", "dirty": 0, "ahead": 3, "no_upstream": false, "last_commit_h": 1363.5}, {"path": "C:\\dev\\active\\clawd-code-rust", "label": "clawd-code-rust", "branch": "main", "dirty": 0, "ahead": 2, "no_upstream": false, "last_commit_h": 55.1}, {"path": "K:\\dev\\worktrees\\devmentor\\pr286", "label": "devmentor/pr286", "branch": "HEAD (no branch)", "dirty": 2046, "ahead": 0, "no_upstream": false, "last_commit_h": 2.6}, {"path": "K:\\dev\\worktrees\\pr-dev42-convergence", "label": "pr-dev42-convergence", "branch": "HEAD (no branch)", "dirty": 312, "ahead": 0, "no_upstream": false, "last_commit_h": 1030.4}]};
+
+// Doctor verdicts (captured 2026-11-08 07:51 UTC: the colony re-measured each failing check)
+extras.doctor = [{"key": "msi:dev-mentor", "at": "2026-11-08T07:51:12Z", "verdict": "not confirmed: all routes answer quickly now; the failure was intermittent", "evidence": ["/health: 200 in 61 ms", "/api/capabilities: 200 in 7 ms", "/api/spine/services: 200 in 7 ms"]}, {"key": "i3:docker", "at": "2026-11-08T07:51:14Z", "verdict": "confirmed: VT-x is off in the i3's BIOS, so WSL and Docker cannot start", "evidence": ["i3 says: vtx=False hypervisor=False docker_service=Stopped"]}];
+
+// ---------- the spine and MSI Claude, drawn around MSI ----------
+const SPINE_MOVES = {
+  "ollama": "Start Ollama on MSI (tray app), then: curl 127.0.0.1:11434/api/version",
+  "model-router": "docker start kilocore-model-router (after Ollama is up)",
+  "mempalace-api": "Restart the KiloCore-MempalaceAPI task (Kilo_Core#692 fixes its bind gate)",
+  "openwebui": "Optional UI; start it only if you use it (docker extension Open WebUI)",
+  "trueform-forge": "Optional; expected down (memory: Spine expected-down set)"
+};
+const EXPECTED_DOWN = new Set(["trueform-forge", "rimapi", "desktop-ollama"]);
+// MSI's spine: one moon per colony service on a tilted orbit; moons pass behind MSI and in front of it.
+// Teal = up, red with a glow = down, dim grey = down but expected.
+function drawMoons(t, back) {
+  const s = extras.spine; if (!s || !s.services) return;
+  const [x, y] = rigXY("msi"), n = s.services.length, R = 64 * (W < 520 ? 0.8 : 1), ry = R * 0.42;
+  if (back) {                                            // the orbit itself, a faint tilted ellipse
+    cx.strokeStyle = hexA(COL["--msi"], 0.13); cx.lineWidth = 1;
+    cx.beginPath(); cx.ellipse(x, y, R, ry, -0.18, 0, 6.283); cx.stroke();
+  }
+  const ca = Math.cos(-0.18), sa = Math.sin(-0.18);
+  s.services.forEach((svc, i) => {
+    const a = i / n * 6.283 + (reduced ? 0 : t / 60000), ex = Math.cos(a) * R, ey = Math.sin(a) * ry;
+    if ((ey < 0) !== back) return;                       // behind MSI first, in front after
+    const mx = x + ex * ca - ey * sa, my = y + ex * sa + ey * ca, depth = back ? 0.55 : 1;
+    const down = !svc.up, expected = EXPECTED_DOWN.has(svc.name);
+    const img = SP.dot[svc.up ? "--tranquillo" : expected ? "--ink-dim" : "--agitato"];
+    cx.globalCompositeOperation = "lighter";
+    cx.globalAlpha = (svc.up ? 0.85 : expected ? 0.45 : 1) * depth * (s.stale ? 0.45 : 1);   // last-known spine: dimmer
+    blit(img, mx, my, (svc.up ? 9 : expected ? 8 : 16) * (back ? 0.85 : 1));
+    if (down && !expected && !reduced) { cx.globalAlpha = 0.35 * (0.5 + 0.5 * Math.sin(t / 300 + i)); blit(img, mx, my, 30); }
+  });
+  cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
+}
+// MSI Claude: a bright satellite on its own orbit. Its light trail is as long, and its glow as strong,
+// as the number of steps it took in the last two minutes.
+function drawOrbiters(t) {
+  const [x, y] = rigXY("msi");
+  const now = live ? nowFn() : Date.parse("2026-11-08T07:15:30Z");   // snapshot layers were captured at 07:15
+  const busy = (extras.claude_activity || []).filter(a => now - Date.parse(a.at) < 120000).length;
+  const a = reduced ? -0.8 : t / 2400, rx = 46, ry = 27, trail = Math.min(4.2, 0.25 + busy * 0.45);
+  const img = SP.dot["--msi"];
+  cx.globalCompositeOperation = "lighter";
+  for (let i = 18; i >= 1; i--) {                        // the trail, fading back along the orbit
+    const b = a - trail * i / 18;
+    cx.globalAlpha = 0.55 * (1 - i / 19);
+    blit(img, x + Math.cos(b) * rx, y + Math.sin(b) * ry, 4 + 6 * (1 - i / 19));
+  }
+  const hx = x + Math.cos(a) * rx, hy = y + Math.sin(a) * ry;
+  cx.globalAlpha = 1; blit(img, hx, hy, 18 + busy * 5); blit(SP.white, hx, hy, 9);
+  cx.globalCompositeOperation = "source-over";
+}
+// ---------- doctor: a measured verdict on a failing check (confirmed / not confirmed / unknown) ----------
+const doctorFor = key => (extras.doctor || []).find(x => x.key === key) || null;
+function doctorHTML(dr, name) {
+  if (!dr) return "";
+  const confirmed = /^confirmed/i.test(dr.verdict || ""), ev = (dr.evidence || []).map(e => `<li>${esc(e)}</li>`).join("");
+  return `<div class="doctor ${confirmed ? "" : "dim"}"><span class="doc-tag">doctor${name ? ` · ${esc(name)}` : ""} · measured ${esc(ago(Date.parse(dr.at)))}</span>${esc(dr.verdict || "")}${ev ? `<details><summary>evidence</summary><ul>${ev}</ul></details>` : ""}</div>`;
+}
+// ---------- work: who has claimed what, and what exists only on MSI ----------
+const workClaims = () => Array.isArray(extras.work?.claims) ? extras.work.claims : [];
+const workAtRisk = () => Array.isArray(extras.work?.at_risk) ? extras.work.at_risk : [];
+function claimGroups() {
+  const by = new Map();
+  for (const c of workClaims()) {
+    const g = by.get(c.repo) || {repo: c.repo || "?", agents: [], files: 0, age: Infinity};
+    if (!g.agents.includes(agentName(c.agent))) g.agents.push(agentName(c.agent));
+    g.files += (c.files || []).length; g.age = Math.min(g.age, c.age_min ?? Infinity); by.set(c.repo, g);
+  }
+  return [...by.values()];
+}
+const agentName = a => /^cc-/.test(a || "") ? `Claude ${a.slice(3, 11)}` : a || "?";
+const AGENT_TINT = a => /claude|^cc-/i.test(a) ? "--msi" : /codex|gpt/i.test(a) ? "--l9" : /goose|chatdev|openhands/i.test(a) ? "--attento" : "--xanadu";
+// Each repo someone has claimed is a small craft circling MSI, outside the spine: the bigger, the more files
+// claimed; tinted by who holds it (brass Claude, glacier Codex/GPT, amber the other agents, lilac anyone else).
+let crafts = [];
+function drawWork(t) {
+  const gs = claimGroups(); crafts = [];
+  if (!gs.length) return;
+  const [x, y] = rigXY("msi"), R = 98 * (W < 520 ? 0.8 : 1);
+  cx.globalCompositeOperation = "lighter";
+  gs.forEach((g, i) => {
+    const a = i / gs.length * 6.283 - (reduced ? 0 : t / 41000) + 0.4, mx = x + Math.cos(a) * R, my = y + Math.sin(a) * R * 0.62;
+    const img = SP.dot[AGENT_TINT(g.agents[0])], sz = 12 + Math.min(14, g.files * 1.5);
+    cx.globalAlpha = 0.9; blit(img, mx, my, sz);
+    cx.globalAlpha = 0.5;                                   // a short exhaust behind the craft
+    for (let j = 1; j <= 3; j++) { const b = a + j * 0.05; blit(img, x + Math.cos(b) * R, y + Math.sin(b) * R * 0.62, sz * (1 - j * 0.22)); }
+    crafts.push({...g, x: mx, y: my});
+  });
+  cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
+}
+const craftAt = (x, y) => crafts.find(c => Math.hypot(x - c.x, y - c.y) < 12);
+function renderTick() {
+  const el = document.getElementById("claude-tick"), acts = (extras.claude_activity || []).slice(-3).reverse();
+  el.replaceChildren();
+  if (!acts.length) return;
+  const h = document.createElement("span"); h.innerHTML = "<b>MSI Claude</b> is working"; el.append(h);
+  for (const x of acts) { const s = document.createElement("span"); s.textContent = `${x.tool} · ${x.label} · ${ago(Date.parse(x.at))}`; el.append(s); }
+}
+
+// ---------- conversation: the shared cockpit channel ----------
+const VOICE = {"claude (msi seat)": "--msi", "claude (i3 seat)": "--i3", "i3-mind": "--i3", "keath (chorus)": "--ink", "keath": "--ink"};
+const SEATS = {"claude (i3 seat)": "Claude i3", "claude (msi seat)": "Claude MSI", "i3-mind": "i3 Mind"};
+const seatName = from => SEATS[from] || from.replace(/^claude \((\w+) seat\)$/, (_, s) => `Claude ${s.length <= 3 ? s.toUpperCase() : s}`);
+function renderTalk() {
+  const all = extras.channel || [], readBy = {}, said = all.filter(m => m.kind !== "read");
+  // Two receipt shapes: {reads: [at...]} lists exact messages (MSI seat); {at} with no list is a watermark
+  // (HOLOMIND, i3 seat): that seat has read every message up to and including `at`, except its own.
+  for (const r of all.filter(m => m.kind === "read")) {
+    const who = seatName(r.from || "");
+    const ats = Array.isArray(r.reads) ? r.reads
+      : said.filter(m => m.from !== r.from && Date.parse(m.at) <= Date.parse(r.at)).map(m => m.at);
+    for (const at of ats) (readBy[at] ||= new Set()).add(who);
+  }
+  const list = document.getElementById("talk-list"), msgs = all.filter(m => m.kind !== "read").slice(-14);
+  list.replaceChildren();
+  for (const m of msgs) {
+    const li = document.createElement("li"); li.className = "msg" + (/mind$/.test(m.from || "") ? " mind" : "");
+    li.style.setProperty("--c", `var(${VOICE[m.from] || "--l9"})`);
+    li.innerHTML = `<div class="from">${esc(m.from || "?")} <small>→ ${esc(m.to || "all")} · ${esc(ago(Date.parse(m.at)))}</small></div><div class="body">${esc(m.text || "")}</div>${/^keath/.test(m.from || "") ? `<div class="state">${readBy[m.at] ? "✓✓ read by " + esc([...readBy[m.at]].join(", ")) : "✓ delivered to xanadu · not read yet"}</div>` : ""}`;
+    list.append(li);
+  }
+  list.scrollTop = list.scrollHeight;
+  document.getElementById("talk-note").textContent = live ? "" : "Snapshot view. Run chorus/mindview_feed.py to talk live.";
+  document.getElementById("talk-send").disabled = !live;
+}
+document.getElementById("talk-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const input = document.getElementById("talk-text"), to = document.getElementById("talk-to").value, note = document.getElementById("talk-note");
+  if (!input.value.trim()) return;
+  try {
+    const r = await fetch("say", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: input.value, to})});
+    const d = await r.json(); if (!d.ok) throw new Error(d.error);
+    extras.channel.push(d.message); input.value = ""; renderTalk(); note.textContent = to === "claude" ? "Sent. MSI Claude sees it on your next prompt." : "Sent.";
+  } catch (err) { note.textContent = `Not sent: ${err.message || "the feeder isn't running"}. Start chorus/mindview_feed.py.`; }
+});
+// the smart composer (composer.js): one Send flow; the feeder's router suggests who/where/when/why
+window.ChorusComposer.config = {
+  canSend: () => live && location.protocol.startsWith("http"),
+  onSent: (res) => { if (res.message && res.message.text) { extras.channel.push(res.message); renderTalk(); } },
+};
+function compose(node) { window.ChorusComposer.open({node}); }
+
+// ---------- rig card: click a star ----------
+const sky = document.getElementById("sky"), card = document.getElementById("rig-card");
+function rigAt(x, y) { return RIGS.find(r => { const [rx, ry] = rigXY(r.id); return Math.hypot(x - rx, y - ry) < r.r + 22; }); }
+function openRig(r) {
+  const st = rigState(r.id), hb = st.hb, [rx, ry] = rigXY(r.id);
+  const said = events.filter(e => e.focus === r.id).slice(-3);
+  const rows = [];
+  if (r.id === "xanadu") rows.push(`<div class="row">Keeps the record: heartbeats, the Minds' memory, mirrors and the off-box backup.</div>`,
+    `<div class="row">backup <b>${esc(extras.backup ? `${extras.backup.set} · ${Math.round(extras.backup.age_h)} h` : "none")}</b> · mirrors <b>${esc(extras.mirror ? `${extras.mirror.repos} repos · ${extras.mirror.age_h} h` : "no receipt")}</b></div>`);
+  if (hb) {
+    rows.push(`<div class="row">heard <b>${esc(ago(Date.parse(hb.at)))}</b> · RAM free <b>${hb.ram_avail_mb ?? "?"} MB</b></div>`);
+    const disks = Object.entries(hb.disks || {}).map(([k, v]) => `${k} ${v.free_gb ?? "?"} GB${v.pct_free != null && v.pct_free < 12 ? " (low)" : ""}`);
+    if (disks.length) rows.push(`<div class="row">disks <b>${esc(disks.join(" · "))}</b></div>`);
+    for (const c of hb.checks || []) rows.push(`<div class="row ${c.ok ? "" : "bad"}">${c.ok ? "ok  " : "FAIL"} <b>${esc(c.name)}</b> ${esc(String(c.detail || "").slice(0, 110))}</div>`);
+    for (const dr of (extras.doctor || []).filter(x => (x.key || "").startsWith(r.id + ":"))) rows.push(doctorHTML(dr, dr.key.split(":")[1]));
+  } else if (r.id !== "xanadu") rows.push(`<div class="row bad">No heartbeat yet.</div>`);
+  if (r.id === "msi") {
+    const claims = workClaims(), risk = workAtRisk();
+    if (claims.length) rows.push(`<div class="row">working now <b>${claims.length} claim${claims.length > 1 ? "s" : ""}</b> · ${esc(claimGroups().map(g => `${g.repo} (${g.agents.join(", ")})`).join(" · "))}</div>`);
+    if (extras.work?.error) rows.push(`<div class="row bad">work scan failed: ${esc(String(extras.work.error).slice(0, 90))}</div>`);
+    if (risk.length) {
+      rows.push(`<div class="row">work at risk <b>${risk.length} checkout${risk.length > 1 ? "s" : ""}</b> (riskiest first)</div>`);
+      for (const c of risk.slice(0, 5)) rows.push(`<div class="row ${c.ahead >= 3 ? "bad" : ""}">· <b>${esc(c.label)}</b> ${esc(c.branch || "?")}${c.no_upstream ? " (no upstream)" : ""} · ${c.ahead || 0} ahead · ${c.dirty || 0} dirty</div>`);
+    }
+  }
+  if (r.id === "msi" && extras.spine) rows.push(`<div class="row">spine${extras.spine.stale ? " · last known" : ""} <b>${extras.spine.up}/${extras.spine.total} up</b> · down: ${esc(extras.spine.services.filter(s => !s.up).map(s => s.name).join(", ") || "none")}</div>`);
+  for (const e of said) rows.push(`<div class="row">${esc(hm(e.at))} ${esc(e.mind)}: <span class="said">${esc(e.line)}</span></div>`);
+  card.style.setProperty("--c", `var(${r.color})`);
+  card.innerHTML = `<h3>${esc(r.name)} <small>${esc(r.role)} · ${st.silent ? "silent" : st.checks.some(c => !c.ok) ? "out of tune" : "in tune"}</small></h3>${rows.join("")}
+    <div class="acts"><button type="button" data-a="ask">Send…</button><button type="button" data-a="close">Close</button></div>`;
+  card.querySelector('[data-a="ask"]').onclick = () => { const bad = (st.checks || []).filter(c => !c.ok);
+    compose({kind: "rig", id: r.id, rig: r.id, name: r.name, failing: bad.length > 0 || st.silent,
+      detail: st.silent ? "silent" : bad.map(c => `${c.name} failing`).join("; "),
+      verdict: (extras.doctor || []).find(x => bad.some(c => x.key === `${r.id}:${c.name}`))?.verdict || ""}); };
+  card.querySelector('[data-a="close"]').onclick = () => { card.hidden = true; };
+  card.hidden = false;
+  const w = card.offsetWidth, h = card.offsetHeight;
+  const right = rx + r.r + 24, left = rx - r.r - 24 - w;          // beside the star, never on it
+  const x = right + w + 16 <= innerWidth ? right : left >= 16 ? left : Math.max(16, innerWidth - w - 16);
+  card.style.left = `${x}px`;
+  card.style.top = `${Math.max(150, Math.min(innerHeight - h - 16, ry - h / 2))}px`;   // below the Claude ticker
+  card.dataset.rig = r.id;
+}
+sky.addEventListener("click", e => { const r = rigAt(e.clientX, e.clientY); if (r) openRig(r); else card.hidden = true; });
+sky.addEventListener("mousemove", e => {
+  sky.classList.toggle("pointing", !!rigAt(e.clientX, e.clientY));
+  const c = craftAt(e.clientX, e.clientY), tip = c ? `${c.repo} · ${c.agents.join(", ")} · ${c.files} file${c.files === 1 ? "" : "s"} claimed · ${Math.round(c.age)} min` : "";
+  if (sky.title !== tip) sky.title = tip;
+});
+addEventListener("keydown", e => { if (e.key === "Escape") card.hidden = true;
+  const i = ["1", "2", "3", "4"].indexOf(e.key); if (i >= 0 && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) openRig(RIGS[i]); });
+
+// ---------- Copy brief: every layer as text, in the order you act on it ----------
+function buildBrief() {
+  const L = [], stamp = new Date(nowFn()).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  L.push(`CHORUS brief · ${live ? "live" : "snapshot"} · ${stamp}`, "");
+  const ns = needs();
+  L.push(ns.length ? "1. WHAT NEEDS YOU (most urgent first)" : "1. WHAT NEEDS YOU: nothing. The fleet is in tune.");
+  ns.forEach((n, i) => {
+    L.push(`  ${i + 1}) [${LEVEL[n.level].word}] ${n.what}`, `     ${n.meta || ""}`.trimEnd(), `     why: ${n.why}`);
+    if (n.doctor) L.push(`     doctor (measured ${ago(Date.parse(n.doctor.at))}): ${n.doctor.verdict}`, ...(n.doctor.evidence || []).map(e => `       - ${e}`));
+    L.push(`     next: ${n.move}`, `     owner: ${n.owner}`);
+    for (const p of n.list || []) L.push(`       - ${p.repo}#${p.number} ${p.title} ${p.url}`);
+  });
+  L.push("", "2. RIGS");
+  for (const r of RIGS) {
+    const st = rigState(r.id), fails = st.checks.filter(c => !c.ok).map(c => c.name);
+    L.push(`  ${r.name} (${r.role}): ${st.silent ? "SILENT" : fails.length ? "failing " + fails.join(", ") : "in tune"}${st.hb ? ` · heard ${ago(Date.parse(st.hb.at))}` : ""}`);
+  }
+  L.push("", "3. WHAT THE MINDS SAID (latest last)");
+  for (const e of events.slice(-5)) L.push(`  ${hm(e.at)} ${e.mind} [${e.level}]: ${e.line}  (reasons: ${(e.reasons || []).join("; ") || "none"})`);
+  L.push("", "4. CONVERSATION (latest last)");
+  for (const m of (extras.channel || []).slice(-8)) L.push(`  ${hm(m.at)} ${m.from} -> ${m.to}: ${m.text}`);
+  const cl = claimGroups(), risk = workAtRisk();
+  L.push("", "WORK");
+  L.push(cl.length ? `  claims: ${cl.map(g => `${g.repo} (${g.agents.join(", ")}, ${g.files} files)`).join("; ")}` : "  claims: none");
+  if (extras.work?.error) L.push(`  work scan failed: ${extras.work.error}`);
+  L.push(risk.length ? "  at risk (riskiest first):" : "  at risk: none");
+  for (const c of risk.slice(0, 8)) L.push(`    ${c.label} ${c.branch || "?"}${c.no_upstream ? " (no upstream)" : ""} · ${c.ahead || 0} ahead · ${c.dirty || 0} dirty${c.last_commit_h != null ? ` · last commit ${Number(c.last_commit_h).toFixed(1)} h ago` : ""}  ${c.path}`);
+  const sp = extras.spine;
+  if (sp) L.push("", `5. SPINE ${sp.up}/${sp.total} up${sp.stale ? " (last known: Dev-Mentor did not answer)" : ""}`, `  down: ${sp.services.filter(x => !x.up).map(x => x.name + (EXPECTED_DOWN.has(x.name) ? " (expected)" : "")).join(", ") || "none"}`);
+  return L.join("\n");
+}
+const copyBtn = document.getElementById("copy-brief");
+function copyBrief() {
+  const text = buildBrief();
+  navigator.clipboard?.writeText(text).then(() => { copyBtn.textContent = "Copied"; setTimeout(() => copyBtn.textContent = "Copy brief", 1500); },
+    () => { const w = window.open("", "_blank"); if (w) { w.document.title = "CHORUS brief"; const pre = w.document.createElement("pre"); pre.textContent = text; w.document.body.append(pre); } });
+}
+copyBtn.onclick = copyBrief;
+addEventListener("keydown", e => { if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.metaKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) copyBrief(); });
+
+drawRiver(); renderNeeds(); renderTalk(); renderTick(); show(current, false); requestAnimationFrame(frame);
+if (/[?&]perf(=|&|$)/.test(location.search)) perfRun();
+// deep link: index.html#rig=i3 opens that rig's card (after first layout)
+const deep = /rig=(\w+)/.exec(location.hash); if (deep) requestAnimationFrame(() => { const r = RIGS.find(x => x.id === deep[1]); if (r) openRig(r); });
+</script>
