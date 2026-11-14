@@ -19,6 +19,42 @@ commands:
     - name: Cockpit offline integration smoke with strict engine diagnostics
       run: ${python} tests/godot_smoke_gate.py --godot ${godot} --project .
       requires: [godot]
+    - name: Workstation mission contract and no-false-POST gate
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_mission_test.gd
+      requires: [godot]
+    - name: Workstation receipt evidence negative controls
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_evidence_test.gd
+      requires: [godot]
+    - name: Hyperspace source projection negative controls
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_spatial_test.gd
+      requires: [godot]
+    - name: Hyperspace native 3D scene smoke
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_hyperspace_ui_test.gd
+      requires: [godot]
+    - name: HOLO DIVE 3D controls, source-age, edge and mission-authority gate
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_holodive_contract_test.gd
+      requires: [godot]
+    - name: PR review operations source gate and 3D source identity
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_review_operations_test.gd
+      requires: [godot]
+    - name: Verified running-mission work animation and idle render budget
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_observed_activity_test.gd
+      requires: [godot]
+    - name: Python exact-head review source and routing negative controls
+      run: ${python} -m unittest discover -s tools/workstation/tests -p test_collect_review_queue.py -q
+      requires: [python]
+    - name: Workstation UI scene smoke
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_ui_test.gd
+      requires: [godot]
+    - name: Spatial capability Atlas and agent capsule no-false-admission gate
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_atlas_capsule_test.gd
+      requires: [godot]
+    - name: Portable agent handoff CLI authority-negative controls
+      run: ${python} -m unittest discover -s tools/workstation/tests -p test_*.py
+      requires: [python]
+    - name: Native Godot agent handoff export file and no-false-grant gate
+      run: ${godot} --headless --audio-driver Dummy --path . --script res://tests/workstation_agent_export_test.gd
+      requires: [godot]
 security:
   network_required: false
   secrets_required: false

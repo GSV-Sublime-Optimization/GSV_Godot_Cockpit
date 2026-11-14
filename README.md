@@ -6,6 +6,31 @@ A Godot visual membrane for **GSV Sublime Optimization**.
 
 The project presents colony-facing information such as agents, services, quests, and receipts through a Godot UI. Those views are projections of external owners; the cockpit must not silently become the canonical store for the systems it displays.
 
+## GPT-6 colony workstation bakeoff (experimental)
+
+**HOLO DIVE is the configured default Godot scene on this GPT-6 branch.** It opens
+a native 3D holographic colony work environment, not the old menu dashboard.
+The **existing thirteen-tab cockpit is preserved**, launchable from the Legacy
+Cockpit work surface or directly via its own scene. The new theatre has distinct
+3D rigs, observed Git-project/game spires, source-bound mission crystals and
+service obelisks, explicit camera dive, recorded-time filters, and genuine owner
+navigation. It binds to KiloCore Studio mission and evidence APIs without
+inventing model processes, tool authority or proof of successful builds.
+
+Use **PLAY_HOLODIVE.cmd** on MSI or Godot's ordinary Play Project control to
+launch the experience. See [HOLO DIVE operational stage](docs/HOLODIVE_OPERATIONAL_STAGE.md)
+and [Software Factory Seat](docs/WORKSTATION_FACTORY_SEAT.md) for exact API
+boundaries, tests, and remaining live software-build acceptance gates.
+
+**REVIEW OPS (F8)** is a new source-bound GitHub PR investigation instrument.
+Run **EXPORT_REVIEW_QUEUE.cmd** to gather a bounded read-only exact-head
+snapshot, then use the searchable queue or select **PR REVIEW GATE** in
+HYPERSPACE. No reviews/merges are performed by the renderer. See
+[Review Operations](docs/REVIEW_OPERATIONS_WORKSTATION.md) and the
+[Bakeoff cross-reference](docs/COCKPIT_BAKEOFF_CROSS_REFERENCE.md).
+Running-mission work packets animate only on verified project-to-mission
+edges; idle 3D rendering is invalidation-driven.
+
 ## Status
 
 A working personal tool, not a general-purpose product: no release and no packaged
@@ -22,14 +47,16 @@ deliberate: the cockpit shows unknown/offline rather than inventing data.
 
 ## Start
 
-Open the project in Godot 4.7 and run the configured main scene:
+Open the project in Godot 4.7 and press **Play Project**, or double-click
+**PLAY_HOLODIVE.cmd** on the configured MSI machine. Its default scene is:
 
 ```text
-res://scenes/Main.tscn
+res://scenes/ColonyWorkstation.tscn
 ```
 
-The window is 1280×720 and resizable. Boot paints in well under a second; the first
-status probe runs after the first frames, so a slow or missing service never blocks the UI.
+The window starts at 1600×900 and is resizable. The first Studio observation
+uses bounded nonblocking HTTP. The older 13-tab UI remains available at
+res://scenes/Main.tscn and via Legacy Cockpit; no screens were removed.
 
 ## What is in it
 
