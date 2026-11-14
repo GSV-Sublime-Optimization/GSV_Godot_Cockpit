@@ -8,16 +8,20 @@ signal self_model_changed(model: Dictionary)
 
 const STUDIO_SENSOR = preload("res://scripts/entity/StudioObservationBridge.gd")
 const FLEET_SENSOR = preload("res://scripts/entity/FleetBodiesBridge.gd")
+const CONSTELLATION_SENSOR = preload("res://scripts/entity/StudioConstellationBridge.gd")
 const MAX_HISTORY := 64
 const SELF_SCHEMA := "kilocore.entity-session.v0"
+const DEFAULT_CONSTELLATION_PERIOD_SECONDS := 180.0
 
 @export var auto_observe: bool = false
 @export_range(2.0, 300.0, 1.0) var observe_period_seconds: float = 15.0
 
 var _sensor: Node
 var _fleet_sensor: Node
+var _constellation: Node
 var _tick: int = 0
 var _time_to_observe: float = 0.0
+var _time_to_constellation: float = 0.0
 var _history: Array[Dictionary] = []
 
 func _ready() -> void:
@@ -27,10 +31,15 @@ func _ready() -> void:
 	_fleet_sensor = FLEET_SENSOR.new()
 	add_child(_fleet_sensor)
 	_fleet_sensor.bodies_changed.connect(_on_fleet_bodies)
+	_constellation = CONSTELLATION_SENSOR.new()
+	add_child(_constellation)
+	_constellation.observation_changed.connect(_on_constellation_observation)
 	_time_to_observe = observe_period_seconds
+	_time_to_constellation = DEFAULT_CONSTELLATION_PERIOD_SECONDS
 	if auto_observe:
 		_sensor.observe()
 		_fleet_sensor.observe()
+		_constellation.observe()
 
 func _physics_process(delta: float) -> void:
 	_tick += 1
@@ -41,6 +50,10 @@ func _physics_process(delta: float) -> void:
 		_time_to_observe = maxf(2.0, observe_period_seconds)
 		_sensor.observe()  # one request in flight; skip instead of stacking
 		_fleet_sensor.observe()
+	_time_to_constellation -= delta
+	if _time_to_constellation <= 0.0:
+		_time_to_constellation = maxf(60.0, DEFAULT_CONSTELLATION_PERIOD_SECONDS)
+		_constellation.observe()  # cached sensor; no-op inside its refresh window
 
 func observe_now() -> bool:
 	if _sensor == null or _fleet_sensor == null:
@@ -49,10 +62,18 @@ func observe_now() -> bool:
 	var fleet_started: bool = _fleet_sensor.observe()
 	return health_started or fleet_started
 
+func observe_constellation_now(force: bool = false) -> bool:
+	return _constellation != null and _constellation.observe(force)
+
 func self_model() -> Dictionary:
 	var observation: Dictionary = (
 		_sensor.current_observation()
 		if _sensor != null
+		else {"state": "unknown", "error": "sensor_not_ready"}
+	)
+	var constellation: Dictionary = (
+		_constellation.current_observation()
+		if _constellation != null
 		else {"state": "unknown", "error": "sensor_not_ready"}
 	)
 	return {
@@ -61,6 +82,7 @@ func self_model() -> Dictionary:
 		"tick": _tick,
 		"sensor": observation,
 		"fleet_bodies": _fleet_sensor.current_bodies() if _fleet_sensor != null else [],
+		"constellation": constellation,
 		"capabilities": [{
 			"id": "studio.health.read",
 			"source": "KiloCore-Studio",
@@ -69,6 +91,11 @@ func self_model() -> Dictionary:
 		}, {
 			"id": "studio.fleet_bodies.read",
 			"source": "KiloCore-Studio",
+			"mutation": false
+		}, {
+			"id": "studio.projects.read",
+			"source": "KiloCore-Studio",
+			"observed_state": constellation.get("state", "unknown"),
 			"mutation": false
 		}],
 		"authorized_actuators": [],
@@ -79,9 +106,15 @@ func recent_events() -> Array[Dictionary]:
 	return _history.duplicate(true)
 
 func _on_studio_observation(observation: Dictionary) -> void:
+	_record_event("studio_health_observation", observation)
+
+func _on_constellation_observation(observation: Dictionary) -> void:
+	_record_event("constellation_observation", observation)
+
+func _record_event(kind: String, observation: Dictionary) -> void:
 	_history.append({
 		"tick": _tick,
-		"kind": "studio_health_observation",
+		"kind": kind,
 		"source": observation.get("source", "unknown"),
 		"state": observation.get("state", "unknown"),
 		"error": observation.get("error", "")
