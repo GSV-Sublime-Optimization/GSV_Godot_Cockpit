@@ -16,6 +16,11 @@ commands:
     - name: Godot GDScript parse
       run: ${python} ${gsv_tools}/godot_parse_gate.py --project . --godot ${godot}
       requires: [godot]
+    - name: Self-contained first-party Godot GDScript parse gate
+      run: ${python} tests/cockpit_parse_gate.py --godot ${godot} --project .
+      requires: [godot]
+    - name: Offline gate negative-control regression tests
+      run: ${python} -m unittest discover -s tests -p "test_*.py" -v
     - name: Cockpit offline integration smoke with strict engine diagnostics
       run: ${python} tests/godot_smoke_gate.py --godot ${godot} --project .
       requires: [godot]
